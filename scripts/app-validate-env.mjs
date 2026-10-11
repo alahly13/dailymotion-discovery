@@ -48,9 +48,29 @@ function validateRequired(name, options = {}) {
   return null;
 }
 
+function validateDatabase() {
+  // Canonical first, legacy fallback with warning. Values never printed.
+  const canonical = process.env.DATABASE_URL_CONNECTION_STRING?.trim();
+  if (!isBlankOrPlaceholder(canonical)) {
+    if (!looksLikePostgres(canonical)) {
+      return "DATABASE_URL_CONNECTION_STRING must be a postgres:// or postgresql:// URL. Percent-encode reserved password characters such as #, @, ?, /, or $.";
+    }
+    return null;
+  }
+  const legacy = process.env.DATABASE_URL?.trim();
+  if (!isBlankOrPlaceholder(legacy)) {
+    if (!looksLikePostgres(legacy)) {
+      return "DATABASE_URL must be a postgres:// or postgresql:// URL. Percent-encode reserved password characters such as #, @, ?, /, or $.";
+    }
+    console.warn("[WARN] Build uses deprecated DATABASE_URL fallback. Migrate to DATABASE_URL_CONNECTION_STRING.");
+    return null;
+  }
+  return "DATABASE_URL_CONNECTION_STRING is missing or still contains a placeholder.";
+}
+
 function main() {
   const failures = [
-    validateRequired("DATABASE_URL", { kind: "postgres" }),
+    validateDatabase(),
     validateRequired("GEMINI_API_KEY"),
     validateRequired("NEXT_PUBLIC_APP_URL", { kind: "url" }),
     validateRequired("NEXT_PUBLIC_SUPABASE_URL", { kind: "url" }),

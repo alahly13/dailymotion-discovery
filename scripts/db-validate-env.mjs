@@ -54,16 +54,20 @@ function sanitizeMeta(raw) {
 }
 
 function validate() {
-  const databaseUrl = process.env.DATABASE_URL?.trim() || '';
+  // Canonical first, legacy fallback (warns). Values never printed.
+  const canonical = process.env.DATABASE_URL_CONNECTION_STRING?.trim() || '';
+  const legacy = process.env.DATABASE_URL?.trim() || '';
+  const databaseUrl = canonical || legacy;
+  const usingLegacy = !canonical && !!legacy;
 
   if (isBlankOrPlaceholder(databaseUrl)) {
-    console.error('[ERROR] Missing required environment variable: DATABASE_URL');
-    console.error('Set DATABASE_URL in Vercel, GitHub Codespaces, GitHub Actions, your local shell, or a root .env.local file.');
+    console.error('[ERROR] Missing required environment variable: DATABASE_URL_CONNECTION_STRING');
+    console.error('Set DATABASE_URL_CONNECTION_STRING in Vercel, GitHub Codespaces, GitHub Actions, your local shell, or a root .env.local file.');
     process.exit(1);
   }
 
   if (!looksLikePostgres(databaseUrl)) {
-    console.error('[ERROR] DATABASE_URL must be a postgres:// or postgresql:// URL.');
+    console.error('[ERROR] DATABASE_URL_CONNECTION_STRING must be a postgres:// or postgresql:// URL.');
     console.error('If your password contains reserved characters such as #, @, ?, /, or $, percent-encode them before pasting the URL.');
     process.exit(1);
   }
@@ -72,14 +76,18 @@ function validate() {
 
   const databaseDetails = sanitizeMeta(databaseUrl);
   console.log(
-    `- DATABASE_URL: protocol=${databaseDetails.protocol}, host=${databaseDetails.host}, port=${databaseDetails.port}, database=${databaseDetails.database}, host_type=${databaseDetails.hostType}, query_params=${databaseDetails.queryParams}`
+    `- connection: protocol=${databaseDetails.protocol}, host=${databaseDetails.host}, port=${databaseDetails.port}, database=${databaseDetails.database}, host_type=${databaseDetails.hostType}, query_params=${databaseDetails.queryParams}`
   );
 
-  console.log('[INFO] Prisma CLI and migrations use DATABASE_URL only.');
+  if (usingLegacy) {
+    console.warn('[WARN] Using deprecated DATABASE_URL fallback. Migrate to DATABASE_URL_CONNECTION_STRING (canonical wins when both are set).');
+  }
+
+  console.log('[INFO] Prisma CLI and migrations use DATABASE_URL_CONNECTION_STRING (legacy DATABASE_URL fallback).');
 
   if (classifyHost(databaseDetails.host) === 'supabase-direct') {
     console.warn(
-      '[WARN] DATABASE_URL looks like a Supabase direct host (db.<project-ref>.supabase.co). ' +
+      '[WARN] Connection looks like a Supabase direct host (db.<project-ref>.supabase.co). ' +
         'This can fail in IPv4-only environments unless IPv6 or Supabase IPv4 add-on is available. ' +
         'Use the Supabase Session Pooler shape: aws-0-<region>.pooler.supabase.com.'
     );
@@ -87,7 +95,7 @@ function validate() {
 
   if (databaseDetails.hostType === 'supabase-session-pooler' && databaseDetails.port !== '5432') {
     console.warn(
-      '[WARN] DATABASE_URL uses a Supabase pooler host but not the documented Session Pooler port 5432. ' +
+      '[WARN] Connection uses a Supabase pooler host but not the documented Session Pooler port 5432. ' +
         'This project expects the Session Pooler URL for Prisma CLI/status/apply diagnostics.'
     );
   }

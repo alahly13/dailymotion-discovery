@@ -1,5 +1,6 @@
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
+import { resolveDatabaseUrl } from "@/lib/db/database-url";
 
 const globalForPrisma = globalThis as unknown as {
   dailymotionDiscoveryPrisma?: PrismaClient;
@@ -11,11 +12,9 @@ const globalForPrisma = globalThis as unknown as {
 // connection pressure and future Vercel deployments.
 export function getPrismaClient() {
   if (!globalForPrisma.dailymotionDiscoveryPrisma) {
-    const connectionString = process.env.DATABASE_URL;
-
-    if (!connectionString) {
-      throw new Error("DATABASE_URL is required before creating the Channel Explorer Prisma client.");
-    }
+    // Canonical contract: DATABASE_URL_CONNECTION_STRING first, legacy
+    // DATABASE_URL with a sanitized deprecation warning. Never printed.
+    const connectionString = resolveDatabaseUrl();
 
     const adapter = new PrismaPg({
       connectionString,

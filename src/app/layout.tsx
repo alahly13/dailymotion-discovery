@@ -16,8 +16,9 @@ const jetBrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "AI Public Video Discovery Platform",
-  description: "Manifest-based public Dailymotion video metadata discovery and filtering.",
+  title: "Dailymotion Discovery — Dual-API Platform",
+  description: "Version-separated public Dailymotion discovery across Legacy API v1 and API v2.",
+  icons: { icon: "/dailymotion-icon.svg", shortcut: "/dailymotion-icon.svg", apple: "/dailymotion-icon.svg" },
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {

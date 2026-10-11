@@ -81,7 +81,7 @@ function runValidation() {
 function printTargetedHint(output) {
   if (/P1000/.test(output)) {
     console.error("[ERROR] Prisma reported P1000: database authentication failed.");
-    console.error("- Verify the Supabase database password used in DATABASE_URL.");
+    console.error("- Verify the Supabase database password used in DATABASE_URL_CONNECTION_STRING.");
     console.error("- Percent-encode reserved password characters such as #, @, ?, /, and $.");
     console.error("- Confirm the Session Pooler username shape is postgres.<project-ref>.");
     console.error("- Raw `prisma migrate status` can hide this as a bare schema-engine error; the connectivity preflight above is the concrete blocker.");
@@ -90,7 +90,7 @@ function printTargetedHint(output) {
 
   if (/P1001/.test(output)) {
     console.error("[ERROR] Prisma reported P1001: database host or port is unreachable.");
-    console.error("- Keep DATABASE_URL on the Supabase Session Pooler host, not the direct db.<project-ref>.supabase.co host.");
+    console.error("- Keep DATABASE_URL_CONNECTION_STRING on the Supabase Session Pooler host, not the direct db.<project-ref>.supabase.co host.");
     console.error("- Confirm the Supabase project is active and the pooler host/region are correct.");
     return;
   }
@@ -175,7 +175,7 @@ function main() {
   if (preflight.status !== 0) {
     printTargetedHint(preflight.output);
     console.error("[INFO] Skipping prisma migrate status because the connectivity preflight failed first.");
-    console.error("[INFO] DATABASE_URL remains the only supported database variable for this project.");
+    console.error("[INFO] DATABASE_URL_CONNECTION_STRING is the canonical database variable (legacy DATABASE_URL fallback).");
     process.exit(preflight.status || 1);
   }
 

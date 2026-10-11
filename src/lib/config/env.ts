@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { publicEnv } from "./public-env";
+import { resolveDatabaseUrl } from "@/lib/db/database-url";
 import type { FetchProfile, FetchSafetyCaps } from "@/types/channel-fetch";
 
 const postgresUrlSchema = z.string().url().refine((value) => {
@@ -12,16 +13,53 @@ const postgresUrlSchema = z.string().url().refine((value) => {
 }, "Must be a postgres:// or postgresql:// URL.");
 
 const databaseSchema = z.object({
-  DATABASE_URL: postgresUrlSchema,
+  DATABASE_URL_CONNECTION_STRING: postgresUrlSchema.optional(),
+  DATABASE_URL: postgresUrlSchema.optional(),
 });
 
 const isBuildTime = process.env.NEXT_PHASE === "phase-production-build";
 
 const optionalServerSchema = z.object({
+  // Deprecated: retained for active Supabase clients only. The canonical
+  // secret is SUPABASE_SECRET_KEY (server-only Supabase SDK). This variable
+  // is never read as a credential path — do not reintroduce it.
   SUPABASE_SERVICE_ROLE_KEY: z.string().optional(),
+  // Canonical server-only Supabase secret (sb_secret_…). Used only by the
+  // server-side Storage client. Never prefix with NEXT_PUBLIC_.
+  SUPABASE_SECRET_KEY: z.string().optional(),
   GEMINI_MODEL: z.string().trim().min(1).optional(),
   DAILYMOTION_API_BASE_URL: z.string().url().default("https://api.dailymotion.com"),
   DAILYMOTION_API_KEY: z.string().optional(),
+  // Canonical split: public discovery base vs authenticated Partner base.
+  // A V1 base containing "partner" is honored as Partner (warns once).
+  DAILYMOTION_API_BASE_URL_V1: z.string().url().default("https://api.dailymotion.com/"),
+  DAILYMOTION_PARTNER_API_BASE_URL_V1: z.string().url().default("https://partner.api.dailymotion.com/rest"),
+  DAILYMOTION_API_BASE_URL_V2: z.string().url().default("https://api.dailymotion.com/v2"),
+  DAILYMOTION_OAUTH_TOKEN_URL_V1: z.string().url().default("https://partner.api.dailymotion.com/oauth/v1/token"),
+  DAILYMOTION_OAUTH_TOKEN_URL_V2: z.string().url().default("https://oauth2.dailymotion.com/v2/token"),
+  PRIVATE_DAILYMOTION_API_KEY_V1: z.string().optional(),
+  PRIVATE_DAILYMOTION_API_KEY_SECRET_V1: z.string().optional(),
+  PRIVATE_DAILYMOTION_API_KEY_V2: z.string().optional(),
+  PRIVATE_DAILYMOTION_API_KEY_SECRET_V2: z.string().optional(),
+  // V1 token endpoint REQUIRES scope (documented Platform scopes:
+  // userinfo, email, manage_videos, manage_players, manage_playlists,
+  // manage_subtitles). Default userinfo = least privilege for discovery.
+  DAILYMOTION_API_SCOPE_V1: z.string().trim().min(1).default("userinfo"),
+  // V2 scope default: read-only public bundle for discovery.
+  DAILYMOTION_API_SCOPE_V2: z.string().trim().min(1).default("bundle.public"),
+  // Tri-state safety default ("true"/"false"/unset→omit=safe). Parsed in
+  // version-config; raw string kept here so "false" is never falsy-dropped.
+  DAILYMOTION_FAMILY_FILTER: z.string().optional(),
+  // v1 global localization default.
+  DAILYMOTION_LOCALIZATION: z.string().trim().min(1).default("detect"),
+  // Optional encryption key for the durable (Postgres) OAuth token cache.
+  // Absent → memory-only reuse (documented). Server-only, never logged.
+  TOKEN_CACHE_ENCRYPTION_KEY: z.string().optional(),
+  TOKEN_CACHE_SAFETY_MARGIN_SECONDS: z.coerce.number().int().nonnegative().max(3600).default(60),
+  ADMIN_DEFAULT_USERNAME: z.string().trim().min(1).default("admin"),
+  ADMIN_INITIAL_PASSWORD: z.string().optional(),
+  ADMIN_SESSION_SECRET: z.string().optional(),
+  ADMIN_SESSION_TTL_SECONDS: z.coerce.number().int().positive().default(604800),
   CRON_SECRET: z.string().optional(),
   WEBHOOK_SECRET: z.string().optional(),
   AI_EMBEDDING_MODEL: z.string().optional(),
@@ -58,9 +96,12 @@ let cachedDatabaseEnv: z.infer<typeof databaseSchema> | null = null;
 export function getDatabaseEnv() {
   if (cachedDatabaseEnv) return cachedDatabaseEnv;
 
-  const rawDatabaseUrl = process.env.DATABASE_URL?.trim();
+  // Canonical contract first; legacy fallback handled by the resolver.
+  // Validation here checks shapes only — resolution/warnings live in
+  // src/lib/db/database-url.ts. Values are never printed.
   const values = {
-    DATABASE_URL: rawDatabaseUrl,
+    DATABASE_URL_CONNECTION_STRING: process.env.DATABASE_URL_CONNECTION_STRING?.trim() || undefined,
+    DATABASE_URL: process.env.DATABASE_URL?.trim() || undefined,
   };
 
   const parsed = databaseSchema.safeParse(values);
@@ -68,7 +109,7 @@ export function getDatabaseEnv() {
     if (isBuildTime) {
       console.warn("[WARN] Skipping strict database env validation during Next.js production build.");
       cachedDatabaseEnv = {
-        DATABASE_URL: "postgresql://build:build@localhost:5432/build",
+        DATABASE_URL_CONNECTION_STRING: "postgresql://build:build@localhost:5432/build",
       };
       return cachedDatabaseEnv;
     }
@@ -76,13 +117,24 @@ export function getDatabaseEnv() {
     throw parsed.error;
   }
 
+  if (!parsed.data.DATABASE_URL_CONNECTION_STRING && !parsed.data.DATABASE_URL) {
+    if (isBuildTime) {
+      console.warn("[WARN] Skipping strict database env validation during Next.js production build.");
+      cachedDatabaseEnv = { DATABASE_URL_CONNECTION_STRING: "postgresql://build:build@localhost:5432/build" };
+      return cachedDatabaseEnv;
+    }
+    throw new Error("Missing database connection string. Set DATABASE_URL_CONNECTION_STRING.");
+  }
+
   cachedDatabaseEnv = {
+    DATABASE_URL_CONNECTION_STRING: parsed.data.DATABASE_URL_CONNECTION_STRING,
     DATABASE_URL: parsed.data.DATABASE_URL,
   };
 
-  if (!hasWarnedSupabaseDirect && isSupabaseDirectHost(cachedDatabaseEnv.DATABASE_URL)) {
+  const effective = parsed.data.DATABASE_URL_CONNECTION_STRING ?? parsed.data.DATABASE_URL ?? "";
+  if (!hasWarnedSupabaseDirect && isSupabaseDirectHost(effective)) {
     console.warn(
-      "[WARN] DATABASE_URL uses Supabase direct host (db.<project-ref>.supabase.co). " +
+      "[WARN] Database URL uses Supabase direct host (db.<project-ref>.supabase.co). " +
         "Use the Supabase Session Pooler URL for this project to avoid IPv4-limited connection failures."
     );
     hasWarnedSupabaseDirect = true;
@@ -101,7 +153,7 @@ export const env = {
     return optionalServerEnv.GEMINI_MODEL?.trim() || "gemini-1.5-flash";
   },
   get databaseUrl() {
-    return getDatabaseEnv().DATABASE_URL;
+    return getDatabaseEnv().DATABASE_URL_CONNECTION_STRING ?? getDatabaseEnv().DATABASE_URL ?? "";
   },
   get dailymotionApiBaseUrl() {
     return optionalServerEnv.DAILYMOTION_API_BASE_URL;
@@ -111,8 +163,10 @@ export const env = {
   },
 };
 
-export function requireServerEnv(name: "GEMINI_API_KEY" | "DATABASE_URL") {
-  if (name === "DATABASE_URL") return getDatabaseEnv().DATABASE_URL;
+export function requireServerEnv(name: "GEMINI_API_KEY" | "DATABASE_URL"): string {
+  // DATABASE_URL resolves through the canonical contract (CONNECTION_STRING
+  // first, legacy fallback with warning). Values are never printed.
+  if (name === "DATABASE_URL") return resolveDatabaseUrl();
 
   const value = process.env[name];
   if (!value) throw new Error(`${name} is required on the server.`);

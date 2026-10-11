@@ -162,6 +162,10 @@ model Video {
   id                String         @id @default(uuid()) @db.Uuid
   platform          String
   platformVideoId   String         @map("platform_video_id")
+  // Canonical resource type: video | channel | playlist | user | live.
+  // Defaults to video for all pre-existing rows. Provider identity stays
+  // (platform, platformVideoId); titles are never identity.
+  resourceType      String         @default("video") @map("resource_type")
   sourceId          String?        @map("source_id") @db.Uuid
   url               String?
   embedUrl          String?        @map("embed_url")
@@ -193,6 +197,7 @@ model Video {
   @@unique([platform, platformVideoId])
   @@index([sourceId, publishedAt])
   @@index([platform, publishedAt])
+  @@index([platform, resourceType])
   @@index([ownerId])
   @@index([channelId])
   @@map("videos")
@@ -219,6 +224,13 @@ model SavedVideo {
   favorite     Boolean     @default(false)
   notes        String?
   tags         String[]    @default([])
+  // Playlist ordering within a collection (null = unordered/global saves).
+  position     Int?
+  // Discovery provenance: which API version saved this row + source context.
+  // Nullable so pre-existing rows stay valid; new saves populate it.
+  apiVersion   String?     @map("api_version")
+  sourceQuery  String?     @map("source_query")
+  sourcePage   String?     @map("source_page")
   savedAt      DateTime    @default(now()) @map("saved_at") @db.Timestamptz(6)
   updatedAt    DateTime    @updatedAt @map("updated_at") @db.Timestamptz(6)
   video        Video       @relation(fields: [videoId], references: [id], onDelete: Cascade)
@@ -227,6 +239,7 @@ model SavedVideo {
   @@unique([ownerId, videoId, collectionId])
   @@index([videoId])
   @@index([collectionId])
+  @@index([collectionId, position])
   @@map("saved_videos")
 }
 
@@ -440,4 +453,117 @@ model FetchJobEvent {
 
   @@index([fetchJobId, createdAt])
   @@map("fetch_job_events")
+}
+
+// Durable per-version search history: exactly one row per user-submitted
+// search (pagination appends never create rows). Complements the browser
+// history; server rows are created only via explicit sync/batch commit.
+// Never stores secrets, tokens, or auth headers.
+model SearchHistory {
+  id                String    @id @default(uuid()) @db.Uuid
+  ownerId           String?   @map("owner_id") @db.Uuid
+  apiVersion        String    @map("api_version")
+  query             String
+  resource          String    @default("general")
+  mode              String    @default("search")
+  paramsJson        Json?     @map("params_json")
+  sort              String?
+  pageSize          Int?      @map("page_size")
+  status            String    @default("completed")
+  resultCount       Int?      @map("result_count")
+  errorJson         Json?     @map("error_json")
+  submittedAt       DateTime  @default(now()) @map("submitted_at") @db.Timestamptz(6)
+  completedAt       DateTime? @map("completed_at") @db.Timestamptz(6)
+  snapshotPath      String?   @map("snapshot_path")
+  snapshotRevision  Int?      @map("snapshot_revision")
+  snapshotChecksum  String?   @map("snapshot_checksum")
+  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([ownerId, submittedAt])
+  @@index([apiVersion, submittedAt])
+  @@map("search_history")
+}
+
+// Idempotency + result ledger for one-click batch commits. Retries with the
+// same idempotencyKey return the recorded result instead of duplicating work.
+model BatchCommit {
+  idempotencyKey   String    @id @map("idempotency_key")
+  ownerId          String?   @map("owner_id") @db.Uuid
+  status           String    @default("completed")
+  revision         Int       @default(1)
+  savedUpserts     Int       @default(0) @map("saved_upserts")
+  historyAppended  Int       @default(0) @map("history_appended")
+  snapshotPath     String?   @map("snapshot_path")
+  snapshotChecksum String?   @map("snapshot_checksum")
+  resultJson       Json?     @map("result_json")
+  errorJson        Json?     @map("error_json")
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  completedAt      DateTime? @map("completed_at") @db.Timestamptz(6)
+
+  @@index([ownerId, createdAt])
+  @@map("batch_commits")
+}
+
+// Ledger for application JSON/data migrations (NOT Prisma schema tracking).
+// One row per migrationKey; reruns resume from lastCheckpoint.
+model DataMigrationRun {
+  migrationKey  String    @id @map("migration_key")
+  status        String    @default("pending")
+  sourceDomain  String?   @map("source_domain")
+  targetVersion String?   @map("target_version")
+  startedAt     DateTime? @map("started_at") @db.Timestamptz(6)
+  completedAt   DateTime? @map("completed_at") @db.Timestamptz(6)
+  lastCheckpoint String?  @map("last_checkpoint")
+  sourceCount   BigInt    @default(0) @map("source_count")
+  importedCount BigInt    @default(0) @map("imported_count")
+  mergedCount   BigInt    @default(0) @map("merged_count")
+  skippedCount  BigInt    @default(0) @map("skipped_count")
+  failedCount   BigInt    @default(0) @map("failed_count")
+  verifiedCount BigInt    @default(0) @map("verified_count")
+  sourceChecksum String?  @map("source_checksum")
+  destChecksum   String?  @map("dest_checksum")
+  errorJson      Json?    @map("error_json")
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@map("data_migration_runs")
+}
+
+// Registry of Supabase Storage JSON documents. The database retains the
+// known path + revision so reads never scan bucket prefixes. Snapshots are
+// descriptive — relational rows stay authoritative for lists/order/CRUD.
+model StorageDocument {
+  id            String   @id @default(uuid()) @db.Uuid
+  domain        String
+  apiVersion    String?  @map("api_version")
+  path          String   @unique
+  revision      Int      @default(1)
+  checksum      String?
+  byteSize      BigInt?  @map("byte_size")
+  schemaVersion String   @default("1") @map("schema_version")
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([domain, apiVersion])
+  @@map("storage_documents")
+}
+
+// Server-side OAuth token cache for the two Dailymotion integrations.
+// One row per API version ("v1" | "v2"); namespaces are never shared.
+// Tokens are encrypted at rest (AES-256-GCM, TOKEN_CACHE_ENCRYPTION_KEY).
+// Rows are written only on token acquisition — never per search — and a
+// missing/undecryptable row is treated as a cache miss (reacquire).
+model ApiVersionTokenCache {
+  version        String   @id
+  encryptedToken String   @map("encrypted_token")
+  iv             String
+  authTag        String   @map("auth_tag")
+  scope          String
+  expiresAt      DateTime @map("expires_at") @db.Timestamptz(6)
+  obtainedAt     DateTime @map("obtained_at") @db.Timestamptz(6)
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@map("api_version_token_cache")
 }

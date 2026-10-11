@@ -1,8 +1,8 @@
 # Dailymotion Discovery Platform Ledger
 
-Updated: 2026-05-07
-Repo path: `F:\discovery\dailymotion-video-discovery`
-Scope: Project source-of-truth ledger, updated after Channel Explorer live-search, parallel window-fetch, feedback timeline, and UI organization hardening.
+Updated: 2026-10-11
+Repo path: `E:\discovery\dailymotion-discovery`
+Scope: Project source-of-truth ledger, updated after Supabase/Postgres/Storage/batch-save/migration-management integration.
 
 ## Table of Contents
 
@@ -23,6 +23,254 @@ Scope: Project source-of-truth ledger, updated after Channel Explorer live-searc
 - [Known Limitations](#known-limitations)
 - [Future Roadmap](#future-roadmap)
 - [Agent Instructions](#agent-instructions)
+
+## 2026-10-11 Supabase/Postgres/Storage/batch-save/migration integration
+
+**Audit findings (verified, not inferred)**
+
+- `.env.local` already uses canonical names: `DATABASE_URL_CONNECTION_STRING`
+  + `DATABASE_URL_DIRECT` set, legacy `DATABASE_URL` empty, new
+  `SUPABASE_SECRET_KEY` set, no service-role key. Code now matches reality.
+- Configured DB target is a Supabase DIRECT host (`db.*.supabase.co:5432`),
+  unreachable from IPv4-limited environments (P1001, confirmed live) —
+  all remote-DB verification is therefore reported, not claimed.
+- No active service-role code path existed (only a dead schema entry).
+  Browser Supabase clients use the publishable key only.
+- Prisma 7.8.0 + adapter-pg lockfile-aligned; no upgrade performed.
+- Baseline migration `20260506_...` preserved byte-identical; a never-applied
+  pending token-cache dir was folded into the grouped migration below.
+
+**What was built**
+
+- Canonical env: `DATABASE_URL_CONNECTION_STRING` (+legacy fallback with
+  warning), `DATABASE_URL_DIRECT` optional, `SUPABASE_SECRET_KEY` canonical
+  (service-role retired, never a fallback), `DAILYMOTION_PARTNER_API_BASE_URL_V1`
+  split, token-cache vars; scripts + prisma.config + validation updated.
+- One grouped migration `20261011183739_workspace_cloud_persistence`
+  (PENDING): ApiVersionTokenCache, SearchHistory, BatchCommit,
+  DataMigrationRun, StorageDocument + SavedVideo provenance/position +
+  Video resourceType. Additive only; rollback = drop new objects.
+- Layers: `lib/db/prisma.ts` (singleton re-export), `lib/supabase/
+  storage-server.ts` (secret-key, server-only), `lib/admin/require-admin.ts`,
+  `lib/persistence/{repositories,storage-documents,batch-save}`.
+- Routes (admin-gated): `POST /api/cloud/batch-commit` (idempotent),
+  `GET /api/cloud/sync-state`, `GET /api/admin/migrations/status`.
+- UI: workspace Sync panel (pending/Save/retry/discard/beforeunload),
+  `/admin/migrations` diagnostics, Settings Supabase section.
+- Storage: private bucket `application-data` CREATED live + probe
+  upload/read/delete verified; `supabase:storage:{check,setup}` scripts;
+  `scripts/data-migrations/registry.ts`; `docs/migrations/` trio.
+- Source of truth: Postgres rows for lists/order/CRUD; Storage for raw
+  snapshots (DB keeps path+revision+checksum); browser = drafts until Save.
+
+**Verification (all executed)**
+
+- `npx vitest run`: 94/94 pass (16 files).
+- `npm run typecheck`: exit 0. `npm run build`: passed (52 routes).
+- `npx prisma validate`: schema valid; `prisma generate`: exit 0.
+- `db:validate`: pass (sanitized). `db:status`: reaches preflight, P1001 on
+  direct host (documented; operator may switch to pooler).
+- Storage check live: bucket exists+private, probe up/read/del passed,
+  self-cleaned. `lint`: pre-existing failure only.
+- Live smoke (:3113): `/workspace`, `/admin/migrations` 200; private APIs
+  401 without session (gating proven). Allow-path + real-DB paths need
+  operator login + reachable DB (reported, not claimed).
+- No deployment; no migration applied (needs CONFIRM_DB_APPLY + reachability);
+  no destructive command run; `.env.local` secrets never printed/touched.
+
+### Earlier 2026-10-11 work (separate auth panels + unified Search)
+
+**Scope**
+
+- Implemented the two follow-up tasks on top of the 2026-10-10 dual-API
+  platform: (A) independent `Authenticate & Test V1/V2` wiring with genuine
+  token + read-only API probes; (B) unified version-aware `/search` with a
+  dynamic parameter-compatibility panel, per-version Settings sections with
+  defaults editors, and full-app consistency fixes.
+
+**New verified API facts (live probes 2026-10-11)**
+
+- Partner host requires a token for EVERY call (anonymous → 401
+  `invalid_token`); public host serves anonymous discovery. V1 profile now:
+  token → Partner base, no token → public host (same version).
+- V1 token endpoint REQUIRES `scope` (422 without). New documented-optional
+  `DAILYMOTION_API_SCOPE_V1`, default `userinfo` (least privilege; documented
+  Platform scopes: userinfo/email/manage_videos/manage_players/
+  manage_playlists/manage_subtitles). No V2 scope was copied into V1.
+- V2 scope default `DAILYMOTION_API_SCOPE_V2=bundle.public` (documented
+  read-only bundle). New `DAILYMOTION_OAUTH_TOKEN_URL_V1/V2` vars (documented
+  defaults). New tri-state `DAILYMOTION_FAMILY_FILTER` (unset = omit = safe)
+  and `DAILYMOTION_LOCALIZATION` (default `detect`, v1-only).
+
+**Files added/changed**
+
+- `src/lib/discovery/version-config.ts` (profiles, tri-state parsing),
+  `auth.ts` (isolated caches, classified failures, sanitized status),
+  `v1-client.ts` (partner/public host selection, fail-closed option),
+  `v2-client.ts` (profile-based), `connection-test.ts` (two-step probes,
+  8s cooldown), `param-schema.ts` (compatibility registry, sort/fields/
+  cache-key helpers).
+- Routes: `api/discovery/v1|v2/test-connection` (POST, sanitized),
+  `auth-status` extended (profile facts, no secrets); v1/v2 resource routes
+  forward `fields`, v1 forwards live/hd/verified/explicit flags.
+- UI: `connection-panel.tsx`, `result-card.tsx` (shared), `unified-search.tsx`,
+  rebuilt `/search`, reorganized `/settings` (V1/V2 sections + defaults +
+  resets + admin + deploy notes), dashboard auth-shape update.
+- Store: per-version defaults + last-version persistence (V1 reset never
+  touches V2). `src/lib/config/env.ts` + `.env.example` document all vars.
+- Tests: `auth` (11), `connection-test` (6), `param-schema` (9) + updated
+  clients tests; total 67 passing.
+
+**Verification**
+
+- `npx vitest run`: 67/67 pass. `npm run typecheck`: clean.
+- `npm run build`: passed (Next 16.2.5, 48 routes incl. test-connection pair).
+  Plain build still needs real local secrets (pre-existing placeholder
+  `.env.local`); verified with sanitized dummy env.
+- `npm run lint`: still fails pre-existing (`next lint` removed in Next 16).
+- Live connection tests were run later the same day against the production
+  build (see results below); panels report honest states. No deployment
+  performed (separate step; redeploy required after env change).
+
+**Live connection tests (2026-10-11, production build on :3111, creds from
+root .env.local — lengths only, values never printed)**
+
+- V2: PASS. `POST /api/discovery/v2/test-connection` → token acquired via
+  client_credentials (`expires_in` 10800s server value honored, scope
+  bundle.public) + `GET /videos/x5auisp` → HTTP 200. V2 is genuinely
+  connected. Follow-up: `GET /profiles/xiy/videos` via app route returned
+  real v2 items with opaque `next` cursor (total 23, hasMore true).
+- V1: token REJECTED. Creds present; Partner token endpoint refused them
+  (invalid_client, 550ms). Request format matches docs (422-scope check
+  proves parsing); cause is credential-side (wrong/rotated secret or key not
+  enabled for client_credentials). Operator action: verify/recreate the V1
+  key+secret in Dailymotion Studio. Public v1 discovery unaffected (auto
+  public-host fallback verified live: Arabic query → Arabic results,
+  total 1000, has_more true).
+- No secrets/tokens in any test response (asserted in tests + verified in
+  live payloads). No deployment performed.
+
+**Preserved**
+
+- All 12 dedicated v1/v2 pages, Channel Explorer, channels, saved, AI,
+  compare, capabilities, workspace flows unchanged in behavior. No migration
+  created/applied; `db:apply` not run. Unrelated working-tree edits
+  (notes.txt, skills-lock.json, supabase pins) preserved.
+
+## 2026-10-10 Dual-API (v1+v2) discovery platform implementation
+
+**Scope**
+
+- Implemented the requested version-separated Dailymotion discovery platform:
+  12 paired search pages, version-isolated clients/services/normalizers,
+  capability registry + Capabilities page, opt-in compare mode, workspace
+  (history/saved), settings, docs gateway, admin session, dashboard rework,
+  sidebar regrouping, Dailymotion branding/favicon, `.env.example` + README
+  updates, and 42 automated tests. All pre-existing Channel Explorer /
+  channels / saved / AI routes preserved untouched.
+
+**Path/scope truth**
+
+- `F:\discovery\youtube-discovery` does not exist on this machine; only
+  `E:\discovery\dailymotion-discovery` exists (`E:\discovery` contains just
+  that directory). No duplicate app was created; reference interaction
+  patterns were reconstructed from the prompt + official docs instead.
+- `notes.txt` / `skills-lock.json` / supabase pin edits in the working tree
+  are pre-existing unrelated changes and were preserved (not reverted).
+- `notes.txt` contains an operator secret-like line — never printed, never
+  committed by this task, never touched.
+
+**Official docs inspected (evidence in docs/ inventories)**
+
+- v2: docs index, migration guide (full: auth/scopes/video/profile/player/
+  playlist/livestream maps), authenticate, browse-large-catalog,
+  collect-video-ids, collect-profile-ids, reference index, perform-an-api-call,
+  understand-api-response, api-scopes, rate-limiting, api-errors,
+  listprofilevideos + get-video OpenAPI (full).
+- v1: v0 docs index + reference index, authenticate (+ auth/scopes refs),
+  browse-large-catalog, collect-video-ids, video-filters (full),
+  user-filters (full), playlist-filters (full), video-connections (full),
+  global-api-parameters (full), api-list-videos OpenAPI, rate-limiting.
+- Created `docs/api-v1-capability-inventory.md` and
+  `docs/api-v2-capability-inventory.md` (endpoint/params/fields/pagination/
+  limits/errors/auth per endpoint + implementation status + doc URLs).
+
+**Live verification (2026-10-10, curl, no credentials)**
+
+- v1 public: `/videos?search=news` 200 (`total:1000,has_more:true`); Arabic
+  `العربية` query returns Arabic titles (Unicode preserved);
+  `/users?search=` 200; `/user/{id}` + `/user/{id}/videos` 200;
+  `/user/lequipe/playlists` 11 total; `/playlist/x88apm/videos` 40 total;
+  `list=what-to-watch` 200; `live_onair=1` returns on-air lives;
+  `/playlists?search=` → 403 "Only authenticated users can use this filter";
+  stale playlist id → 404 object_not_found (honest errors).
+- v2: `/v2/profiles/xiy/videos` and `/v2/videos/x5auisp` without token → 401;
+  `POST oauth2.../v2/token` with dummy creds → structured `invalid_request`
+  (endpoint live). Conclusion: v2 = auth-required for everything; all v2
+  reads are mock-tested, UI reports `auth_missing` + setup remedy.
+
+**Architecture (new, additive under src/lib/discovery/)**
+
+- `version-config.ts` (V1/V2 base isolation; bare legacy var = v1 default
+  only), `auth.ts` (separate v1/v2 token caches; v1 ~10h, v2 30-min refresh),
+  `v1-client.ts` (public-first, opportunistic Bearer, 429/5xx retry+backoff),
+  `v2-client.ts` (no-creds → `auth_missing` with zero HTTP),
+  `query-serialization.ts` (pure per-version builders; exact query preserved),
+  `v1-normalize.ts` / `v2-normalize.ts` (→ shared `DiscoveryItem` + `raw`,
+  `apiVersion` stamped), `v1-search-service.ts` / `v2-search-service.ts`
+  (typed ops incl. profile/playlist contents, related, /me),
+  `capability-registry.ts` (12 entries; UI controls derive from it),
+  `types.ts` (merge/dedupe keyed on version+kind+id).
+- Routes: `/api/discovery/v1/[resource]`, `/api/discovery/v2/[resource]`,
+  `/api/discovery/compare` (side-by-side, never merged),
+  `/api/discovery/auth-status` (booleans only, no secrets).
+- Pages: `/general|videos|channels|playlists|users|live-v1|v2` (shared
+  `DiscoveryExplorer`: URL-synced state, server+labelled-local filters,
+  pagination/load-more, raw inspection, JSON/CSV export, history/saved,
+  cross-version links), `/compare`, `/capabilities` (registry-rendered),
+  `/workspace`, `/settings`, `/docs`, `/admin/login` (+ `/api/admin/*`).
+- Workspace persistence is browser-localStorage (no migration, no new
+  tables). Admin session is a stateless HMAC cookie (7-day default, httpOnly,
+  SameSite=Lax, timing-safe compare) — no DB table, no migration.
+- Canonical tables unchanged: `video_sources`, `videos`, `manifests`,
+  `manifest_items`, `fetch_jobs`, `fetch_windows`, `fetch_page_attempts`,
+  `source_catalog_snapshots`, `fetch_job_events`, `collections`,
+  `saved_videos`. No migration created/applied; `db:apply` not run.
+- Env: `.env.example` documents the versioned pair
+  (`DAILYMOTION_API_BASE_URL_V1/V2`), exact private credential names,
+  `ADMIN_*` names/TTL, mandatory-vs-optional + where-to-obtain. Bare
+  `DAILYMOTION_API_BASE_URL` kept as v1 default only. `src/lib/config/env.ts`
+  extended with optional versioned/admin fields (no secret exposure).
+
+**Verification**
+
+- `npx vitest run`: 42/42 pass (serialization incl. Arabic/emoji preservation,
+  normalizers, registry consistency, base-URL isolation, v1 envelope/403/429
+  retry, v2 no-creds-no-HTTP, window-cap/end detection, admin roundtrip/
+  tamper/unconfigured).
+- `npm run typecheck`: clean (after `npx prisma generate`; Prisma errors were
+  missing-client artifacts, not code).
+- `npm run build`: passed (Next 16.2.5, 46 routes incl. all new pages/APIs).
+  Plain `npm run build` fails in THIS checkout because root `.env.local`
+  still holds `.env.example` placeholders (DATABASE_URL/GEMINI_API_KEY/
+  NEXT_PUBLIC_APP_URL) — pre-existing, secrets not touched; verified with
+  sanitized dummy env override instead.
+- `npm run lint`: still fails pre-existing (`next lint` removed in Next 16;
+  interprets `lint` as a directory) — unchanged, out of scope (no eslint
+  dependency added per dependency discipline).
+- Runtime smoke: production server on :3110 (background); route checks
+  pending at ledger-write time (see final report).
+
+**Known limitations**
+
+- All v2 reads need operator credentials (`PRIVATE_DAILYMOTION_API_KEY_V2` +
+  secret, Private API key, read scopes) — not supplied; v2 pages show setup
+  remedy instead of results until configured.
+- v1 anonymous global playlist search unavailable upstream (403) — owner/id
+  workflows offered instead. v2 has no global search for any resource —
+  profile-scoped alternatives, explicitly labelled.
+- History/saved are browser-local (per-device, no cross-device sync).
+- `npm run lint` needs a future ESLint migration (pre-existing).
 
 ## 2026-05-07 Channel Explorer live search, parallel window fetch, and window feedback
 

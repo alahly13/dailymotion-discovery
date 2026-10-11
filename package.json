@@ -9,6 +9,9 @@
     "start": "next start",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "supabase:storage:check": "tsx scripts/supabase-storage-check.mjs",
+    "supabase:storage:setup": "tsx scripts/supabase-storage-setup.mjs",
     "env:validate": "node scripts/app-validate-env.mjs",
     "db:generate": "prisma generate",
     "db:studio": "prisma studio",
@@ -23,8 +26,8 @@
     "@prisma/adapter-pg": "^7.8.0",
     "@prisma/client": "7.8.0",
     "@radix-ui/react-slot": "latest",
-    "@supabase/ssr": "latest",
-    "@supabase/supabase-js": "latest",
+    "@supabase/ssr": "^0.12.7",
+    "@supabase/supabase-js": "^2.117.3",
     "class-variance-authority": "latest",
     "clsx": "latest",
     "dotenv": "^17.4.2",
@@ -46,7 +49,9 @@
     "@types/react": "latest",
     "@types/react-dom": "latest",
     "tailwindcss": "latest",
-    "typescript": "latest"
+    "tsx": "^4.23.15",
+    "typescript": "latest",
+    "vitest": "^5.0.3"
   },
   "overrides": {
     "@hono/node-server": "1.19.14",

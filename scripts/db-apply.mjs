@@ -97,18 +97,23 @@ function isProductionLikeHost(host = '') {
 }
 
 function validateEnv() {
-  const databaseUrl = process.env.DATABASE_URL?.trim() || "";
+  const canonical = process.env.DATABASE_URL_CONNECTION_STRING?.trim() || "";
+  const legacy = !canonical ? process.env.DATABASE_URL?.trim() || "" : "";
+  const databaseUrl = canonical || legacy;
   const dbMeta = parseMeta(databaseUrl);
 
   if (!dbMeta) {
-    console.error('[ERROR] DATABASE_URL must be a valid postgres:// or postgresql:// URL.');
+    console.error('[ERROR] DATABASE_URL_CONNECTION_STRING must be a valid postgres:// or postgresql:// URL.');
     console.error('Run `npm run db:validate` for details.');
     process.exit(1);
   }
 
   console.log('[INFO] Database target summary (sanitized):');
-  console.log(`- DATABASE_URL host=${dbMeta.host}, port=${dbMeta.port}, database=${dbMeta.database}, protocol=${dbMeta.protocol}`);
-  console.log('- Prisma CLI/migrations connection=DATABASE_URL only');
+  console.log(`- host=${dbMeta.host}, port=${dbMeta.port}, database=${dbMeta.database}, protocol=${dbMeta.protocol}`);
+  console.log(`- Prisma CLI/migrations connection=${canonical ? "DATABASE_URL_CONNECTION_STRING" : "DATABASE_URL (deprecated fallback)"}`);
+  if (!canonical) {
+    console.warn('[WARN] Using deprecated DATABASE_URL fallback. Migrate to DATABASE_URL_CONNECTION_STRING.');
+  }
 
   if (isProductionLikeHost(dbMeta.host) || process.env.VERCEL_ENV === 'production') {
     console.warn('[WARN] Production-like database target detected.');
@@ -122,7 +127,7 @@ function validateEnv() {
 
 function printConnectionTroubleshooting() {
   console.error('Troubleshooting checklist:');
-  console.error('- Use the Supabase Session Pooler URL for DATABASE_URL in Vercel/Codespaces/GitHub Actions.');
+  console.error('- Use the Supabase Session Pooler URL for DATABASE_URL_CONNECTION_STRING in Vercel/Codespaces/GitHub Actions.');
   console.error('- Verify Supabase password and project reference are correct.');
   console.error('- Avoid Supabase direct hosts for this workflow; they can fail with P1001 in IPv4-limited environments.');
 }

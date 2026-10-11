@@ -1,8 +1,43 @@
-# AI Public Video Discovery Platform
+# Dailymotion Discovery — Dual-API Platform
 
-Next.js App Router application for public Dailymotion video metadata discovery and research.
+Next.js App Router application for version-separated public Dailymotion video metadata discovery and research across Legacy API v1 and API v2.
 
 This platform is not a downloader. It does not download, rehost, scrape private streams, or bypass platform restrictions.
+
+## Dual-API discovery workspaces
+
+Every discovery page is version-explicit (own route, endpoint, params, normalizer, pagination, history):
+
+- General: `/general-v1`, `/general-v2`
+- Videos: `/videos-v1`, `/videos-v2`
+- Channels: `/channels-v1`, `/channels-v2`
+- Playlists: `/playlists-v1`, `/playlists-v2`
+- Users: `/users-v1`, `/users-v2`
+- Live: `/live-v1`, `/live-v2`
+- `/compare` (deliberate side-by-side, never merged), `/capabilities` (v1-vs-v2 source of truth),
+  `/workspace` (history/saved + Sync to Supabase), `/settings` (config status), `/docs` (doc gateway)
+
+API routes live under `/api/discovery/v1/[resource]`, `/api/discovery/v2/[resource]`,
+`/api/discovery/compare`, and `/api/discovery/auth-status`. Shared UI renders the
+version-neutral model in `src/lib/discovery/` (clients, services, normalizers,
+capability registry). Capability evidence lives in `docs/api-v1-capability-inventory.md`
+and `docs/api-v2-capability-inventory.md`. Tests: `npm test` (vitest).
+
+## Cloud persistence (Supabase Postgres + Storage)
+
+- Prisma owns relational state (`src/lib/db/prisma.ts` singleton); the
+  Supabase SDK owns private Storage JSON (`src/lib/supabase/storage-server.ts`
+  with `SUPABASE_SECRET_KEY`, server-only). Orchestration in
+  `src/lib/persistence/` (repositories, storage-documents, batch-save).
+- One-click Save: `/workspace` → Sync to Supabase (admin sign-in required) →
+  `POST /api/cloud/batch-commit` (idempotent by key). Local drafts stay
+  browser-local until the server confirms.
+- Bucket `application-data` (private). Verify: `npm run supabase:storage:check`;
+  create: `npm run supabase:storage:setup` (idempotent, never alters existing).
+- Migrations: schema via Prisma (`prisma/migrations/`, guarded `db:apply`);
+  data migrations via `scripts/data-migrations/registry.ts`. Docs:
+  `docs/migrations/{README,registry,recovery}.md`. Diagnostics:
+  `/admin/migrations` (admin only).
 
 ## Setup
 
