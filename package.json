@@ -10,6 +10,7 @@
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "db:diagnose": "node scripts/db-diagnose-connection.mjs",
     "supabase:storage:check": "tsx scripts/supabase-storage-check.mjs",
     "supabase:storage:setup": "tsx scripts/supabase-storage-setup.mjs",
     "env:validate": "node scripts/app-validate-env.mjs",

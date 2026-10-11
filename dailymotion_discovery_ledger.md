@@ -24,6 +24,40 @@ Scope: Project source-of-truth ledger, updated after Supabase/Postgres/Storage/b
 - [Future Roadmap](#future-roadmap)
 - [Agent Instructions](#agent-instructions)
 
+## 2026-10-12 Direct IPv6 connectivity diagnosis (P1001 root cause)
+
+**Cause established (not assumed)**
+
+- `P1001` is NOT a wrong-string/adapter/config problem. Evidence chain from
+  new `npm run db:diagnose` (7 layers, sanitized, read-only):
+  DNS AAAA `2a05:d01c:…:9aac` resolves (hostname/credentials/port correct);
+  machine has interface IPv6 addresses; **IPv6 egress control probe
+  (google:443) TIMES OUT**; TCP to the DB IP times out identically
+  (environmental, not host-specific); hence auth/Prisma/migrate layers
+  unreachable. Password correctness is untestable from here.
+- Corroborated by Windows resolver (AAAA present, no A record — correct for
+  Free direct) and official Supabase docs (direct = IPv6-only on Free;
+  pooler = IPv4; serverless → transaction pooler).
+
+**Changes (targeted, no redesign)**
+
+- `scripts/db-diagnose-connection.mjs` (new, `db:diagnose` npm script):
+  explicit AAAA/A DNS (Node lookup is unreliable for IPv6-only hosts on
+  Windows), local-stack + egress-control probes, per-address TCP, pg auth
+  (hostaddr bypass), Prisma query + migrate status. No migrations/DDL.
+- No Prisma/adapter/client changes needed — verified correct for 7.8.0.
+- Docs: `.env.example` + `docs/migrations/README.md` now explain direct vs
+  pooler, per-environment values in the SAME variable, and the unverified
+  Vercel IPv6 position (pooler recommended there unless verified).
+- Migration `20261011183739` reviewed (matches schema, `prisma validate`
+  clean) and still PENDING — not applied, per safety rules.
+
+**Not verified**
+
+- Vercel IPv6 egress (cannot test from here; web search unavailable).
+  Production guidance: pooler URL in Vercel's variable unless verified.
+- Password correctness (unreachable auth layer). Nothing was changed about it.
+
 ## 2026-10-11 Supabase/Postgres/Storage/batch-save/migration integration
 
 **Audit findings (verified, not inferred)**
@@ -77,6 +111,10 @@ Scope: Project source-of-truth ledger, updated after Supabase/Postgres/Storage/b
   operator login + reachable DB (reported, not claimed).
 - No deployment; no migration applied (needs CONFIRM_DB_APPLY + reachability);
   no destructive command run; `.env.local` secrets never printed/touched.
+- Pushed 2026-10-11: commit c16118d to origin/main (113 files, secret scan
+  clean — secrets empty, no credentialed URLs). Deliberately NOT pushed:
+  `notes.txt` modification (contains an operator secret-like line — remove it
+  before committing) and local agent-tool directories/screenshots.
 
 ### Earlier 2026-10-11 work (separate auth panels + unified Search)
 

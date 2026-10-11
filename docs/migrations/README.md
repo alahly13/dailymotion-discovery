@@ -15,8 +15,20 @@ Beginner-friendly guide to the two independent migration systems.
 
 ## Which connection string is used
 
-- Runtime + CLI: `DATABASE_URL_CONNECTION_STRING` (Supabase Session Pooler,
-  port 5432). Legacy `DATABASE_URL` works as a fallback with a warning.
+- Runtime + CLI: `DATABASE_URL_CONNECTION_STRING` (legacy `DATABASE_URL`
+  fallback with warning). Diagnose with `npm run db:diagnose` (DNS, TCP,
+  auth, Prisma, migrate-status layers — read-only, sanitized).
+- Operator intent: Free Tier **direct IPv6** (`db.<ref>.supabase.co:5432`)
+  locally and for migrations. Requires working IPv6 egress on the machine
+  running the command — the diagnose script's `egressControl` layer proves
+  this with a control probe, so a failure is attributed correctly.
+- If IPv6 egress is unavailable, use the Session Pooler URL **in the same
+  variable** (per-environment values, no code change). Pooler usernames
+  differ (`postgres.<ref>`); copy the exact host from Dashboard → Connect.
+- Production (Vercel): IPv6 egress NOT verified from here. Supabase's
+  official serverless guidance prescribes the shared pooler; use the pooler
+  URL in Vercel's `DATABASE_URL_CONNECTION_STRING` unless you verify IPv6
+  egress on Vercel yourself. Never point any variable at another project.
 - Optional `DATABASE_URL_DIRECT` is only for migration/introspection when the
   pooler cannot do the job; the name alone never proves a direct host is
   needed. Never add a second runtime pool without a verified reason.
