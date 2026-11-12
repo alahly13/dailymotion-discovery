@@ -11,6 +11,8 @@ export type VideoSortOption =
 
 export interface AdvancedVideoFilters {
   keyword?: string;
+  excludeKeyword?: string;
+  tags?: string;
   minViews?: number | null;
   maxViews?: number | null;
   targetViews?: number | null;

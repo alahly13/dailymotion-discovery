@@ -12,7 +12,7 @@
 
 "use client";
 
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   V1_MANDATORY_FIELDS,
   V1_VIDEO_FIELD_OPTIONS,
@@ -26,6 +26,15 @@ import {
   type ParamGroup,
 } from "@/lib/discovery/param-schema";
 import { mergeDiscoveryItems, type ApiVersion, type DiscoveryFailure, type DiscoveryItem } from "@/lib/discovery/types";
+import { CountrySelector } from "./country-selector";
+import {
+  DEFAULT_DISCOVERY_LOCAL_FILTERS,
+  applyDiscoveryResultPipeline,
+  type LocalFilterState,
+} from "@/lib/filters/discovery-result-filters";
+import { DiscoveryLocalFilterPanel } from "./discovery-local-filter-panel";
+import { discoveryCompositeKey } from "@/lib/resources/dailymotion-resource-taxonomy";
+import { useMergedDataset } from "@/lib/local-first/use-merged-dataset";
 import { ResultCard } from "./result-card";
 import { useDiscoveryWorkspace } from "@/stores/discovery-workspace-store";
 
@@ -51,6 +60,18 @@ const labelClass = "mb-1 block text-[11px] font-black uppercase tracking-[0.12em
 
 function ParamControl({ def, value, onChange }: { def: ParamDef; value: string; onChange: (value: string) => void }) {
   const id = `usearch-${def.key}`;
+  if (def.key === "country" || def.key === "localization") {
+    return (
+      <CountrySelector
+        value={value}
+        onChange={onChange}
+        mode="api"
+        label={def.label}
+        placeholder="Any country / localization..."
+        helperText={def.key === "country" ? "API regional context parameter (ams_country / country)" : "V1 regional localization"}
+      />
+    );
+  }
   if (def.control === "select") {
     return (
       <div>
@@ -113,10 +134,15 @@ function ParamControl({ def, value, onChange }: { def: ParamDef; value: string; 
 
 export function UnifiedSearch() {
   const workspace = useDiscoveryWorkspace();
+  const merged = useMergedDataset();
   const [version, setVersion] = useState<ApiVersion>(workspace.lastSearchVersion ?? "v1");
   const [query, setQuery] = useState("");
   const [profileId, setProfileId] = useState("");
   const [filters, setFilters] = useState<Record<string, string>>({});
+  const [localFilters, setLocalFilters] = useState<LocalFilterState>(DEFAULT_DISCOVERY_LOCAL_FILTERS);
+  const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
+  const [bulkCollectionId, setBulkCollectionId] = useState("");
+  const [saveFlash, setSaveFlash] = useState<string | null>(null);
   const [fieldSelection, setFieldSelection] = useState<string[] | null>(null);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [items, setItems] = useState<DiscoveryItem[]>([]);
@@ -126,6 +152,68 @@ export function UnifiedSearch() {
   const [loading, setLoading] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
   const inflightKey = useRef<string | null>(null);
+
+  // Hydrate URL search parameters cleanly on mount, including offline snapshot loading (`snapshotType=preset|history&snapshotId=...`).
+  useEffect(() => {
+    const sp = new URLSearchParams(window.location.search);
+    if ([...sp.keys()].length === 0) return;
+    let active = true;
+    void Promise.resolve().then(() => {
+      if (!active) return;
+      const vParam = sp.get("v");
+      if (vParam === "v1" || vParam === "v2") setVersion(vParam);
+      if (sp.has("q")) setQuery(sp.get("q") ?? "");
+      if (sp.has("profileId")) setProfileId(sp.get("profileId") ?? "");
+      const hydrated: Record<string, string> = {};
+      for (const [k, val] of sp.entries()) {
+        if (!["v", "q", "profileId", "page", "mode", "fields", "snapshotType", "snapshotId"].includes(k) && val) {
+          hydrated[k] = val;
+        }
+      }
+      if (Object.keys(hydrated).length > 0) setFilters(hydrated);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  // Load offline archived snapshot cleanly when navigated from /saved-searches or /history with `snapshotType` + `snapshotId`.
+  useEffect(() => {
+    if (!merged.ready) return;
+    const sp = new URLSearchParams(window.location.search);
+    const snapType = sp.get("snapshotType");
+    const snapId = sp.get("snapshotId");
+    if (!snapType || !snapId) return;
+
+    let active = true;
+    void Promise.resolve().then(() => {
+      if (!active) return;
+      if (snapType === "preset") {
+        const preset = merged.savedSearches.find((p) => p.id === snapId);
+        if (preset?.cachedSnapshot?.items?.length) {
+          setVersion(preset.apiVersion);
+          setQuery(preset.query);
+          setFilters(preset.apiParams ?? {});
+          setItems(preset.cachedSnapshot.items);
+          setHasSearched(true);
+          setNotice(`Loaded archived offline snapshot for preset "${preset.name}" (${preset.cachedSnapshot.items.length} items, zero API calls).`);
+        }
+      } else if (snapType === "history") {
+        const entry = merged.searchHistory.find((h) => h.id === snapId);
+        if (entry?.snapshotItems?.length) {
+          setVersion(entry.apiVersion);
+          setQuery(entry.query);
+          setFilters(entry.apiParams ?? {});
+          setItems(entry.snapshotItems);
+          setHasSearched(true);
+          setNotice(`Loaded archived offline search history snapshot (${entry.snapshotItems.length} items, zero API calls).`);
+        }
+      }
+    });
+    return () => {
+      active = false;
+    };
+  }, [merged.ready, merged.savedSearches, merged.searchHistory]);
 
   const schema = useMemo(() => schemaFor(version), [version]);
   const defaults = workspace.versionDefaults[version];
@@ -224,6 +312,9 @@ export function UnifiedSearch() {
       setItems((prev) => (append ? mergeDiscoveryItems(prev, data.result.items) : data.result.items));
       setMeta({ page: data.result.page, pageSize: data.result.pageSize, total: data.result.total, hasMore: data.result.hasMore, capped: data.result.capped, endpoint: data.result.endpoint });
       setHasSearched(true);
+      const shareParams = new URLSearchParams(params);
+      shareParams.set("v", version);
+      window.history.replaceState(null, "", `?${shareParams.toString()}`);
       if (!append) {
         const effective = Object.fromEntries(params.entries());
         workspace.addHistory({
@@ -231,6 +322,16 @@ export function UnifiedSearch() {
           label: `Search (${version.toUpperCase()}): ${query || profileId || "filters"}`,
           params: { ...effective, cacheKey: buildSearchCacheKey(version, "general", version === "v1" ? "search" : "browse", effective) },
           resultCount: data.result.total ?? data.result.items.length,
+        });
+        void merged.coordinator.recordSearchHistory({
+          apiVersion: version,
+          resource: "general",
+          mode: version === "v1" ? "search" : "browse",
+          query: query || profileId || "",
+          apiParams: effective,
+          localFilters: localFilters as unknown as Record<string, unknown>,
+          resultCount: data.result.total ?? data.result.items.length,
+          snapshotItems: data.result.items.slice(0, 100),
         });
         workspace.recordSearchOutcome(version, true, 1);
       } else {
@@ -246,6 +347,99 @@ export function UnifiedSearch() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fieldSelection, filters, profileId, query, schema, version]);
+
+  const visibleItems = useMemo(
+    () => applyDiscoveryResultPipeline(items, localFilters),
+    [items, localFilters]
+  );
+
+  function saveCurrentSearch() {
+    const label = `Search (${version.toUpperCase()}): ${query.trim() || profileId.trim() || "filters"}`;
+    workspace.saveSearch({
+      version,
+      resource: "general",
+      label,
+      params: { q: query, profileId, ...filters },
+    });
+    void merged.coordinator.saveSearchPreset({
+      name: label,
+      apiVersion: version,
+      resource: "general",
+      mode: version === "v1" ? "search" : "browse",
+      query: query.trim() || profileId.trim(),
+      apiParams: { q: query, profileId, ...filters },
+      localFilters: localFilters as unknown as Record<string, unknown>,
+      tags: [version],
+      pinned: false,
+      cachedSnapshot: items.length > 0
+        ? { capturedAt: new Date().toISOString(), totalFetched: items.length, items: items.slice(0, 150) }
+        : undefined,
+    });
+    setSaveFlash("Saved preset (query + filters + offline snapshot)");
+    setTimeout(() => setSaveFlash(null), 2600);
+  }
+
+  function toggleSelectKey(key: string) {
+    setSelectedKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
+
+  async function saveSelectedItems() {
+    const chosen = visibleItems.filter((i) => selectedKeys.has(discoveryCompositeKey(i.apiVersion, i.kind, i.id)));
+    if (chosen.length === 0) return;
+    await merged.coordinator.saveItemsBatch(chosen);
+    for (const item of chosen) {
+      if (!workspace.isItemSaved(item.apiVersion, item.kind, item.id)) workspace.saveItem(item);
+    }
+    setSaveFlash(`Saved ${chosen.length} selected items locally`);
+    setTimeout(() => setSaveFlash(null), 2200);
+  }
+
+  async function addSelectedToCollection() {
+    if (!bulkCollectionId) return;
+    const chosen = visibleItems.filter((i) => selectedKeys.has(discoveryCompositeKey(i.apiVersion, i.kind, i.id)));
+    if (chosen.length === 0) return;
+    for (const item of chosen) {
+      await merged.coordinator.addItemToCollection(bulkCollectionId, item);
+    }
+    setSaveFlash(`Added ${chosen.length} items to collection`);
+    setTimeout(() => setSaveFlash(null), 2200);
+  }
+
+  function exportResults(format: "json" | "csv") {
+    if (visibleItems.length === 0) return;
+    const content =
+      format === "json"
+        ? JSON.stringify(visibleItems, null, 2)
+        : [
+            "id,apiVersion,kind,title,ownerName,duration,views,language,createdAt,url",
+            ...visibleItems.map((i) =>
+              [
+                i.id,
+                i.apiVersion,
+                i.kind,
+                `"${i.title.replaceAll('"', '""')}"`,
+                `"${(i.ownerName ?? "").replaceAll('"', '""')}"`,
+                i.duration ?? "",
+                i.views ?? "",
+                i.language ?? "",
+                i.createdAt ?? "",
+                i.url ?? "",
+              ].join(","),
+            ),
+          ].join("\n");
+    const blob = new Blob([content], { type: format === "json" ? "application/json" : "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `dailymotion-${version}-search.${format}`;
+    link.click();
+    URL.revokeObjectURL(url);
+  }
 
   const familyValue = getValue(schema.find((d) => d.key === "familyFilter") ?? { key: "familyFilter", default: null } as ParamDef);
 
@@ -313,7 +507,11 @@ export function UnifiedSearch() {
         <button type="submit" disabled={loading} className="min-h-13 rounded-lg bg-[var(--primary)] px-8 text-base font-black text-white disabled:opacity-60">
           {loading ? "Searching…" : "Search"}
         </button>
+        <button type="button" onClick={saveCurrentSearch} className="min-h-13 rounded-lg border border-[var(--border)] bg-[var(--card)] px-4 text-xs font-black uppercase hover:border-[var(--primary)]">
+          Save Search
+        </button>
       </form>
+      {saveFlash && <p className="text-xs font-bold text-emerald-600" role="status">{saveFlash}</p>}
 
       {/* Dynamic filter panel from the version schema. */}
       <section aria-label="Search filters" className="space-y-4 rounded-lg border border-[var(--border)] bg-[var(--card)] p-4 sm:p-5">
@@ -386,12 +584,92 @@ export function UnifiedSearch() {
       )}
 
       {hasSearched && !failure && (
-        <p className="text-xs font-bold text-[var(--muted-foreground)]" aria-live="polite">
-          Retrieved <strong className="text-[var(--foreground)]">{items.length}</strong>
-          {meta?.total !== null && meta?.total !== undefined ? <> of <strong className="text-[var(--foreground)]">{meta.total}</strong> reported</> : " (total not reported)"}
-          {meta?.hasMore ? " · more pages available" : " · end of results"}
-          {meta?.capped ? " · window cap — narrow with date filters" : ""}
-        </p>
+        <div className="space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[var(--border)] bg-[var(--card)] p-3">
+            <p className="text-xs font-bold text-[var(--muted-foreground)]" aria-live="polite">
+              Showing <strong className="text-[var(--foreground)]">{visibleItems.length}</strong> of{" "}
+              <strong className="text-[var(--foreground)]">{items.length}</strong> loaded
+              {meta?.total !== null && meta?.total !== undefined ? <> ({meta.total} reported)</> : ""}
+              {meta?.hasMore ? " · more pages available" : " · end of results"}
+              {meta?.capped ? " · window cap — narrow with date filters" : ""}
+            </p>
+            {items.length > 0 && (
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (selectedKeys.size === visibleItems.length) {
+                      setSelectedKeys(new Set());
+                    } else {
+                      setSelectedKeys(new Set(visibleItems.map((i) => discoveryCompositeKey(i.apiVersion, i.kind, i.id))));
+                    }
+                  }}
+                  className="min-h-9 rounded-md border border-[var(--border)] px-3 text-xs font-bold hover:border-[var(--primary)]"
+                >
+                  {selectedKeys.size === visibleItems.length && visibleItems.length > 0 ? "Deselect All" : "Select All Visible"}
+                </button>
+                <button type="button" onClick={() => exportResults("json")} className="min-h-9 rounded-md border border-[var(--border)] px-3 text-xs font-black uppercase hover:border-[var(--primary)]">
+                  Export JSON
+                </button>
+                <button type="button" onClick={() => exportResults("csv")} className="min-h-9 rounded-md border border-[var(--border)] px-3 text-xs font-black uppercase hover:border-[var(--primary)]">
+                  Export CSV
+                </button>
+              </div>
+            )}
+          </div>
+
+          {items.length > 0 && (
+            <DiscoveryLocalFilterPanel
+              value={localFilters}
+              onChange={setLocalFilters}
+              totalLoaded={items.length}
+              filteredCount={visibleItems.length}
+            />
+          )}
+
+          {selectedKeys.size > 0 && (
+            <div className="flex flex-wrap items-center gap-2 rounded-lg border border-[var(--primary)]/40 bg-[var(--primary)]/10 p-3 text-xs font-bold">
+              <span>{selectedKeys.size} selected</span>
+              <button
+                type="button"
+                onClick={() => void saveSelectedItems()}
+                className="min-h-9 rounded-md bg-[var(--primary)] px-3 font-black uppercase text-white"
+              >
+                Save Selected
+              </button>
+              {merged.collections.length > 0 && (
+                <div className="flex items-center gap-1.5">
+                  <select
+                    aria-label="Choose target collection"
+                    value={bulkCollectionId}
+                    onChange={(e) => setBulkCollectionId(e.target.value)}
+                    className="min-h-9 rounded-md border border-[var(--border)] bg-[var(--card)] px-2 text-xs font-semibold"
+                  >
+                    <option value="">Choose collection...</option>
+                    {merged.collections.map((c) => (
+                      <option key={c.id} value={c.id}>{c.name}</option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    disabled={!bulkCollectionId}
+                    onClick={() => void addSelectedToCollection()}
+                    className="min-h-9 rounded-md border border-[var(--border)] bg-[var(--card)] px-3 font-black uppercase disabled:opacity-50"
+                  >
+                    + Add to Collection
+                  </button>
+                </div>
+              )}
+              <button
+                type="button"
+                onClick={() => setSelectedKeys(new Set())}
+                className="ml-auto text-xs font-bold text-[var(--muted-foreground)] hover:underline"
+              >
+                Clear Selection
+              </button>
+            </div>
+          )}
+        </div>
       )}
 
       {!hasSearched && (
@@ -402,17 +680,37 @@ export function UnifiedSearch() {
       )}
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {items.map((item) => (
-          <ResultCard
-            key={`${item.apiVersion}:${item.kind}:${item.id}`}
-            item={item}
-            saved={workspace.isItemSaved(item.apiVersion, item.kind, item.id)}
-            onToggleSave={() => {
-              if (workspace.isItemSaved(item.apiVersion, item.kind, item.id)) workspace.removeItem(item.apiVersion, item.kind, item.id);
-              else workspace.saveItem(item);
-            }}
-          />
-        ))}
+        {visibleItems.map((item) => {
+          const cKey = discoveryCompositeKey(item.apiVersion, item.kind, item.id);
+          const isSavedLocal = merged.savedKeys.has(cKey) || workspace.isItemSaved(item.apiVersion, item.kind, item.id);
+          return (
+            <ResultCard
+              key={cKey}
+              item={item}
+              saved={isSavedLocal}
+              favorite={merged.favoriteKeys.has(cKey)}
+              collections={merged.collections.map((c) => ({ id: c.id, name: c.name }))}
+              selectable
+              selected={selectedKeys.has(cKey)}
+              onToggleSelect={() => toggleSelectKey(cKey)}
+              onToggleFavorite={() => {
+                if (!isSavedLocal) {
+                  void merged.coordinator.toggleSaveItem(item).then(() =>
+                    merged.coordinator.setSavedItemFavorite(cKey, true)
+                  );
+                } else {
+                  void merged.coordinator.setSavedItemFavorite(cKey, !merged.favoriteKeys.has(cKey));
+                }
+              }}
+              onAddToCollection={(colId) => void merged.coordinator.addItemToCollection(colId, item)}
+              onToggleSave={() => {
+                void merged.coordinator.toggleSaveItem(item);
+                if (workspace.isItemSaved(item.apiVersion, item.kind, item.id)) workspace.removeItem(item.apiVersion, item.kind, item.id);
+                else workspace.saveItem(item);
+              }}
+            />
+          );
+        })}
       </div>
 
       {meta?.hasMore && (

@@ -21,11 +21,10 @@ import type {
   FetchHistoryEntry,
   FetchJobStatus,
   FetchPageAttemptSummary,
-  FetchWindowStatus,
   FetchWindowSummary,
   TimeWindowUnit,
 } from "@/types/channel-fetch";
-import type { ChannelManifest, ManifestFetchStatus } from "@/types/manifest";
+import type { ChannelManifest } from "@/types/manifest";
 import type { NormalizedVideoMetadata } from "@/types/video";
 import { fetchDailymotionChannelPage } from "./dailymotion-client";
 import { fetchDailymotionSourceMetadata } from "./channel-metadata-service";
@@ -330,19 +329,6 @@ function mergeVideos(
 
 function terminalStatus(status: FetchJobStatus) {
   return ["complete", "capped", "stopped", "failed", "max_items_reached", "timeout_limited", "provider_limited", "auth_or_provider_limited"].includes(status);
-}
-
-function manifestStatusFor(status: FetchJobStatus): ManifestFetchStatus {
-  if (status === "complete") return "complete";
-  if (status === "capped") return "capped";
-  if (status === "stopped") return "stopped";
-  if (status === "failed") return "failed";
-  if (status === "max_items_reached") return "max_items_reached";
-  if (status === "provider_limited") return "provider_limited";
-  if (status === "auth_or_provider_limited") return "auth_or_provider_limited";
-  if (status === "timeout_limited") return "timeout_limited";
-  if (status === "partial") return "partial";
-  return "fetching";
 }
 
 function calculateCompleteness(job: RuntimeFetchJob): ChannelFetchCompletenessStatus {

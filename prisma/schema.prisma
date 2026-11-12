@@ -4,6 +4,7 @@ generator client {
 
 datasource db {
   provider = "postgresql"
+  url      = env("DATABASE_URL")
 }
 
 enum ManifestType {
@@ -496,6 +497,9 @@ model BatchCommit {
   historyAppended  Int       @default(0) @map("history_appended")
   snapshotPath     String?   @map("snapshot_path")
   snapshotChecksum String?   @map("snapshot_checksum")
+  generationId     String?   @map("generation_id")
+  aggregateSha256  String?   @map("aggregate_sha256")
+  storageBackend   String    @default("supabase") @map("storage_backend")
   resultJson       Json?     @map("result_json")
   errorJson        Json?     @map("error_json")
   createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
@@ -566,4 +570,121 @@ model ApiVersionTokenCache {
   updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   @@map("api_version_token_cache")
+}
+
+// Saved search presets: query + API filters + local filters + optional cached result snapshot.
+model SavedSearchPreset {
+  id               String   @id @default(uuid()) @db.Uuid
+  ownerId          String   @default("admin") @map("owner_id")
+  name             String
+  apiVersion       String   @map("api_version")
+  resource         String
+  mode             String   @default("search")
+  query            String
+  apiParamsJson    Json?    @map("api_params_json")
+  localFiltersJson Json?    @map("local_filters_json")
+  tags             String[] @default([])
+  pinned           Boolean  @default(false)
+  snapshotJson     Json?    @map("snapshot_json")
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([ownerId, updatedAt])
+  @@index([apiVersion, resource])
+  @@map("saved_search_presets")
+}
+
+// Personal research collections (explicitly separate from Dailymotion platform playlists).
+model ResearchCollection {
+  id          String                   @id
+  ownerId     String                   @default("admin") @map("owner_id")
+  name        String
+  description String?
+  tags        String[]                 @default([])
+  createdAt   DateTime                 @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime                 @updatedAt @map("updated_at") @db.Timestamptz(6)
+  items       ResearchCollectionItem[]
+
+  @@index([ownerId, updatedAt])
+  @@map("research_collections")
+}
+
+model ResearchCollectionItem {
+  id           String             @id
+  collectionId String             @map("collection_id")
+  itemKey      String             @map("item_key")
+  resourceType String             @map("resource_type")
+  apiVersion   String             @map("api_version")
+  position     Int                @default(0)
+  note         String?
+  snapshotJson Json               @map("snapshot_json")
+  addedAt      DateTime           @default(now()) @map("added_at") @db.Timestamptz(6)
+  collection   ResearchCollection @relation(fields: [collectionId], references: [id], onDelete: Cascade)
+
+  @@unique([collectionId, itemKey])
+  @@index([collectionId, position])
+  @@map("research_collection_items")
+}
+
+// Canonical Cloudflare R2 Storage dataset registry (pointer to active immutable generation).
+model StorageDataset {
+  id                   String              @id @default(uuid()) @db.Uuid
+  ownerId              String              @map("owner_id")
+  datasetSlug          String              @map("dataset_slug")
+  storageBackend       String              @default("r2-worker") @map("storage_backend")
+  bucketName           String              @default("dailymotion-discovery-private") @map("bucket_name")
+  versionPointerKey    String              @map("version_pointer_key")
+  activeGenerationId   String?             @map("active_generation_id")
+  activeManifestKey    String?             @map("active_manifest_key")
+  activeAggregateSha   String?             @map("active_aggregate_sha")
+  activeRecordCount    Int                 @default(0) @map("active_record_count")
+  activeTotalBytes     BigInt              @default(0) @map("active_total_bytes")
+  lastSyncedAt         DateTime?           @map("last_synced_at") @db.Timestamptz(6)
+  createdAt            DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt            DateTime            @updatedAt @map("updated_at") @db.Timestamptz(6)
+  generations          StorageGeneration[]
+
+  @@unique([ownerId, datasetSlug])
+  @@index([ownerId, lastSyncedAt])
+  @@map("storage_datasets")
+}
+
+model StorageGeneration {
+  id              String                @id @default(uuid()) @db.Uuid
+  datasetId       String                @map("dataset_id") @db.Uuid
+  ownerId         String                @map("owner_id")
+  datasetSlug     String                @map("dataset_slug")
+  generationId    String                @unique @map("generation_id")
+  status          String                @default("pending")
+  manifestKey     String                @map("manifest_key")
+  manifestSha256  String                @map("manifest_sha256")
+  aggregateSha256 String                @map("aggregate_sha256")
+  recordCount     Int                   @default(0) @map("record_count")
+  partCount       Int                   @default(0) @map("part_count")
+  totalBytes      BigInt                @default(0) @map("total_bytes")
+  metadataJson    Json?                 @map("metadata_json")
+  committedAt     DateTime?             @map("committed_at") @db.Timestamptz(6)
+  createdAt       DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+  dataset         StorageDataset        @relation(fields: [datasetId], references: [id], onDelete: Cascade)
+  parts           StorageManifestPart[]
+
+  @@index([datasetId, createdAt])
+  @@index([ownerId, datasetSlug, status])
+  @@map("storage_generations")
+}
+
+model StorageManifestPart {
+  id           String            @id @default(uuid()) @db.Uuid
+  generationId String            @map("generation_id")
+  partIndex    Int               @map("part_index")
+  objectKey    String            @unique @map("object_key")
+  sha256       String
+  byteCount    BigInt            @map("byte_count")
+  recordCount  Int               @map("record_count")
+  verifiedAt   DateTime?         @map("verified_at") @db.Timestamptz(6)
+  createdAt    DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  generation   StorageGeneration @relation(fields: [generationId], references: [generationId], onDelete: Cascade)
+
+  @@unique([generationId, partIndex])
+  @@map("storage_manifest_parts")
 }

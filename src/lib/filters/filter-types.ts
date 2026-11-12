@@ -2,6 +2,8 @@ export type { AdvancedVideoFilters, VideoSortOption } from "@/types/filters";
 
 export const defaultAdvancedVideoFilters = {
   keyword: "",
+  excludeKeyword: "",
+  tags: "",
   minViews: null,
   maxViews: null,
   targetViews: null,

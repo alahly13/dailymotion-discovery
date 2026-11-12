@@ -37,6 +37,15 @@ function num(value: string | null): number | undefined {
   return Number.isFinite(parsed) ? parsed : undefined;
 }
 
+/** Parse tri-state boolean query params (`true`/`1`, `false`/`0`, or absent). */
+function bool(value: string | null): boolean | undefined {
+  if (value === null) return undefined;
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "true" || normalized === "1") return true;
+  if (normalized === "false" || normalized === "0") return false;
+  return undefined;
+}
+
 function iso(value: string | null, endOfDay: boolean): string | null {
   if (!value) return null;
   const normalized = value.length <= 10 ? `${value}T${endOfDay ? "23:59:59" : "00:00:00"}Z` : value;
@@ -61,13 +70,16 @@ export async function GET(request: Request, context: { params: Promise<{ resourc
     switch (typed) {
       case "general":
       case "videos": {
-        if (mode === "lookup") return NextResponse.json(await v2GetVideo(id));
+        if (mode === "lookup") return NextResponse.json(await v2GetVideo(id, str(url.searchParams.get("fields"))));
         return NextResponse.json(
           await v2ProfileVideos(profileId, {
             visibility: (str(url.searchParams.get("visibility")) as "public" | "private" | "password" | undefined) ?? null,
             tags: str(url.searchParams.get("tags")) ?? null,
             createdAfterIso: iso(url.searchParams.get("createdAfter"), false),
             createdBeforeIso: iso(url.searchParams.get("createdBefore"), true),
+            // Forward v2 safety/kids flags that query-serialization maps to `is_explicit` / `is_for_kids`.
+            isExplicit: bool(url.searchParams.get("isExplicit")) ?? null,
+            isForKids: bool(url.searchParams.get("isForKids")) ?? null,
             sort: str(url.searchParams.get("sort")) ?? null,
             page, pageSize,
             fields: str(url.searchParams.get("fields")),
@@ -79,12 +91,12 @@ export async function GET(request: Request, context: { params: Promise<{ resourc
           const me = await v2Me();
           return NextResponse.json(me.ok ? { ok: true, data: me.data } : { ...me.failure, ok: false });
         }
-        return NextResponse.json(await v2GetProfile(id || profileId, "channels"));
+        return NextResponse.json(await v2GetProfile(id || profileId, "channels", str(url.searchParams.get("fields"))));
       }
       case "playlists": {
-        if (mode === "lookup") return NextResponse.json(await v2GetPlaylist(id));
-        if (mode === "videos") return NextResponse.json(await v2PlaylistVideos(id, page ?? 1, pageSize ?? 50));
-        return NextResponse.json(await v2ProfilePlaylists(profileId, page ?? 1, pageSize ?? 50));
+        if (mode === "lookup") return NextResponse.json(await v2GetPlaylist(id, str(url.searchParams.get("fields"))));
+        if (mode === "videos") return NextResponse.json(await v2PlaylistVideos(id, page ?? 1, pageSize ?? 50, str(url.searchParams.get("fields"))));
+        return NextResponse.json(await v2ProfilePlaylists(profileId, page ?? 1, pageSize ?? 50, str(url.searchParams.get("fields"))));
       }
       case "users": {
         if (mode === "me") {
@@ -103,6 +115,7 @@ export async function GET(request: Request, context: { params: Promise<{ resourc
             createdBeforeIso: iso(url.searchParams.get("createdBefore"), true),
             tags: str(url.searchParams.get("tags")) ?? null,
             page, pageSize,
+            fields: str(url.searchParams.get("fields")),
           })
         );
       }

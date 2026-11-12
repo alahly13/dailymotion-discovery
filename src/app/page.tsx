@@ -3,8 +3,9 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { ArrowRight, ShieldCheck } from "lucide-react";
+import { ArrowRight, Search, ShieldCheck, Sparkles } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { useDiscoveryWorkspace } from "@/stores/discovery-workspace-store";
 
@@ -24,8 +25,10 @@ const WORKSPACES = [
 ];
 
 export default function HomePage() {
+  const router = useRouter();
   const workspace = useDiscoveryWorkspace();
   const [auth, setAuth] = useState<AuthStatus | null>(null);
+  const [quickQuery, setQuickQuery] = useState("");
 
   useEffect(() => {
     void fetch("/api/discovery/auth-status").then((r) => r.json()).then(setAuth).catch(() => setAuth(null));
@@ -65,13 +68,51 @@ export default function HomePage() {
               </>
             )}
           </div>
-          <div className="action-row mt-6">
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              const q = quickQuery.trim();
+              router.push(q ? `/search?v=v1&q=${encodeURIComponent(q)}` : "/search");
+            }}
+            className="mt-5 flex flex-col gap-2 sm:flex-row"
+          >
+            <label htmlFor="home-quick-search" className="sr-only">Quick Dailymotion search</label>
+            <input
+              id="home-quick-search"
+              type="search"
+              value={quickQuery}
+              onChange={(e) => setQuickQuery(e.target.value)}
+              placeholder="Quick search Dailymotion videos..."
+              className="min-h-11 flex-1 rounded-md border border-[var(--border)] bg-[var(--surface-container-low)] px-3.5 text-sm font-semibold outline-none focus:border-[var(--primary)] focus:ring-4 focus:ring-[var(--ring)]"
+            />
+            <button
+              type="submit"
+              className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md bg-[var(--primary)] px-4 text-sm font-black text-white transition hover:bg-[var(--accent-strong)]"
+            >
+              <Search className="h-4 w-4" aria-hidden="true" />
+              Search V1
+            </button>
+          </form>
+          <div className="action-row mt-4">
             <Link
               href="/general-v1"
               className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md bg-[var(--primary)] px-5 text-sm font-black text-white transition hover:bg-[var(--accent-strong)] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[var(--ring)]"
             >
               Start with General v1
               <ArrowRight className="h-4 w-4" aria-hidden="true" />
+            </Link>
+            <Link
+              href="/ai-search"
+              className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md border border-[var(--border)] bg-[var(--surface-container-low)] px-4 text-sm font-bold transition hover:border-[var(--border-strong)] hover:bg-[var(--surface-container-high)]"
+            >
+              <Sparkles className="h-4 w-4 text-[var(--primary)]" aria-hidden="true" />
+              AI Search
+            </Link>
+            <Link
+              href="/saved"
+              className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md border border-[var(--border)] bg-[var(--surface-container-low)] px-4 text-sm font-bold transition hover:border-[var(--border-strong)] hover:bg-[var(--surface-container-high)]"
+            >
+              Saved Library
             </Link>
             <Link
               href="/capabilities"

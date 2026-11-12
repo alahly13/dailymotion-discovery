@@ -1,37 +1,25 @@
-# Recovery guide
+# Migration Recovery & Troubleshooting (Prisma ORM 7.10.1)
 
-## Interrupted batch save
+Use only safe diagnostics (`db:validate`, `db:diagnose`, `db:status`, `/admin/migrations`). Never run destructive resets (`migrate reset`, `db push --force-reset`).
 
-- Same `idempotencyKey` retry replays the recorded result — never duplicates.
-- DB failed after Storage upload: the staged snapshot is unreferenced but
-  intact; retry with the SAME key. It is adopted or superseded, never
-  double-counted.
-- Client timeout after successful commit: next retry returns the recorded
-  result (`replayed: true`).
-- `batch_commits` row with `status=failed` + `errorJson` explains what broke.
+## Common Connection & Pooler Issues
 
-## Interrupted data migration
+### 1. `P1000`: Authentication Failed / `tenant/user ... not found`
+- Confirm `DATABASE_URL` in `.env` matches an active Supabase project's **Session Pooler** URI (`postgres.<project-ref>` on `aws-0-<region>.pooler.supabase.com:5432`).
+- Check Supabase Dashboard -> Project Settings to verify the project is not paused or deleted and confirm the pooler region host.
+- Percent-encode special characters (`#`, `@`, `?`, `/`, `$`) in the database password.
 
-- Rerun resumes from `lastCheckpoint`; completed prefixes are skipped.
-- Verify counts before marking complete; failed runs keep sanitized errors.
+### 2. `P1001`: Host / Port Unreachable
+- Prefer the IPv4-capable Session Pooler (`:5432`) over direct `db.<project-ref>.supabase.co` hosts in IPv4-only environments (Windows terminals, GitHub Actions, serverless runtimes).
+- `db:status` and `db:apply` inject `connect_timeout=30` (or `PRISMA_CONNECT_TIMEOUT_SECONDS`) in-process automatically.
 
-## Staged Storage orphans
+### 3. Failed Partial Migration (`P3009` / `P3018`)
+- Inspect `_prisma_migrations` and Supabase SQL logs to see which statement failed.
+- Fix the underlying cause and mark state explicitly with `prisma migrate resolve --rolled-back <migration_name>` or `--applied <migration_name>` after verification, then re-run `CONFIRM_DB_APPLY=true npm run db:apply`.
 
-- Objects under `users/admin/**` not referenced by `storage_documents` or
-  history rows are safe to leave; remove only via explicit, approved cleanup
-  after verifying no DB pointer exists.
-
-## Schema migration problems
-
-- Never edit applied migrations or `_prisma_migrations` by hand.
-- Pending migration with bad SQL: fix with a NEW migration (or, if never
-  applied anywhere, regenerate it — document why).
-- Failed apply: `npm run db:status` shows failed state; repair via Prisma's
-  documented resolve flow (`prisma migrate resolve`), not manual table edits.
-
-## Secret rotation
-
-- `TOKEN_CACHE_ENCRYPTION_KEY` change → old token rows fail decrypt → cache
-  misses → tokens reacquired automatically. No data migration needed.
-- Supabase secret rotation: update `SUPABASE_SECRET_KEY` locally + Vercel,
-  redeploy; no code change.
+### 4. Client / Schema Mismatch After Checkout
+```bash
+npx prisma validate
+npm run db:generate
+npm run typecheck
+```

@@ -1,0 +1,3 @@
+# Copy to .dev.vars for local `wrangler dev` testing (never commit secrets).
+WORKER_AUTH_SECRET="replace-with-matching-64-char-hex-secret-from-CLOUDFLARE_R2_WORKER_HMAC_SECRET"
+ALLOWED_ORIGINS="http://localhost:3000,http://127.0.0.1:3000"

@@ -110,6 +110,101 @@ function VersionDefaultsEditor({ version, defaults }: { version: ApiVersion; def
   );
 }
 
+function ChangePasswordForm() {
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setLoading(true);
+    setError(null);
+    setMessage(null);
+
+    try {
+      const res = await fetch("/api/admin/change-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ currentPassword, newPassword, confirmPassword }),
+      });
+      const data = (await res.json()) as { ok: boolean; message?: string; error?: string };
+      if (!data.ok) {
+        setError(data.error || "Failed to change password.");
+      } else {
+        setMessage(data.message || "Password updated successfully in Supabase Auth.");
+        setCurrentPassword("");
+        setNewPassword("");
+        setConfirmPassword("");
+      }
+    } catch {
+      setError("Network error while submitting password change request.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <form onSubmit={(e) => void handleSubmit(e)} className="mt-4 max-w-md space-y-3 rounded-md border border-[var(--border)] bg-[var(--surface-container-low)] p-4">
+      <h3 className="text-xs font-black uppercase tracking-[0.12em] text-[var(--foreground)]">Change Administrator Password (Supabase Auth)</h3>
+      <p className="text-[11px] text-[var(--muted-foreground)]">
+        Updates your password directly in Supabase Auth. Passwords are never stored in PostgreSQL.
+      </p>
+
+      <div>
+        <label className={labelClass} htmlFor="cp-current">Current Password</label>
+        <input
+          id="cp-current"
+          type="password"
+          className={inputClass}
+          value={currentPassword}
+          onChange={(e) => setCurrentPassword(e.target.value)}
+          required
+        />
+      </div>
+
+      <div>
+        <label className={labelClass} htmlFor="cp-new">New Password (min 8 chars)</label>
+        <input
+          id="cp-new"
+          type="password"
+          className={inputClass}
+          value={newPassword}
+          onChange={(e) => setNewPassword(e.target.value)}
+          minLength={8}
+          required
+        />
+      </div>
+
+      <div>
+        <label className={labelClass} htmlFor="cp-confirm">Confirm New Password</label>
+        <input
+          id="cp-confirm"
+          type="password"
+          className={inputClass}
+          value={confirmPassword}
+          onChange={(e) => setConfirmPassword(e.target.value)}
+          minLength={8}
+          required
+        />
+      </div>
+
+      {error && <p className="text-xs font-bold text-red-500" role="alert">{error}</p>}
+      {message && <p className="text-xs font-bold text-emerald-600 dark:text-emerald-400" role="status">{message}</p>}
+
+      <button
+        type="submit"
+        disabled={loading}
+        className="min-h-10 rounded-md bg-[var(--primary)] px-4 text-xs font-black uppercase text-white hover:opacity-90 disabled:opacity-50"
+      >
+        {loading ? "Updating..." : "Update Password"}
+      </button>
+    </form>
+  );
+}
+
 export default function SettingsPage() {
   const [auth, setAuth] = useState<AuthStatus | null>(null);
   const [admin, setAdmin] = useState<AdminStatus | null>(null);
@@ -174,6 +269,7 @@ export default function SettingsPage() {
             <button type="button" onClick={() => void logout()} className="mt-3 min-h-10 rounded-md border border-[var(--border)] px-4 text-xs font-black uppercase">
               Log out
             </button>
+            <ChangePasswordForm />
           </div>
         ) : (
           <p className="mt-2 text-sm leading-6 text-[var(--muted-foreground)]">
@@ -191,7 +287,7 @@ export default function SettingsPage() {
         <ul className="mt-2 list-disc space-y-1 pl-5 text-xs leading-5 text-[var(--muted-foreground)]">
           <li>Project URL + publishable key are browser-safe (<code>NEXT_PUBLIC_SUPABASE_URL</code>, <code>NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY</code>).</li>
           <li>Secret key <code>SUPABASE_SECRET_KEY</code> is server-only (Storage). The legacy service-role variable is retired — in Vercel, replace it with the new secret; do not deactivate keys until the deploy reads the new name.</li>
-          <li>Runtime connection <code>DATABASE_URL_CONNECTION_STRING</code> (Session Pooler :5432). Optional <code>DATABASE_URL_DIRECT</code> for migration/introspection only.</li>
+          <li>Primary database connection <code>DATABASE_URL</code> (Session Pooler :5432). Optional backup <code>SUPABASE_DATABASE_URL_CONNECTION_STRING</code> (direct) applies only when the primary is missing.</li>
           <li>Local values live in root <code>.env.local</code> (never committed). Vercel values live in Project Settings → Environment Variables. <strong>Redeploy after any change.</strong></li>
           <li>Private bucket <code>application-data</code>; verify with <code>npm run supabase:storage:check</code>.</li>
         </ul>

@@ -38,6 +38,8 @@ function SelectField({
 }
 
 export function AdvancedFilterPanel({ filters, onChange, onReset }: { filters: AdvancedVideoFilters; onChange: (filters: AdvancedVideoFilters) => void; onReset: () => void }) {
+  const applyPreset = (patch: Partial<AdvancedVideoFilters>) => onChange({ ...filters, ...patch });
+
   return (
     <Card className="space-y-5">
       <div className="flex flex-wrap items-start justify-between gap-4">
@@ -59,8 +61,31 @@ export function AdvancedFilterPanel({ filters, onChange, onReset }: { filters: A
         </Button>
       </div>
 
+      {/* Quick metadata presets for 1-click refinement without modifying upstream fetch settings. */}
+      <div className="flex flex-wrap gap-2" aria-label="Quick result presets">
+        {[
+          { label: "Short (< 5m)", patch: { durationMin: null, durationMax: 300 } },
+          { label: "Medium (5-20m)", patch: { durationMin: 300, durationMax: 1200 } },
+          { label: "Long (20m+)", patch: { durationMin: 1200, durationMax: null } },
+          { label: "10K+ views", patch: { minViews: 10_000 } },
+          { label: "100K+ views", patch: { minViews: 100_000 } },
+          { label: "Rich metadata", patch: { hasThumbnail: true, hasDescription: true } },
+        ].map((preset) => (
+          <button
+            key={preset.label}
+            type="button"
+            onClick={() => applyPreset(preset.patch)}
+            className="rounded-md border border-[var(--border)] bg-[var(--surface-container-low)] px-2.5 py-1 text-xs font-bold text-[var(--muted-foreground)] transition hover:border-[var(--primary)] hover:text-[var(--foreground)]"
+          >
+            {preset.label}
+          </button>
+        ))}
+      </div>
+
       <div className="control-grid">
         <Input placeholder="Keyword" value={filters.keyword ?? ""} onChange={(e) => onChange({ ...filters, keyword: e.target.value })} />
+        <Input placeholder="Exclude words (comma)" value={filters.excludeKeyword ?? ""} onChange={(e) => onChange({ ...filters, excludeKeyword: e.target.value })} />
+        <Input placeholder="Required tags (comma)" value={filters.tags ?? ""} onChange={(e) => onChange({ ...filters, tags: e.target.value })} />
         <Input type="number" placeholder="Min views" value={filters.minViews ?? ""} onChange={(e) => onChange({ ...filters, minViews: numberValue(e.target.value) })} />
         <Input type="number" placeholder="Max views" value={filters.maxViews ?? ""} onChange={(e) => onChange({ ...filters, maxViews: numberValue(e.target.value) })} />
         <Input type="number" placeholder="Target views" value={filters.targetViews ?? ""} onChange={(e) => onChange({ ...filters, targetViews: numberValue(e.target.value) })} />

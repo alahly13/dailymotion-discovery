@@ -171,3 +171,45 @@ export async function countSavedTitles(db: PrismaClient): Promise<number> {
     throw toPersistenceError(error);
   }
 }
+
+/** List all saved-video collections with live item counts for workspace/library views. */
+export async function listCollections(db: PrismaClient) {
+  try {
+    return db.collection.findMany({
+      include: { _count: { select: { savedVideos: true } } },
+      orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
+      take: 200,
+    });
+  } catch (error) {
+    throw toPersistenceError(error);
+  }
+}
+
+/** Update favorite flag or collection assignment for an existing SavedVideo row. */
+export async function updateSavedVideo(
+  db: PrismaClient,
+  savedVideoId: string,
+  patch: { favorite?: boolean; collectionId?: string | null },
+) {
+  try {
+    return db.savedVideo.update({
+      where: { id: savedVideoId },
+      data: {
+        ...(patch.favorite !== undefined ? { favorite: patch.favorite } : {}),
+        ...(patch.collectionId !== undefined ? { collectionId: patch.collectionId } : {}),
+      },
+      include: { video: true },
+    });
+  } catch (error) {
+    throw toPersistenceError(error);
+  }
+}
+
+/** Remove a single SavedVideo row by primary key without deleting the canonical Video row. */
+export async function deleteSavedVideoById(db: PrismaClient, savedVideoId: string) {
+  try {
+    return db.savedVideo.delete({ where: { id: savedVideoId } });
+  } catch (error) {
+    throw toPersistenceError(error);
+  }
+}

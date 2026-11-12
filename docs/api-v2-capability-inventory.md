@@ -162,7 +162,7 @@ Guide: `https://developers.dailymotion.com/docs/authenticate.md`
 | Operation | Status |
 |---|---|
 | OAuth2 client_credentials token flow (30-min cache, least-privilege scopes) | implemented, endpoint live-verified; token issuance **needs-credentials** |
-| `GET /profiles/{id}/videos` + filters/sort/`fields`/pagination | implemented, **mock-tested only** (all probes 401 without creds) |
+| `GET /profiles/{id}/videos` + filters (`isExplicit`, `isForKids`, `tags`, `visibility`, ISO dates)/sort/`fields`/pagination | implemented (`v2/[resource]/route.ts` -> `v2-search-service.ts`), **mock-tested** (live probes 401 without creds) |
 | `GET /videos/{id}`, `/profiles/{id}`, `/users/{id}`, `/me` | implemented, mock-tested only |
 | Playlist + livestream profile listings & direct lookups | implemented, mock-tested only |
 | Global search in v2 | **unavailable in this version** — no such endpoint; profile-scoped alternative implemented |

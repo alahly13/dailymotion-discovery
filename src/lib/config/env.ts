@@ -13,17 +13,13 @@ const postgresUrlSchema = z.string().url().refine((value) => {
 }, "Must be a postgres:// or postgresql:// URL.");
 
 const databaseSchema = z.object({
-  DATABASE_URL_CONNECTION_STRING: postgresUrlSchema.optional(),
   DATABASE_URL: postgresUrlSchema.optional(),
+  SUPABASE_DATABASE_URL_CONNECTION_STRING: postgresUrlSchema.optional(),
 });
 
 const isBuildTime = process.env.NEXT_PHASE === "phase-production-build";
 
 const optionalServerSchema = z.object({
-  // Deprecated: retained for active Supabase clients only. The canonical
-  // secret is SUPABASE_SECRET_KEY (server-only Supabase SDK). This variable
-  // is never read as a credential path — do not reintroduce it.
-  SUPABASE_SERVICE_ROLE_KEY: z.string().optional(),
   // Canonical server-only Supabase secret (sb_secret_…). Used only by the
   // server-side Storage client. Never prefix with NEXT_PUBLIC_.
   SUPABASE_SECRET_KEY: z.string().optional(),
@@ -57,13 +53,16 @@ const optionalServerSchema = z.object({
   TOKEN_CACHE_ENCRYPTION_KEY: z.string().optional(),
   TOKEN_CACHE_SAFETY_MARGIN_SECONDS: z.coerce.number().int().nonnegative().max(3600).default(60),
   ADMIN_DEFAULT_USERNAME: z.string().trim().min(1).default("admin"),
+  ADMIN_EMAIL: z.string().trim().email().optional(),
   ADMIN_INITIAL_PASSWORD: z.string().optional(),
   ADMIN_SESSION_SECRET: z.string().optional(),
   ADMIN_SESSION_TTL_SECONDS: z.coerce.number().int().positive().default(604800),
-  CRON_SECRET: z.string().optional(),
-  WEBHOOK_SECRET: z.string().optional(),
-  AI_EMBEDDING_MODEL: z.string().optional(),
-  ENABLE_PGVECTOR: z.enum(["true", "false"]).default("false"),
+  CLOUDFLARE_R2_WORKER_URL: z.string().url().optional(),
+  CLOUDFLARE_R2_WORKER_HMAC_SECRET: z.string().optional(),
+  CLOUDFLARE_R2_BUCKET_NAME: z.string().default("dailymotion-discovery-private"),
+  STORAGE_OWNER_UUID: z.string().default("admin"),
+  AI_MANIFEST_MAX_ITEMS: z.coerce.number().int().positive().default(25),
+  AI_MANIFEST_MAX_CHARS: z.coerce.number().int().positive().default(9000),
   ENABLE_MANIFEST_PERSISTENCE: z.enum(["true", "false"]).default("true"),
   MAX_CHANNEL_FETCH_PAGES: z.coerce.number().int().positive().default(200),
   MAX_CHANNEL_FETCH_ITEMS: z.coerce.number().int().positive().default(100000),
@@ -96,12 +95,12 @@ let cachedDatabaseEnv: z.infer<typeof databaseSchema> | null = null;
 export function getDatabaseEnv() {
   if (cachedDatabaseEnv) return cachedDatabaseEnv;
 
-  // Canonical contract first; legacy fallback handled by the resolver.
-  // Validation here checks shapes only — resolution/warnings live in
-  // src/lib/db/database-url.ts. Values are never printed.
+  // DATABASE_URL is primary; the backup is validated as optional and never
+  // required. Shapes only — resolution lives in src/lib/db/database-url.ts.
+  // Values are never printed. No .env.local dependency of any kind.
   const values = {
-    DATABASE_URL_CONNECTION_STRING: process.env.DATABASE_URL_CONNECTION_STRING?.trim() || undefined,
     DATABASE_URL: process.env.DATABASE_URL?.trim() || undefined,
+    SUPABASE_DATABASE_URL_CONNECTION_STRING: process.env.SUPABASE_DATABASE_URL_CONNECTION_STRING?.trim() || undefined,
   };
 
   const parsed = databaseSchema.safeParse(values);
@@ -109,7 +108,7 @@ export function getDatabaseEnv() {
     if (isBuildTime) {
       console.warn("[WARN] Skipping strict database env validation during Next.js production build.");
       cachedDatabaseEnv = {
-        DATABASE_URL_CONNECTION_STRING: "postgresql://build:build@localhost:5432/build",
+        DATABASE_URL: "postgresql://build:build@localhost:5432/build",
       };
       return cachedDatabaseEnv;
     }
@@ -117,25 +116,25 @@ export function getDatabaseEnv() {
     throw parsed.error;
   }
 
-  if (!parsed.data.DATABASE_URL_CONNECTION_STRING && !parsed.data.DATABASE_URL) {
+  if (!parsed.data.DATABASE_URL && !parsed.data.SUPABASE_DATABASE_URL_CONNECTION_STRING) {
     if (isBuildTime) {
       console.warn("[WARN] Skipping strict database env validation during Next.js production build.");
-      cachedDatabaseEnv = { DATABASE_URL_CONNECTION_STRING: "postgresql://build:build@localhost:5432/build" };
+      cachedDatabaseEnv = { DATABASE_URL: "postgresql://build:build@localhost:5432/build" };
       return cachedDatabaseEnv;
     }
-    throw new Error("Missing database connection string. Set DATABASE_URL_CONNECTION_STRING.");
+    throw new Error("Missing database connection string. Set DATABASE_URL (primary).");
   }
 
   cachedDatabaseEnv = {
-    DATABASE_URL_CONNECTION_STRING: parsed.data.DATABASE_URL_CONNECTION_STRING,
     DATABASE_URL: parsed.data.DATABASE_URL,
+    SUPABASE_DATABASE_URL_CONNECTION_STRING: parsed.data.SUPABASE_DATABASE_URL_CONNECTION_STRING,
   };
 
-  const effective = parsed.data.DATABASE_URL_CONNECTION_STRING ?? parsed.data.DATABASE_URL ?? "";
+  const effective = parsed.data.DATABASE_URL ?? parsed.data.SUPABASE_DATABASE_URL_CONNECTION_STRING ?? "";
   if (!hasWarnedSupabaseDirect && isSupabaseDirectHost(effective)) {
     console.warn(
-      "[WARN] Database URL uses Supabase direct host (db.<project-ref>.supabase.co). " +
-        "Use the Supabase Session Pooler URL for this project to avoid IPv4-limited connection failures."
+      "[WARN] Database URL uses a Supabase direct host (db.<project-ref>.supabase.co). " +
+        "Direct connections need working IPv6 egress; otherwise use the Session Pooler URL. See .env.example."
     );
     hasWarnedSupabaseDirect = true;
   }
@@ -150,10 +149,11 @@ export const env = {
     return requireServerEnv("GEMINI_API_KEY");
   },
   get geminiModel() {
-    return optionalServerEnv.GEMINI_MODEL?.trim() || "gemini-1.5-flash";
+    // 2026 canonical Gemini default for @google/genai. Server-only.
+    return optionalServerEnv.GEMINI_MODEL?.trim() || "gemini-2.5-flash";
   },
   get databaseUrl() {
-    return getDatabaseEnv().DATABASE_URL_CONNECTION_STRING ?? getDatabaseEnv().DATABASE_URL ?? "";
+    return getDatabaseEnv().DATABASE_URL ?? getDatabaseEnv().SUPABASE_DATABASE_URL_CONNECTION_STRING ?? "";
   },
   get dailymotionApiBaseUrl() {
     return optionalServerEnv.DAILYMOTION_API_BASE_URL;

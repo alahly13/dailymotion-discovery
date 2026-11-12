@@ -45,7 +45,19 @@ export default function AdminMigrationsPage() {
   }
 
   useEffect(() => {
-    if (admin) void refresh();
+    if (!admin) return;
+    let active = true;
+    void (async () => {
+      try {
+        const data = (await (await fetch("/api/admin/migrations/status")).json()) as StatusResponse;
+        if (active) setStatus(data.ok ? data : null);
+      } catch {
+        if (active) setStatus(null);
+      }
+    })();
+    return () => {
+      active = false;
+    };
   }, [admin]);
 
   if (admin === false) {

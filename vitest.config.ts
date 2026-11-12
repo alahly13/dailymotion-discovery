@@ -9,8 +9,9 @@ export default defineConfig({
   },
   test: {
     environment: "node",
-    include: ["src/**/*.test.ts"],
+    include: ["src/**/*.test.ts", "cloudflare/**/*.test.ts"],
     setupFiles: ["./src/test-setup.ts"],
+    maxWorkers: 4,
     testTimeout: 20000,
   },
 });

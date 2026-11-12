@@ -87,23 +87,25 @@ export async function GET(request: Request, context: { params: Promise<{ resourc
       case "general":
         return NextResponse.json(await v1SearchVideos({ ...baseVideoFilters(url), query: rawQuery }, "general"));
       case "videos": {
-        if (mode === "lookup") return NextResponse.json(await v1GetVideo(url.searchParams.get("id") ?? ""));
-        if (mode === "related") return NextResponse.json(await v1RelatedVideos(url.searchParams.get("id") ?? "", num(url.searchParams.get("pageSize")) ?? 10));
+        const fields = str(url.searchParams.get("fields"));
+        if (mode === "lookup") return NextResponse.json(await v1GetVideo(url.searchParams.get("id") ?? "", fields));
+        if (mode === "related") return NextResponse.json(await v1RelatedVideos(url.searchParams.get("id") ?? "", num(url.searchParams.get("pageSize")) ?? 10, fields));
         return NextResponse.json(await v1SearchVideos({ ...baseVideoFilters(url), query: rawQuery }, "videos"));
       }
       case "channels": {
-        if (mode === "lookup") return NextResponse.json(await v1GetProfile(url.searchParams.get("id") ?? "", "channels"));
+        if (mode === "lookup") return NextResponse.json(await v1GetProfile(url.searchParams.get("id") ?? "", "channels", str(url.searchParams.get("fields"))));
         if (mode === "videos") return NextResponse.json(await v1ProfileVideos(url.searchParams.get("owner") ?? "", { ...baseVideoFilters(url), query: rawQuery }));
-        return NextResponse.json(await v1SearchChannels({ search: rawQuery, query: rawQuery, country: str(url.searchParams.get("country")), language: str(url.searchParams.get("language")), sort: str(url.searchParams.get("sort")), limit: num(url.searchParams.get("pageSize")), page: num(url.searchParams.get("page")) }, "channels"));
+        return NextResponse.json(await v1SearchChannels({ search: rawQuery, query: rawQuery, country: str(url.searchParams.get("country")), language: str(url.searchParams.get("language")), sort: str(url.searchParams.get("sort")), limit: num(url.searchParams.get("pageSize")), page: num(url.searchParams.get("page")), fields: str(url.searchParams.get("fields")) }, "channels"));
       }
       case "playlists": {
-        if (mode === "lookup") return NextResponse.json(await v1GetPlaylist(url.searchParams.get("id") ?? ""));
-        if (mode === "videos") return NextResponse.json(await v1PlaylistVideos(url.searchParams.get("id") ?? "", num(url.searchParams.get("page")) ?? 1, num(url.searchParams.get("pageSize")) ?? 50));
-        return NextResponse.json(await v1OwnerPlaylists({ owner: str(url.searchParams.get("owner")), sort: str(url.searchParams.get("sort")), limit: num(url.searchParams.get("pageSize")), page: num(url.searchParams.get("page")) }));
+        const fields = str(url.searchParams.get("fields"));
+        if (mode === "lookup") return NextResponse.json(await v1GetPlaylist(url.searchParams.get("id") ?? "", fields));
+        if (mode === "videos") return NextResponse.json(await v1PlaylistVideos(url.searchParams.get("id") ?? "", num(url.searchParams.get("page")) ?? 1, num(url.searchParams.get("pageSize")) ?? 50, fields));
+        return NextResponse.json(await v1OwnerPlaylists({ owner: str(url.searchParams.get("owner")), sort: str(url.searchParams.get("sort")), limit: num(url.searchParams.get("pageSize")), page: num(url.searchParams.get("page")), fields }));
       }
       case "users": {
-        if (mode === "lookup") return NextResponse.json(await v1GetProfile(url.searchParams.get("id") ?? "", "users"));
-        return NextResponse.json(await v1SearchChannels({ search: rawQuery, query: rawQuery, country: str(url.searchParams.get("country")), language: str(url.searchParams.get("language")), sort: str(url.searchParams.get("sort")), limit: num(url.searchParams.get("pageSize")), page: num(url.searchParams.get("page")) }, "users"));
+        if (mode === "lookup") return NextResponse.json(await v1GetProfile(url.searchParams.get("id") ?? "", "users", str(url.searchParams.get("fields"))));
+        return NextResponse.json(await v1SearchChannels({ search: rawQuery, query: rawQuery, country: str(url.searchParams.get("country")), language: str(url.searchParams.get("language")), sort: str(url.searchParams.get("sort")), limit: num(url.searchParams.get("pageSize")), page: num(url.searchParams.get("page")), fields: str(url.searchParams.get("fields")) }, "users"));
       }
       case "live":
         return NextResponse.json(

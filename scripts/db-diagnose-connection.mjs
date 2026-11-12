@@ -34,9 +34,12 @@ function sanitizeHost(url) {
 }
 
 function resolveConnectionString() {
-  const canonical = process.env.DATABASE_URL_CONNECTION_STRING?.trim() || "";
-  const legacy = !canonical ? process.env.DATABASE_URL?.trim() || "" : "";
-  return { value: canonical || legacy, source: canonical ? "DATABASE_URL_CONNECTION_STRING" : "DATABASE_URL (deprecated fallback)" };
+  const primary = process.env.DATABASE_URL?.trim() || "";
+  const backup = !primary ? process.env.SUPABASE_DATABASE_URL_CONNECTION_STRING?.trim() || "" : "";
+  return {
+    value: primary || backup,
+    source: primary ? "DATABASE_URL" : "SUPABASE_DATABASE_URL_CONNECTION_STRING (backup, warned)",
+  };
 }
 
 async function layerDns(host) {
@@ -125,7 +128,7 @@ async function main() {
   const report = { layers: {}, pass: false };
   const { value: connectionString, source } = resolveConnectionString();
   if (!connectionString) {
-    console.log(JSON.stringify({ ok: false, error: "Missing DATABASE_URL_CONNECTION_STRING (and no legacy fallback)." }));
+    console.log(JSON.stringify({ ok: false, error: "Missing DATABASE_URL (and no SUPABASE_DATABASE_URL_CONNECTION_STRING backup)." }));
     process.exit(1);
   }
   const meta = sanitizeHost(connectionString);

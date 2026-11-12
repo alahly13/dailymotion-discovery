@@ -115,6 +115,7 @@ interface DiscoveryWorkspaceState {
   ensureBatchKey: () => string;
   markSynced: () => void;
   acknowledgePending: () => void;
+  hydrateFromCloud: (payload: { items?: DiscoveryItem[]; history?: HistoryEntry[] }) => { addedItems: number; addedHistory: number };
 }
 
 function uid(): string {
@@ -174,6 +175,38 @@ export const useDiscoveryWorkspace = create<DiscoveryWorkspaceState>()(
       },
       markSynced: () => set({ dirtyOps: 0, lastSyncedAt: Date.now(), pendingBatchKey: null }),
       acknowledgePending: () => set({ dirtyOps: 0, pendingBatchKey: null }),
+      hydrateFromCloud: (payload) => {
+        let addedItems = 0;
+        let addedHistory = 0;
+        set((state) => {
+          const nextItems = [...state.savedItems];
+          for (const remoteItem of payload.items ?? []) {
+            const exists = nextItems.some(
+              (s) => s.item.apiVersion === remoteItem.apiVersion && s.item.kind === remoteItem.kind && s.item.id === remoteItem.id,
+            );
+            if (!exists) {
+              nextItems.push({ item: remoteItem, savedAt: Date.now() });
+              addedItems += 1;
+            }
+          }
+          const nextHistory = [...state.history];
+          const existingIds = new Set(nextHistory.map((h) => h.id));
+          for (const entry of payload.history ?? []) {
+            if (!existingIds.has(entry.id)) {
+              existingIds.add(entry.id);
+              nextHistory.push(entry);
+              addedHistory += 1;
+            }
+          }
+          nextHistory.sort((a, b) => b.createdAt - a.createdAt);
+          return {
+            savedItems: nextItems.slice(0, 500),
+            history: nextHistory.slice(0, 200),
+            lastSyncedAt: Date.now(),
+          };
+        });
+        return { addedItems, addedHistory };
+      },
       recordSearchSubmitted: (version) =>
         set((state) => {
           const today = utcDayKey();

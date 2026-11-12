@@ -23,8 +23,8 @@ describe("batch payload validation", () => {
   });
 
   it("fails closed with a remedy when the database is unconfigured", async () => {
-    vi.stubEnv("DATABASE_URL_CONNECTION_STRING", "");
     vi.stubEnv("DATABASE_URL", "");
+    vi.stubEnv("SUPABASE_DATABASE_URL_CONNECTION_STRING", "");
     const result = await commitBatch({ idempotencyKey: "test-key-123", savedTitles: [], history: [], includeSnapshot: false });
     expect(result.ok).toBe(false);
     expect(result.remedy).toMatch(/drafts stay local/i);

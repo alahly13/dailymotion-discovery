@@ -80,22 +80,25 @@ export async function v1SearchVideos(input: V1SearchInput, resource: DiscoveryRe
 }
 
 /** Direct video lookup: GET /video/{id}. */
-export async function v1GetVideo(id: string): Promise<DiscoveryOutcome> {
+export async function v1GetVideo(id: string, fields?: string): Promise<DiscoveryOutcome> {
   const trimmed = id.trim();
   if (!trimmed) return failure("videos", "GET /video/{id}", "Enter a video ID.", "user_input_error", 400, false);
-  const outcome = await v1Get<V1RawVideo>(`/video/${encodeURIComponent(trimmed)}`);
+  const outcome = await v1Get<V1RawVideo>(
+    `/video/${encodeURIComponent(trimmed)}`,
+    fields?.trim() ? { fields: fields.trim() } : undefined,
+  );
   if (!outcome.ok) return failure("videos", "GET /video/{id}", outcome.failure.error, outcome.failure.reason, outcome.failure.status, outcome.failure.retryable);
   const item = normalizeV1Video(outcome.data);
   return pageResult("videos", "GET /video/{id}", item ? [item] : [], 1, 1, item ? 1 : 0, false);
 }
 
 /** Related videos: GET /video/{id}/related (documented connection). */
-export async function v1RelatedVideos(id: string, limit = 10): Promise<DiscoveryOutcome> {
+export async function v1RelatedVideos(id: string, limit = 10, fields?: string): Promise<DiscoveryOutcome> {
   const trimmed = id.trim();
   if (!trimmed) return failure("videos", "GET /video/{id}/related", "Enter a video ID.", "user_input_error", 400, false);
   const outcome = await v1List<V1RawVideo>(`/video/${encodeURIComponent(trimmed)}/related`, {
     limit: String(clampLimit(limit, 100)), page: "1",
-    fields: "id,title,description,thumbnail_480_url,duration,views_total,created_time,channel,owner,owner.screenname,url",
+    fields: fields?.trim() || "id,title,description,thumbnail_480_url,duration,views_total,created_time,channel,owner,owner.screenname,url",
   });
   if (!outcome.ok) return failure("videos", "GET /video/{id}/related", outcome.failure.error, outcome.failure.reason, outcome.failure.status, outcome.failure.retryable);
   const { data } = outcome;
@@ -118,11 +121,11 @@ export async function v1SearchChannels(input: V1ChannelInput, resource: Discover
 }
 
 /** Direct profile lookup: GET /user/{id}. */
-export async function v1GetProfile(id: string, resource: DiscoveryResource = "channels"): Promise<DiscoveryOutcome> {
+export async function v1GetProfile(id: string, resource: DiscoveryResource = "channels", fields?: string): Promise<DiscoveryOutcome> {
   const trimmed = id.trim();
   if (!trimmed) return failure(resource, "GET /user/{id}", "Enter a profile ID or username.", "user_input_error", 400, false);
   const outcome = await v1Get<V1RawUser>(`/user/${encodeURIComponent(trimmed)}`, {
-    fields: "id,username,screenname,url,description,country,language,videos_total",
+    fields: fields?.trim() || "id,username,screenname,url,description,country,language,videos_total",
   });
   if (!outcome.ok) return failure(resource, "GET /user/{id}", outcome.failure.error, outcome.failure.reason, outcome.failure.status, outcome.failure.retryable);
   const item = resource === "channels" ? normalizeV1Channel(outcome.data) : normalizeV1User(outcome.data);
@@ -159,11 +162,11 @@ export async function v1OwnerPlaylists(input: V1PlaylistInput): Promise<Discover
 }
 
 /** Direct playlist lookup: GET /playlist/{id}. */
-export async function v1GetPlaylist(id: string): Promise<DiscoveryOutcome> {
+export async function v1GetPlaylist(id: string, fields?: string): Promise<DiscoveryOutcome> {
   const trimmed = id.trim();
   if (!trimmed) return failure("playlists", "GET /playlist/{id}", "Enter a playlist ID.", "user_input_error", 400, false);
   const outcome = await v1Get<V1RawPlaylist>(`/playlist/${encodeURIComponent(trimmed)}`, {
-    fields: "id,name,description,videos_total,owner,owner.screenname,created_time,url",
+    fields: fields?.trim() || "id,name,description,videos_total,owner,owner.screenname,created_time,url",
   });
   if (!outcome.ok) return failure("playlists", "GET /playlist/{id}", outcome.failure.error, outcome.failure.reason, outcome.failure.status, outcome.failure.retryable);
   const item = normalizeV1Playlist(outcome.data);
@@ -171,13 +174,13 @@ export async function v1GetPlaylist(id: string): Promise<DiscoveryOutcome> {
 }
 
 /** Playlist contents: GET /playlist/{id}/videos. */
-export async function v1PlaylistVideos(id: string, page = 1, limit = 50): Promise<DiscoveryOutcome> {
+export async function v1PlaylistVideos(id: string, page = 1, limit = 50, fields?: string): Promise<DiscoveryOutcome> {
   const trimmed = id.trim();
   if (!trimmed) return failure("playlists", "GET /playlist/{id}/videos", "Enter a playlist ID.", "user_input_error", 400, false);
   const endpoint = "GET /playlist/{id}/videos";
   const outcome = await v1List<V1RawVideo>(`/playlist/${encodeURIComponent(trimmed)}/videos`, {
     page: String(clampPage(page)), limit: String(clampLimit(limit)),
-    fields: "id,title,description,thumbnail_480_url,duration,views_total,created_time,channel,owner,owner.screenname,url",
+    fields: fields?.trim() || "id,title,description,thumbnail_480_url,duration,views_total,created_time,channel,owner,owner.screenname,url",
   });
   if (!outcome.ok) return failure("playlists", endpoint, outcome.failure.error, outcome.failure.reason, outcome.failure.status, outcome.failure.retryable);
   const { data } = outcome;

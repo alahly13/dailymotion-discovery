@@ -11,9 +11,9 @@ export class PersistenceUnavailableError extends Error {
 export function toPersistenceError(error: unknown): Error {
   if (error instanceof PersistenceUnavailableError) return error;
   const message = error instanceof Error ? error.message : String(error);
-  if (/P1000|P1001|P1011|connect|timeout|ECONNREFUSED|ENOTFOUND/i.test(message)) {
+  if (/P1000|P1001|P1002|P1011|P2024|connect|timeout|ECONNREFUSED|ENOTFOUND/i.test(message)) {
     return new PersistenceUnavailableError(
-      "Database unreachable (check DATABASE_URL_CONNECTION_STRING + network). No data was changed."
+      "Database unreachable (check DATABASE_URL + network). No data was changed."
     );
   }
   return error instanceof Error ? error : new Error("Persistence operation failed.");

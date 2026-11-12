@@ -1,0 +1,18 @@
+import { NextResponse } from "next/server";
+import { requireAdmin } from "@/lib/admin/require-admin";
+import { getStorageExplorerOverview } from "@/lib/storage/storage-explorer-service";
+
+export async function GET() {
+  const gate = await requireAdmin();
+  if (!gate.ok) return gate.response;
+
+  try {
+    const overview = await getStorageExplorerOverview();
+    return NextResponse.json(overview);
+  } catch (error) {
+    return NextResponse.json(
+      { ok: false, error: error instanceof Error ? error.message : "Failed to load storage overview." },
+      { status: 500 }
+    );
+  }
+}

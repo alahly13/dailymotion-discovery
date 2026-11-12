@@ -1,51 +1,40 @@
 // Canonical database connection resolution.
 //
-// What this controls: which connection string Prisma (runtime + CLI) uses.
-// Canonical: DATABASE_URL_CONNECTION_STRING (Session Pooler, port 5432).
-// Migration/introspection: DATABASE_URL_DIRECT (optional; may be the same
-// pooler URL — the name does not prove a literal direct host is required).
-// Backward compat: legacy DATABASE_URL is honored with a one-time sanitized
-// warning; canonical wins when both are set. Removal plan in .env.example.
-// Values are never printed. Scope: server + scripts.
+// Primary: DATABASE_URL (Supabase Session Pooler PostgreSQL connection).
+// Backup: SUPABASE_DATABASE_URL_CONNECTION_STRING (direct connection,
+// reserved for explicit alternate use). The backup never silently replaces
+// the primary: it applies only when DATABASE_URL is missing, with a loud
+// warning naming both variables. Removal plan for the fallback lives in
+// .env.example. Values are never printed. Scope: server + scripts.
 
-let warnedLegacyDbUrl = false;
+let warnedBackup = false;
 
 function clean(value: string | undefined): string {
   return (value ?? "").trim();
 }
 
-function warnOnce(message: string): void {
-  if (!warnedLegacyDbUrl) {
-    warnedLegacyDbUrl = true;
-    console.warn(message);
-  }
-}
-
-/** Runtime connection string. Throws a sanitized actionable error if none. */
+/** Primary connection string. Throws a sanitized actionable error if none. */
 export function resolveDatabaseUrl(): string {
-  const canonical = clean(process.env.DATABASE_URL_CONNECTION_STRING);
-  if (canonical) return canonical;
-  const legacy = clean(process.env.DATABASE_URL);
-  if (legacy) {
-    warnOnce(
-      "[WARN] DATABASE_URL is deprecated; use DATABASE_URL_CONNECTION_STRING. " +
-        "Canonical wins when both are set. Removal planned — see .env.example."
-    );
-    return legacy;
+  const primary = clean(process.env.DATABASE_URL);
+  if (primary) return primary;
+  const backup = clean(process.env.SUPABASE_DATABASE_URL_CONNECTION_STRING);
+  if (backup) {
+    if (!warnedBackup) {
+      warnedBackup = true;
+      console.warn(
+        "[WARN] DATABASE_URL is missing; using backup SUPABASE_DATABASE_URL_CONNECTION_STRING. " +
+          "Set DATABASE_URL as the primary connection. See .env.example."
+      );
+    }
+    return backup;
   }
   throw new Error(
-    "Missing database connection string. Set DATABASE_URL_CONNECTION_STRING " +
-      "(Supabase Session Pooler, port 5432). See .env.example."
+    "Missing database connection string. Set DATABASE_URL " +
+      "(Supabase Session Pooler). See .env.example."
   );
-}
-
-/** Optional separate migration/introspection connection (may be unset). */
-export function resolveDirectDatabaseUrl(): string | null {
-  const direct = clean(process.env.DATABASE_URL_DIRECT);
-  return direct || null;
 }
 
 /** Test seam: reset one-time warnings. */
 export function resetDbEnvWarnings(): void {
-  warnedLegacyDbUrl = false;
+  warnedBackup = false;
 }

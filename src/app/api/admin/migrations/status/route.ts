@@ -60,7 +60,9 @@ export async function GET() {
   let connectionSource = "unknown";
   try {
     resolveDatabaseUrl();
-    connectionSource = (process.env.DATABASE_URL_CONNECTION_STRING ?? "").trim() ? "DATABASE_URL_CONNECTION_STRING" : "DATABASE_URL (deprecated fallback)";
+    connectionSource = (process.env.DATABASE_URL ?? "").trim()
+      ? "DATABASE_URL (primary)"
+      : "SUPABASE_DATABASE_URL_CONNECTION_STRING (backup)";
   } catch {
     connectionSource = "unconfigured";
   }

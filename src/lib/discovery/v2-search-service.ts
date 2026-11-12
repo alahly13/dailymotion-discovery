@@ -73,20 +73,20 @@ export async function v2ProfileVideos(profileId: string, input: Omit<V2ProfileVi
 }
 
 /** Direct video lookup: GET /videos/{id}. */
-export async function v2GetVideo(id: string): Promise<DiscoveryOutcome> {
+export async function v2GetVideo(id: string, fields?: string): Promise<DiscoveryOutcome> {
   const endpoint = "GET /videos/{id}";
   if (!id.trim()) return { ok: false, error: "Enter a video ID.", reason: "user_input_error", status: 400, apiVersion: "v2", resource: "videos", endpoint, remedy: null, retryable: false };
-  const outcome = await v2Get<V2RawVideo>(`/videos/${encodeURIComponent(id.trim())}`, { fields: V2_VIDEO_FIELDS });
+  const outcome = await v2Get<V2RawVideo>(`/videos/${encodeURIComponent(id.trim())}`, { fields: fields?.trim() || V2_VIDEO_FIELDS });
   if (!outcome.ok) return withRemedy(outcome.failure, "videos", endpoint);
   const item = normalizeV2Video(outcome.data);
   return { ok: true, result: { items: item ? [item] : [], page: 1, pageSize: 1, total: item ? 1 : 0, hasMore: false, nextCursor: null, capped: false, apiVersion: "v2", resource: "videos", endpoint } };
 }
 
 /** Direct profile lookup: GET /profiles/{id}. */
-export async function v2GetProfile(id: string, resource: DiscoveryResource = "channels"): Promise<DiscoveryOutcome> {
+export async function v2GetProfile(id: string, resource: DiscoveryResource = "channels", fields?: string): Promise<DiscoveryOutcome> {
   const endpoint = "GET /profiles/{profile_id}";
   if (!id.trim()) return { ok: false, error: "Enter a profile ID.", reason: "user_input_error", status: 400, apiVersion: "v2", resource, endpoint, remedy: "Collect profile IDs via GET /v2/me once authenticated.", retryable: false };
-  const outcome = await v2Get<V2RawProfile>(`/profiles/${encodeURIComponent(id.trim())}`, { fields: V2_PROFILE_FIELDS });
+  const outcome = await v2Get<V2RawProfile>(`/profiles/${encodeURIComponent(id.trim())}`, { fields: fields?.trim() || V2_PROFILE_FIELDS });
   if (!outcome.ok) return withRemedy(outcome.failure, resource, endpoint);
   const item = normalizeV2Profile(outcome.data, resource === "users" ? "user" : "channel");
   return { ok: true, result: { items: item ? [item] : [], page: 1, pageSize: 1, total: item ? 1 : 0, hasMore: false, nextCursor: null, capped: false, apiVersion: "v2", resource, endpoint } };
@@ -118,12 +118,12 @@ export async function v2GetUser(id: string): Promise<DiscoveryOutcome> {
 }
 
 /** Profile playlist listing: GET /profiles/{id}/playlists. */
-export async function v2ProfilePlaylists(profileId: string, page = 1, pageSize = 50): Promise<DiscoveryOutcome> {
+export async function v2ProfilePlaylists(profileId: string, page = 1, pageSize = 50, fields?: string): Promise<DiscoveryOutcome> {
   const endpoint = "GET /profiles/{profile_id}/playlists";
   const missing = requireProfileId(profileId, "playlists", endpoint);
   if (missing) return missing;
   const outcome = await v2List<V2RawPlaylist>(`/profiles/${encodeURIComponent(profileId.trim())}/playlists`, {
-    page: String(clampPage(page)), page_size: String(clampLimit(pageSize)), fields: "playlist_id,title,description,created_at",
+    page: String(clampPage(page)), page_size: String(clampLimit(pageSize)), fields: fields?.trim() || "playlist_id,title,description,created_at",
   });
   if (!outcome.ok) return withRemedy(outcome.failure, "playlists", endpoint);
   const pagination = outcome.data.pagination ?? {};
@@ -132,21 +132,21 @@ export async function v2ProfilePlaylists(profileId: string, page = 1, pageSize =
 }
 
 /** Direct playlist lookup: GET /playlists/{id}. */
-export async function v2GetPlaylist(id: string): Promise<DiscoveryOutcome> {
+export async function v2GetPlaylist(id: string, fields?: string): Promise<DiscoveryOutcome> {
   const endpoint = "GET /playlists/{playlist_id}";
   if (!id.trim()) return { ok: false, error: "Enter a playlist ID.", reason: "user_input_error", status: 400, apiVersion: "v2", resource: "playlists", endpoint, remedy: null, retryable: false };
-  const outcome = await v2Get<V2RawPlaylist>(`/playlists/${encodeURIComponent(id.trim())}`, { fields: "playlist_id,title,description,created_at" });
+  const outcome = await v2Get<V2RawPlaylist>(`/playlists/${encodeURIComponent(id.trim())}`, { fields: fields?.trim() || "playlist_id,title,description,created_at" });
   if (!outcome.ok) return withRemedy(outcome.failure, "playlists", endpoint);
   const item = normalizeV2Playlist(outcome.data);
   return { ok: true, result: { items: item ? [item] : [], page: 1, pageSize: 1, total: item ? 1 : 0, hasMore: false, nextCursor: null, capped: false, apiVersion: "v2", resource: "playlists", endpoint } };
 }
 
 /** Playlist contents: GET /playlists/{id}/videos. */
-export async function v2PlaylistVideos(id: string, page = 1, pageSize = 50): Promise<DiscoveryOutcome> {
+export async function v2PlaylistVideos(id: string, page = 1, pageSize = 50, fields?: string): Promise<DiscoveryOutcome> {
   const endpoint = "GET /playlists/{playlist_id}/videos";
   if (!id.trim()) return { ok: false, error: "Enter a playlist ID.", reason: "user_input_error", status: 400, apiVersion: "v2", resource: "playlists", endpoint, remedy: null, retryable: false };
   const outcome = await v2List<V2RawVideo>(`/playlists/${encodeURIComponent(id.trim())}/videos`, {
-    page: String(clampPage(page)), page_size: String(clampLimit(pageSize)), fields: V2_VIDEO_FIELDS,
+    page: String(clampPage(page)), page_size: String(clampLimit(pageSize)), fields: fields?.trim() || V2_VIDEO_FIELDS,
   });
   if (!outcome.ok) return withRemedy(outcome.failure, "playlists", endpoint);
   const pagination = outcome.data.pagination ?? {};
@@ -161,6 +161,7 @@ export interface V2LivestreamQuery {
   tags?: string | null;
   page?: number;
   pageSize?: number;
+  fields?: string;
 }
 
 /** Profile livestream listing: GET /profiles/{id}/livestreams. */
@@ -171,7 +172,7 @@ export async function v2ProfileLivestreams(profileId: string, input: V2Livestrea
   const params: Record<string, string> = {
     page: String(clampPage(input.page ?? 1)),
     page_size: String(clampLimit(input.pageSize ?? 50)),
-    fields: "livestream_id,title,description,category,status,visibility,created_at,profile.profile_id,profile.name",
+    fields: input.fields?.trim() || "livestream_id,title,description,category,status,visibility,created_at,profile.profile_id,profile.name",
   };
   if (input.status) params.status = input.status;
   if (input.visibility) params.visibility = input.visibility;

@@ -14,12 +14,20 @@ function readConnectTimeoutSeconds() {
 }
 
 export function applyPrismaCommandConnectionDefaults() {
-  // Canonical first, legacy fallback. Patch whichever var is effective so
-  // Prisma CLI children inherit the timeout without rewriting env files.
-  const canonical = process.env.DATABASE_URL_CONNECTION_STRING?.trim();
-  const legacy = !canonical ? process.env.DATABASE_URL?.trim() : "";
-  const sourceVar = canonical ? "DATABASE_URL_CONNECTION_STRING" : "DATABASE_URL";
-  const rawDatabaseUrl = canonical || legacy;
+  // Patch the effective primary var only. The documented backup is mirrored
+  // into DATABASE_URL for CLI children with a loud warning when the primary
+  // is missing (transparent, never silent).
+  let sourceVar = "DATABASE_URL";
+  let rawDatabaseUrl = process.env.DATABASE_URL?.trim();
+  if (!rawDatabaseUrl) {
+    const backup = process.env.SUPABASE_DATABASE_URL_CONNECTION_STRING?.trim();
+    if (backup) {
+      console.warn("[WARN] Mirroring backup SUPABASE_DATABASE_URL_CONNECTION_STRING into DATABASE_URL for this Prisma CLI invocation only (env file unchanged). Set DATABASE_URL as primary.");
+      process.env.DATABASE_URL = backup;
+      rawDatabaseUrl = backup;
+      sourceVar = "DATABASE_URL (mirrored backup)";
+    }
+  }
   if (!rawDatabaseUrl) return;
 
   let databaseUrl;
@@ -35,12 +43,10 @@ export function applyPrismaCommandConnectionDefaults() {
 
   const timeoutSeconds = readConnectTimeoutSeconds();
   databaseUrl.searchParams.set("connect_timeout", timeoutSeconds);
-  process.env[sourceVar] = databaseUrl.toString();
+  process.env.DATABASE_URL = databaseUrl.toString();
 
   // This applies only to Prisma CLI child processes launched by db:status/db:apply.
-  // It follows Supabase's P1001 troubleshooting guidance without changing the
-  // operator's stored values, target host, credentials, or project env files.
   console.log(
-    `[INFO] Prisma command connection default applied: connect_timeout=${timeoutSeconds} seconds (process-only; env file unchanged).`
+    `[INFO] Prisma command connection default applied to ${sourceVar}: connect_timeout=${timeoutSeconds} seconds (process-only; env file unchanged).`
   );
 }

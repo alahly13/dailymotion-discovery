@@ -111,7 +111,11 @@ export async function commitBatch(raw: unknown): Promise<BatchCommitResult> {
   try {
     db = getPrismaClient();
   } catch (error) {
-    return { ...invalidBatch(error instanceof Error ? error.message : "Database unavailable."), idempotencyKey: batch.idempotencyKey, remedy: "Set DATABASE_URL_CONNECTION_STRING and retry — drafts stay local." };
+    return {
+      ...invalidBatch(error instanceof Error ? error.message : "Database unavailable."),
+      idempotencyKey: batch.idempotencyKey,
+      remedy: "Set DATABASE_URL (or SUPABASE_DATABASE_URL_CONNECTION_STRING backup) and retry — drafts stay local.",
+    };
   }
 
   // Idempotency first: same key → recorded result, zero duplicate work.

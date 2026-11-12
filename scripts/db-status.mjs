@@ -3,6 +3,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
+import { Client } from "pg";
 import { loadProjectEnv } from "./load-project-env.mjs";
 import { applyPrismaCommandConnectionDefaults } from "./prisma-command-env.mjs";
 
@@ -81,7 +82,7 @@ function runValidation() {
 function printTargetedHint(output) {
   if (/P1000/.test(output)) {
     console.error("[ERROR] Prisma reported P1000: database authentication failed.");
-    console.error("- Verify the Supabase database password used in DATABASE_URL_CONNECTION_STRING.");
+    console.error("- Verify the Supabase database password used in DATABASE_URL (or backup SUPABASE_DATABASE_URL_CONNECTION_STRING).");
     console.error("- Percent-encode reserved password characters such as #, @, ?, /, and $.");
     console.error("- Confirm the Session Pooler username shape is postgres.<project-ref>.");
     console.error("- Raw `prisma migrate status` can hide this as a bare schema-engine error; the connectivity preflight above is the concrete blocker.");
@@ -90,7 +91,7 @@ function printTargetedHint(output) {
 
   if (/P1001/.test(output)) {
     console.error("[ERROR] Prisma reported P1001: database host or port is unreachable.");
-    console.error("- Keep DATABASE_URL_CONNECTION_STRING on the Supabase Session Pooler host, not the direct db.<project-ref>.supabase.co host.");
+    console.error("- Keep DATABASE_URL on the Supabase Session Pooler host (:5432), not the direct db.<project-ref>.supabase.co host.");
     console.error("- Confirm the Supabase project is active and the pooler host/region are correct.");
     return;
   }
@@ -141,26 +142,35 @@ function isApplyEligibleStatusFailure(output) {
   ].some((pattern) => pattern.test(output));
 }
 
-function runConnectivityPreflight() {
-  let lastResult = null;
-
-  for (let attempt = 1; attempt <= 2; attempt += 1) {
-    // Supabase Session Pooler DNS can surface transient reachability failures.
-    // Retry P1001 once so the diagnostic can reveal a stable auth/config error
-    // without turning status checks into a long-running loop.
-    if (attempt > 1) {
-      console.warn("[WARN] Retrying connectivity preflight once after P1001 reachability failure.");
-    }
-
-    lastResult = runPrisma(["db", "execute", "--stdin"], { input: "SELECT 1;" });
-    if (lastResult.status === 0) return lastResult;
-    if (!/P1001/.test(lastResult.output)) return lastResult;
+async function runConnectivityPreflight() {
+  const connectionString = process.env.DATABASE_URL?.trim();
+  if (!connectionString) {
+    return { status: 1, output: "Missing DATABASE_URL" };
   }
 
-  return lastResult;
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    if (attempt > 1) {
+      console.warn("[WARN] Retrying connectivity preflight once after failure.");
+    }
+
+    const client = new Client({ connectionString, connectionTimeoutMillis: 10000 });
+    try {
+      await client.connect();
+      await client.query("SELECT 1;");
+      await client.end();
+      return { status: 0, output: "SELECT 1" };
+    } catch (error) {
+      try { await client.end(); } catch {}
+      if (attempt === 2) {
+        return { status: 1, output: error?.message || String(error) };
+      }
+    }
+  }
+
+  return { status: 1, output: "Connectivity failed" };
 }
 
-function main() {
+async function main() {
   if (!shouldSkipValidation) runValidation();
   applyPrismaCommandConnectionDefaults();
 
@@ -169,13 +179,13 @@ function main() {
   // do not mistake an empty repo history for a bad Supabase URL.
   printMigrationHistoryWarning();
 
-  console.log("[INFO] Checking database connectivity with Prisma (SELECT 1, no application data).");
-  const preflight = runConnectivityPreflight();
+  console.log("[INFO] Checking database connectivity (SELECT 1, no application data)...");
+  const preflight = await runConnectivityPreflight();
 
   if (preflight.status !== 0) {
     printTargetedHint(preflight.output);
     console.error("[INFO] Skipping prisma migrate status because the connectivity preflight failed first.");
-    console.error("[INFO] DATABASE_URL_CONNECTION_STRING is the canonical database variable (legacy DATABASE_URL fallback).");
+    console.error("[INFO] DATABASE_URL is the primary database variable (optional SUPABASE_DATABASE_URL_CONNECTION_STRING backup).");
     process.exit(preflight.status || 1);
   }
 

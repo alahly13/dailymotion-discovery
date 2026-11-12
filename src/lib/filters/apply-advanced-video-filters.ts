@@ -18,17 +18,50 @@ function passesNumber(value: number | null, minimum?: number | null, maximum?: n
   return true;
 }
 
+/**
+ * Parse a YYYY-MM-DD or ISO-8601 boundary string into UTC epoch milliseconds.
+ * Date-only `dateTo` bounds expand to `23:59:59.999Z` so the chosen calendar day
+ * stays inclusive (matching API V1/V2 server date bounds).
+ */
+function parseBoundaryTime(raw: string | null | undefined, endOfDay: boolean): number | null {
+  if (!raw?.trim()) return null;
+  const trimmed = raw.trim();
+  const normalized = /^\d{4}-\d{2}-\d{2}$/.test(trimmed)
+    ? `${trimmed}T${endOfDay ? "23:59:59.999Z" : "00:00:00.000Z"}`
+    : trimmed;
+  const ms = Date.parse(normalized);
+  return Number.isFinite(ms) ? ms : null;
+}
+
 export function applyAdvancedVideoFilters(items: readonly NormalizedVideoMetadata[], filters: AdvancedVideoFilters) {
   const keyword = filters.keyword?.trim().toLowerCase() ?? "";
+  const excludeTerms = (filters.excludeKeyword ?? "")
+    .split(",")
+    .map((term) => term.trim().toLowerCase())
+    .filter(Boolean);
+  const requiredTags = (filters.tags ?? "")
+    .split(",")
+    .map((tag) => tag.trim().toLowerCase())
+    .filter(Boolean);
   const language = filters.language?.trim().toLowerCase() ?? "";
   const channel = filters.channel?.trim().toLowerCase() ?? "";
   const owner = filters.owner?.trim().toLowerCase() ?? "";
   const strict = filters.strictMetadataFiltering === true;
+  const fromTime = parseBoundaryTime(filters.dateFrom, false);
+  const toTime = parseBoundaryTime(filters.dateTo, true);
 
   const filtered = items.filter((video) => {
-    if (keyword) {
+    if (keyword || excludeTerms.length > 0) {
       const haystack = [video.title, video.description, video.channelName, video.ownerName, ...video.tags].join(" ").toLowerCase();
-      if (!haystack.includes(keyword)) return false;
+      if (keyword && !haystack.includes(keyword)) return false;
+      if (excludeTerms.some((term) => haystack.includes(term))) return false;
+    }
+
+    if (requiredTags.length > 0) {
+      if (video.tags.length === 0) return false;
+      const lowerTags = video.tags.map((t) => t.toLowerCase());
+      const matchesAll = requiredTags.every((needle) => lowerTags.some((tag) => tag.includes(needle)));
+      if (!matchesAll) return false;
     }
 
     if (!passesNumber(video.views, filters.minViews, filters.maxViews, strict)) return false;
@@ -37,12 +70,12 @@ export function applyAdvancedVideoFilters(items: readonly NormalizedVideoMetadat
     if (!passesNumber(video.duration, filters.durationMin, filters.durationMax, strict)) return false;
     if (!passesNumber(video.year, filters.yearFrom ?? filters.year, filters.yearTo ?? filters.year, strict)) return false;
 
-    if (filters.dateFrom || filters.dateTo) {
+    if (fromTime !== null || toTime !== null) {
       if (!video.createdAt) return !strict;
-      const createdTime = new Date(video.createdAt).getTime();
+      const createdTime = Date.parse(video.createdAt);
       if (!Number.isFinite(createdTime)) return !strict;
-      if (filters.dateFrom && createdTime < new Date(filters.dateFrom).getTime()) return false;
-      if (filters.dateTo && createdTime > new Date(filters.dateTo).getTime()) return false;
+      if (fromTime !== null && createdTime < fromTime) return false;
+      if (toTime !== null && createdTime > toTime) return false;
     }
 
     if (language && !includesText(video.language, language)) return false;

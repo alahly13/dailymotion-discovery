@@ -1,8 +1,8 @@
 # Dailymotion Discovery Platform Ledger
 
-Updated: 2026-10-11
+Updated: 2026-11-12
 Repo path: `E:\discovery\dailymotion-discovery`
-Scope: Project source-of-truth ledger, updated after Supabase/Postgres/Storage/batch-save/migration-management integration.
+Scope: Project source-of-truth ledger, updated after Supabase Auth SSR single-identity (`asdy`), searchable CountrySelector & multi-level filters, Cloudflare R2 Worker deployment preparation, Vercel Blob total elimination, and full Vitest / TypeScript verification.
 
 ## Table of Contents
 
@@ -58,6 +58,104 @@ Scope: Project source-of-truth ledger, updated after Supabase/Postgres/Storage/b
   Production guidance: pooler URL in Vercel's variable unless verified.
 - Password correctness (unreachable auth layer). Nothing was changed about it.
 
+- [Agent Instructions](#agent-instructions)
+
+## 2026-10-14 Native Prisma ORM 8 migration (single-version data layer)
+
+**Starting state (verified, not assumed)**
+
+- `npx prisma@latest orm init --from-prisma7-schema` had run: Prisma 8 RC
+  (`@prisma/orm-postgres@8.0.0-rc.17`, `prisma@8.0.0-rc.22`,
+  `@prisma/cli-engine@0.7.0`) installed, `prisma7Schema(...)` compat config,
+  emitted compat artifacts in `src/prisma/`. Prisma 7 packages
+  (`@prisma/client`, `@prisma/adapter-pg`) already absent from
+  package.json/node_modules — but all app code still imported them (broken).
+- `.env` (5885 bytes, real credentials) is the only local env file;
+  `.env.local` is absent. `.env` was never opened, read, printed, edited,
+  moved, or deleted during this task. `.env.example` had been replaced by a
+  10-line init template (restored below).
+- Installed skill `.agents/skills/prisma-8` (v2026-09-12) matches the
+  installed library; its references plus official Prisma docs
+  (coming-from-7 mapping table, scalar-types reference) drove the conversion.
+
+**What was built**
+
+- `src/prisma/contract.prisma` (native PSL, `// use prisma-8`): all 17
+  models + 10 `native_enum`s converted (`@db.Uuid`→`Uuid`,
+  `@db.Timestamptz`→`TimestamptzString` (text timestamps, no Temporal needed
+  on Node 24), `Json`→`Jsonb`, `Decimal`→`Numeric`, `@updatedAt`→
+  `temporal.updatedAtString()`); tables/columns/relations/constraints/indexes
+  preserved verbatim. Two oversized index wire-names shortened with `name:`
+  prefixes (future renames are non-destructive; documented).
+- `prisma.config.ts` native (contract path, `DATABASE_URL` primary, no
+  fallback, `migrations.dir`). `src/prisma/db.ts` native singleton
+  (`@prisma/orm-postgres/runtime`, module scope, lazy connect, 30s pool
+  timeout). `contract.json` + `contract.d.ts` re-emitted (hashes recorded).
+- All queries converted (`db.orm.public.*`, `db.sql`/`db.raw` lanes,
+  `db.transaction`): `channel-fetch-persistence.ts` (full rewrite, same
+  exported signatures), saved-titles/search-history/commits repositories,
+  batch orchestrator, token-cache store, sync-state + migrations/status
+  routes. New `src/lib/db/scalars.ts` bridges branded writes (ISO strings
+  ARE the timestamptz wire values; decimal text IS the numeric wire value)
+  and contract-derived enum unions. Saved-search text filters use
+  combinators + relation order-by; tag matching moved to a JS post-pass
+  (documented: Prisma 8 has no list `has` filter).
+- Reads now return text timestamps (not `Date`): all `.toISOString()` /
+  `.getTime()` call sites guarded; `update()`/`create()` nullability handled
+  with an explicit `required()` helper (honest errors, never silent nulls).
+- Removed (DB untouched — file deletions only): `prisma/schema.prisma`,
+  `prisma/migrations/` (incl. the applied baseline and the never-applied
+  pending dir — recorded here for the record), `src/lib/prisma/client.ts`,
+  root `prisma-8.md` (side-by-side doc). No `prisma7.config.ts`,
+  `prisma7:*` scripts, or compat deps existed to remove.
+- Scripts native: `db-status` (tsx probe + `migration status`),
+  `db-apply` (guarded `db migrate` + re-emit), `db:diagnose` (v8 probe +
+  status), new `scripts/db-probe.ts`; `prebuild` runs `contract emit`.
+  `pg` kept (diagnostic script uses it).
+- Env: `DATABASE_URL` primary + `SUPABASE_DATABASE_URL_CONNECTION_STRING`
+  documented backup (warns, never silent); `DATABASE_URL_DIRECT` and
+  `DATABASE_URL_CONNECTION_STRING` support removed; `SUPABASE_SERVICE_ROLE_KEY`
+  retired from validation; `.env.example` rebuilt from a full source audit
+  (every variable with purpose/consumer/required/server-or-public/origin).
+  `.env` untouched, `.env.local` still absent, `.gitignore` keeps `.env`
+  ignored (verified: `.env` not tracked by git).
+- `MODULE_TYPELESS_PACKAGE_JSON`: left as a warning — no `"type": "module"`
+  change (audit: Next 16 + `.mjs` scripts + tsx + vitest are unaffected;
+  changing module type repo-wide for one warning is unjustified).
+
+**Verification (all executed)**
+
+- `prisma contract emit`: ok (fixed 34 initial PSL diagnostics via the
+  validator: preset-instead-of-type, string enum defaults, index prefixes).
+- `tsc --noEmit`: clean (was ~60 errors mid-migration; tsc verified every
+  query chain, include shape, and branded write).
+- `vitest`: full suite green (see background run record), incl. 8 new
+  conformance tests (contract validity/currency, no-legacy scan,
+  env-file discipline).
+- `prisma db verify`: attempted read-only — connection timed out at the
+  network layer (known: no IPv6 egress here), no DB state touched.
+- Production build: prebuild emit ok; full `next build` blocked ONLY by
+  `GEMINI_API_KEY` + `NEXT_PUBLIC_APP_URL` missing/placeholder in the real
+  `.env` (validator proven correct with dummies; code path verified via a
+  dummy-override build — see build record). No values read or invented.
+- No migration planned/applied/signed, no reset, no data import, no
+  deployment. RLS posture preserved by inaction (no DB writes at all);
+  contract is silent on RLS — flagged as a must-verify item (`contract
+  infer`/`db verify` + `@@rls` review) once connectivity exists.
+
+**Known limitations / manual steps**
+
+1. Fill `GEMINI_API_KEY` + `NEXT_PUBLIC_APP_URL` in `.env` (or Vercel) for
+   builds; redeploy after env changes.
+2. From an IPv6-capable network (or pooler URL): `prisma db verify`, then
+   `prisma db sign` to record the existing-tables baseline (explicit step,
+   changes DB marker metadata — requested authorization required), then
+   future `migration plan` deltas. Verify RLS/policies at that point.
+3. `lint` still runs legacy `next lint` (pre-existing; untouched).
+4. `Numeric` reads as decimal text and timestamps read as ISO strings —
+   app mapping code handles both; watch for `Decimal.js`-style assumptions
+   in future code (none remain).
+
 ## 2026-10-11 Supabase/Postgres/Storage/batch-save/migration integration
 
 **Audit findings (verified, not inferred)**
@@ -112,7 +210,9 @@ Scope: Project source-of-truth ledger, updated after Supabase/Postgres/Storage/b
 - No deployment; no migration applied (needs CONFIRM_DB_APPLY + reachability);
   no destructive command run; `.env.local` secrets never printed/touched.
 - Pushed 2026-10-11: commit c16118d to origin/main (113 files, secret scan
-  clean — secrets empty, no credentialed URLs). Deliberately NOT pushed:
+  clean — secrets empty, no credentialed URLs). Pushed 2026-10-12: commit
+  6ac2961 (IPv6 diagnostics + docs, 5 files, secret scan clean).
+  Deliberately NOT pushed:
   `notes.txt` modification (contains an operator secret-like line — remove it
   before committing) and local agent-tool directories/screenshots.
 
@@ -1768,40 +1868,138 @@ CONFIRM_DB_APPLY=true npm run db:apply
 - Proxy refreshes Supabase session cookies but is not, by itself, a full authorization strategy.
 - Real `.env` data was intentionally omitted from this ledger.
 
+## 2026-11-11 Prisma ORM 7.10.1 Restoration, Dependency Upgrade & Platform Linking
+
+### 1. Prisma ORM 7 (`7.10.1`) Restoration & Schema/Migration Alignment
+- Removed experimental uncommitted Prisma 8 RC packages/files (`@prisma/orm-postgres`, `@prisma/cli-engine`, `prisma@^8.0.0-rc.*`, `src/prisma/`, `src/lib/db/scalars.ts`, `scripts/db-probe.ts`).
+- Installed pinned stable **Prisma ORM 7.10.1** (`prisma@7.10.1`, `@prisma/client@7.10.1`, `@prisma/adapter-pg@7.10.1`).
+- Restored canonical Prisma schema (`prisma/schema.prisma`, 16 models, 10 enums) and SQL migrations (`prisma/migrations/20260506_channel_deep_fetch_history_persistence_foundation`, `prisma/migrations/20261011183739_workspace_cloud_persistence`).
+- Canonical DB resolution (`src/lib/db/database-url.ts`, `prisma.config.ts`, `src/lib/prisma/client.ts`, `src/lib/db/prisma.ts`, `scripts/db-*.mjs`, `/api/admin/migrations/status`): uses `DATABASE_URL` as primary (Supabase Session Pooler `:5432`) and `SUPABASE_DATABASE_URL_CONNECTION_STRING` as optional warned backup (`DATABASE_URL_CONNECTION_STRING`, `DATABASE_URL_DIRECT`, and `DIRECT_URL` remain retired).
+- Restored all Prisma 7 repositories and services (`src/lib/repositories/channel-fetch-persistence.ts` with native SQL tag array filtering, `src/lib/persistence/repositories/{commits,errors,saved-titles,search-history}.ts`, `src/lib/persistence/batch-save/commit.ts`, `src/lib/discovery/token-cache-store.ts`, `src/app/api/cloud/sync-state/route.ts`), adding `listCollections`, `updateSavedVideo`, and `deleteSavedVideoById` in `saved-titles.ts` plus Date `.toISOString()` hydration restoration in `channel-deep-fetch-service.ts`.
+- Live database status check (`node scripts/db-status.mjs --allow-status-failure`): reached `aws-0-eu-west-2.pooler.supabase.com:5432` over IPv4 and received `FATAL: (ENOTFOUND) tenant/user postgres.uuhyelghiwiotcjvidmg not found` (remote Supabase project unreachable/non-existent; pending migration `20261011183739_workspace_cloud_persistence` remains ready to deploy via `CONFIRM_DB_APPLY=true npm run db:apply` once `.env` points at an active project).
+
+### 2. Node Library Modernization & Linting
+- Updated core packages in `package.json`: `next@^16.4.6`, `react@^19.3.1`, `react-dom@^19.3.1`, `@google/genai@^3.2.0` (replacing deprecated `@google/generative-ai`), `@supabase/supabase-js@^2.119.0`, `pg@^8.23.1`, `zod@^4.6.7`, `zustand@^5.1.0`, `lucide-react@^1.72.0`, `framer-motion@^14.12.0`, `tailwindcss@^4.3.5`, `@tailwindcss/postcss@^4.3.5`, `vitest@^5.1.0`, `dotenv@^18.0.10`.
+- Added ESLint 9 flat configuration (`eslint.config.mjs`) with `eslint@^9.39.5` + `eslint-config-next@^16.4.6` replacing removed Next 16 `next lint`, and resolved all React 19 `react-hooks/set-state-in-effect` and hook dependency errors.
+
+### 3. Discovery, AI, Filter, and Frontend/Backend Enhancements
+- Fixed `src/app/api/discovery/v2/[resource]/route.ts` and `v2-search-service.ts` to forward `isExplicit`, `isForKids`, and `fields`, plus optional `fields` passthrough across `v1/[resource]/route.ts` and `v1-search-service.ts`.
+- Upgraded `src/lib/ai/gemini-client.ts` to `@google/genai` defaulting to `gemini-2.5-flash` (`src/lib/config/env.ts`), placeholder-key `503 missing_config` detection, structured JSON mode (`generateGeminiJson`), and error status propagation in `/api/ai/{parse-query,filter-helper,summarize-manifest}`.
+- Added admin-gated cloud CRUD endpoints: `GET/POST/PATCH/DELETE /api/cloud/saved-titles`, `GET/POST /api/cloud/collections`, `PATCH/DELETE /api/cloud/collections/[id]`, `GET/DELETE /api/cloud/history`.
+- Connected live UI workflows:
+  - `/saved` (`src/app/saved/page.tsx`): Saved Library & Postgres Collections manager alongside browser draft items.
+  - `/workspace` (`CloudSyncPanel` + `useDiscoveryWorkspace.hydrateFromCloud`): two-way Save + Pull hydration from Supabase.
+  - `/ai-search` & `AiHelperPanel`: live Gemini query translation -> Dailymotion V1 execution -> grounded manifest filter suggestions & summaries.
+  - `/search` (`UnifiedSearch`): URL param hydration & sync, Save Search, local quick filter, JSON/CSV export.
+  - Channel Explorer filters (`apply-advanced-video-filters.ts`, `AdvancedFilterPanel`, `ActiveFilterChips`): fixed inclusive UTC `dateTo`, added `excludeKeyword` & `tags` filters, quick presets, dismissible filter chips, and `VideoCard` workspace save + ID copy.
+  - Home (`src/app/page.tsx`): Quick V1 search launcher & links to AI Search and Saved Library.
+
+### 4. Environment & Documentation Cleanup
+- Removed unused env vars (`SUPABASE_SERVICE_ROLE_KEY`, `CRON_SECRET`, `WEBHOOK_SECRET`, `AI_EMBEDDING_MODEL`, `ENABLE_PGVECTOR`) from `src/lib/config/env.ts` and regenerated `.env.example` using `.env` conventions; made placeholder/missing `GEMINI_API_KEY` a non-fatal `[WARN]` in `scripts/app-validate-env.mjs`.
+- Removed stale duplicate/phase docs (`PROJECT_LEDGER.md` and obsolete `Guide-Files/` phase specs) and rewrote `README.md`, `docs/migrations/{README,registry,recovery}.md`, and `docs/api-v2-capability-inventory.md` for 2026.
+
+## 2026-11-12 Local-First Research Workspace, Cloudflare R2 + Worker Persistence & API Capability Architecture
+
+### 1. Official 2026 Dailymotion API Research & Architecture Docs
+- Verified official Legacy/Partner API v1 vs REST API v2 rules in `docs/api/dailymotion-api-capabilities-2026.md`.
+- Completed system-by-system parity audit against reference workspace patterns in `docs/architecture/youtube-discovery-parity-matrix.md`.
+- Documented target persistence, Worker HMAC token, generation manifest, and non-destructive Supabase archive plan in `docs/architecture/dailymotion-target-architecture.md`.
+
+### 2. Local Filters, Taxonomy, Search Presets, Collections & History (Phases 1 & 2)
+- Added canonical taxonomy (`src/lib/resources/dailymotion-resource-taxonomy.ts`), explicit API vs Local filter matrix (`src/lib/discovery/filter-capabilities.ts`, rendered on `/capabilities`), zero-safe filter pipeline (`src/lib/filters/discovery-result-filters.ts`), FlexSearch/weighted local searcher (`src/lib/search/discovery-local-search.ts`), `DiscoveryLocalFilterPanel`, `RawJsonDrawer`, and upgraded `ResultCard`.
+- Upgraded `UnifiedSearch` and `DiscoveryExplorer` with zero-API local filters, bulk selection & collection assignment, offline cached snapshot replay (`?snapshotType=preset|history&snapshotId=...`), and Search History / Saved Search Preset capture.
+- Added dedicated research workspace routes: `/collections`, `/saved-searches`, `/history`, and `/storage`, linked in `AppShell`.
+
+### 3. Local-First IndexedDB Engine & Two-Phase Outbox Sync (Phase 3)
+- Implemented `dailymotion_discovery_local_v1` IndexedDB store (`src/lib/local-first/indexeddb-store.ts`) with one-time non-destructive `localStorage` migration, atomic outbox operations + `sync_journal` recovery (`src/lib/sync/sync-coordinator.ts`), `SaveReceipt` stage contracts (`src/lib/sync/save-receipt.ts`), tombstone-aware cloud hydration (`src/lib/sync/cloud-hydration-service.ts`), and reactive `useMergedDataset()` (`src/lib/local-first/use-merged-dataset.ts`).
+
+### 4. Dedicated Cloudflare Worker + Private R2 + Prisma 7 Schema Draft (Phases 4 & 5)
+- Authored local Wrangler/Worker source (`cloudflare/workers/dailymotion-discovery-api/{wrangler.jsonc,.dev.vars.example,README.md,src/index.ts,src/index.test.ts}`) binding `DM_BUCKET -> dailymotion-discovery-private` with Web Crypto HS256 capability verification, path traversal rejection, immutable part `onlyIf` collision guard (409), and `/batch/upload` + `/batch/verify`. (Not deployed remotely; awaits operator approval.)
+- Added server storage & sync services (`src/lib/storage/{r2-canonical-paths,r2-capability-token,r2-manifest-serializer,r2-worker-client,zip-builder,storage-explorer-service}.ts`, `src/lib/persistence/{r2-sync-service,supabase-to-r2-migration}.ts`) and admin-gated routes (`/api/sync/{save-all,hydrate,status}`, `/api/storage/{overview,verify,export}`, `/api/admin/storage-migration`).
+- Added additive Prisma 7 models (`SavedSearchPreset`, `ResearchCollection`, `ResearchCollectionItem`, `StorageDataset`, `StorageGeneration`, `StorageManifestPart`) and columns on `BatchCommit` in `prisma/schema.prisma` + SQL migration draft `prisma/migrations/20261112000000_r2_generations_and_presets/migration.sql` (not applied to remote DB without approval).
+
+### 5. Bounded AI Manifest Context & Env Updates (Phases 6–8)
+- Added `src/lib/ai/manifest-context.ts` enforcing configurable `AI_MANIFEST_MAX_ITEMS` / `AI_MANIFEST_MAX_CHARS` bounds and evidence IDs on `/api/ai/summarize-manifest` and `/api/ai/filter-helper`.
+- Updated `.env.example` and `scripts/app-validate-env.mjs` with Cloudflare R2 Worker and AI bound variables.
+
+### 6. Supabase Auth SSR, Canonical Admin (`asdy`), Searchable Country Selector & Cloudflare Deployment Prep
+- **Supabase Auth Single Authority**:
+  - Administrator `asdy` resolved server-side to canonical identity `asdy@dailymotion.discov.com` in `src/lib/admin/session.ts` (`CANONICAL_ADMIN_USERNAME = "asdy"`, `CANONICAL_ADMIN_EMAIL = "asdy@dailymotion.discov.com"`, `resolveAdminEmail()`).
+  - Zero passwords stored in PostgreSQL. Supabase Auth is the single authoritative identity and password store.
+  - Endpoint `POST /api/admin/login` resolves `asdy` -> `asdy@dailymotion.discov.com`, authenticates via `supabase.auth.signInWithPassword`, falls back to local dev/test credentials, and issues an HMAC-signed `dm_admin_session` httpOnly cookie.
+  - Endpoint `POST /api/admin/change-password` gates caller via `requireAdmin()`, re-authenticates current password, updates password via `supabase.auth.updateUser({ password: newPassword })`.
+  - Added `ChangePasswordForm` on `/settings` (`src/app/settings/page.tsx`) with client-side match validation and honest status/error surfacing.
+  - Tests: `src/lib/admin/__tests__/change-password.test.ts` (identity mapping + unauthenticated 401 gate).
+- **Searchable ISO 3166-1 alpha-2 Country Selector & Multi-Level Filtering**:
+  - Created `src/components/discovery/country-selector.tsx`: 249 ISO 3166-1 alpha-2 entries, real-time search, dropdown menu, clear button, and distinct visual badges (`API parameter` vs `Local result filter`).
+  - Integrated into API parameter inputs (`src/components/discovery/discovery-explorer.tsx` for `ams_country` and `src/components/discovery/unified-search.tsx` for `country` / `localization`).
+  - Integrated into local result filtering: added `country: string` to `LocalFilterState`, `DEFAULT_DISCOVERY_LOCAL_FILTERS`, `matchesClassification`, and `listActiveLocalFilterChips` in `src/lib/filters/discovery-result-filters.ts`.
+  - Embedded in `src/components/discovery/discovery-local-filter-panel.tsx` drawer.
+  - Tests: `src/lib/filters/__tests__/discovery-result-filters.test.ts` (6/6 passing).
+- **Cloudflare Worker `.prod.vars` Safe Inspection & Secret Protection**:
+  - Protected `.prod.vars`, `.dev.vars`, and `*.vars` in `.gitignore` (verified with `git check-ignore`).
+  - Created `scripts/worker-inspect-env.mjs`: validates dotenv format, identifies `WORKER_AUTH_SECRET` (secret, 64 chars) and `ALLOWED_ORIGINS` (config, 85 chars), confirms `WORKER_AUTH_SECRET === CLOUDFLARE_R2_WORKER_HMAC_SECRET` without printing or leaking values.
+  - Configured `cloudflare/workers/dailymotion-discovery-api/wrangler.jsonc` with `"remote": true` on `DM_BUCKET` binding.
+  - Documented official deployment: `npx wrangler deploy --secrets-file .prod.vars`.
+- **Total Vercel Blob Audit & Elimination**:
+  - Scanned codebase via `git grep -i "vercel.*blob"`, `BLOB_READ_WRITE_TOKEN`, `@vercel/blob`; zero occurrences remain across all source, config, and script files. Zero Vercel Blob dependencies in `package.json`.
+- **Database Connectivity & Forward-Only Migration Posture**:
+  - Diagnosed Supabase Session Pooler connection via `node scripts/db-diagnose-connection.mjs`: DNS OK, TCP 5432 OK, PostgreSQL auth OK (`aws-0-eu-west-2.pooler.supabase.com:5432`, 615ms latency).
+  - Forward-only migration strategy preserved: no destructive DDL, no reset; pending migration `20261112000000_r2_generations_and_presets` is ready for zero-downtime deployment via `CONFIRM_DB_APPLY=true npm run db:apply`.
+- **Verification Evidence**:
+  - Full Vitest suite: 26/26 test files passed, 119/119 tests passed (`npm test`).
+  - TypeScript typecheck: `tsc --noEmit` exit 0 (0 type errors).
+  - Environment preflight: `node scripts/app-validate-env.mjs` exit 0.
+  - Worker environment preflight: `node scripts/worker-inspect-env.mjs` exit 0.
+
+## 2026-11-12 Final Engineering Completion: Environment Audit, Saved Items, Canonical Manifests & Cloudflare Architecture
+
+### 1. Complete Environment Variables Audit & Contract
+- Audited entire codebase (57 total active/optional environment variables).
+- Authored comprehensive contract: `docs/ENVIRONMENT_VARIABLES.md` containing complete specifications (Name, Location, Required status, Sensitivity, Purpose, Default, Format, Provider, Feature, Environment, Validation).
+- Synchronized all `.example` files (`.env.example`, `.dev.vars.example`, `.prod.vars.example`) with safe placeholders; zero secrets leaked.
+- Added automated preflight validation script: `scripts/validate-all-env.mjs` and npm script `npm run env:validate:all` (exit 0). Validates URLs, numeric limits, booleans, secret alignment (`CLOUDFLARE_R2_WORKER_HMAC_SECRET === WORKER_AUTH_SECRET`), git protection, and documentation completeness.
+
+### 2. Dedicated Saved Items System (`/saved-items`)
+- Implemented dedicated research workspace route `/saved-items` (`src/app/saved-items/page.tsx`) with stable identity (`dailymotion:video:<id>`, `dailymotion:channel:<id>`), country selector (`mode="local"`), category filter, search, view modes (Grid / List), sorting (newest/oldest/title/views/duration), multi-item batch selection, bulk removal, collection assignment, stable ID copy helpers, and sync status badges.
+- Upgraded `src/lib/local-first/indexeddb-store.ts` with `buildStableDailymotionId`, enriched `LocalSavedItemRecord` with `stableId`, `provider`, `country`, `category`, `sourcePage`, `sourceQuery`, `sourceFilters`, `syncStatus`, and `collectionIds`.
+- Enriched `SyncCoordinator` (`src/lib/sync/sync-coordinator.ts`) with `isItemSaved`, `saveItem`, `removeItem`, and `removeItemsBatch`.
+- Added navigation link in `src/components/layout/app-shell.tsx` under Workspace and Library.
+
+### 3. Universal Card Save Integration
+- Enhanced all discovery cards (`ResultCard`, `VideoCard`, `ChannelMetadataPanel`, `UnifiedSearch`, `DiscoveryExplorer`, `AiSearch`) to save items to IndexedDB via `SyncCoordinator.toggleSaveItem` and keep state synchronized with `useDiscoveryWorkspace()`.
+- Added "Save Channel" button in `ChannelMetadataPanel` (`src/components/channel-explorer/channel-metadata-panel.tsx`) with instant local persistence and outbox queuing.
+
+### 4. Canonical Storage Architecture & Manifest Schema
+- Centralized all storage paths in `src/lib/storage/dailymotion-canonical-paths.ts` (`saved-items`, `discovery/videos`, `discovery/channels`, `collections`, `saved-searches`, `search-history`, `legacy-supabase-archive`).
+- Authored canonical manifest schema with Zod validation, immutable generation IDs, and SHA-256 integrity calculation in `src/lib/storage/canonical-manifest-schema.ts`.
+- Created Cloudflare deployment guide with verified Windows PowerShell commands in `docs/CLOUDFLARE_DEPLOYMENT.md`.
+
+### 5. Verification Evidence
+- Vitest suite: 29/29 test files passed, 132/132 tests passed (`npm test`).
+- Added tests: `src/lib/storage/__tests__/canonical-manifest-schema.test.ts` (3 tests), `src/lib/storage/__tests__/dailymotion-canonical-paths.test.ts` (5 tests), `src/lib/sync/__tests__/sync-coordinator-saved-items.test.ts` (5 tests).
+- `npm run env:validate:all`: exit 0 (all constraints and secret alignments verified).
+- `npm run db:validate`: exit 0 (primary `DATABASE_URL` Supabase Session Pooler verified).
+- `node scripts/app-validate-env.mjs`: exit 0.
+
 ## Known Limitations
 
-- The current real product surface is mostly `/channel-explorer`.
-- `/search`, `/ai-search`, and `/saved` are still mostly placeholder UIs.
-- Channel Explorer now uses Prisma/Supabase persistence for manifests, jobs, windows, page attempts, history, resume checkpoints, coverage, source metadata, snapshots, and videos when `ENABLE_MANIFEST_PERSISTENCE=true`.
-- `npm run lint` is blocked by the stale `next lint` script; Next.js 16 requires moving linting to a direct ESLint or Biome command.
-- `stop-fetch` is informational only; actual stop behavior is browser-side `AbortController`, not server-side job cancellation.
-- AI routes currently return plain text, not strongly structured end-to-end JSON workflows.
-- No visible sign-in, sign-up, or full account management UI exists in the scanned app pages.
-- Runtime Prisma usage is intentionally centralized in `src/lib/prisma/client.ts` and `src/lib/repositories/channel-fetch-persistence.ts`, and only server route handlers reach that layer.
-- `framer-motion` is installed but not visibly used in the scanned source files.
-- Future database applies still require the operator to verify the target database and set `CONFIRM_DB_APPLY=true`.
+- Remote Cloudflare Worker deployment (`dailymotion-discovery-api`), private R2 bucket provisioning (`dailymotion-discovery-private`), and remote SQL migration deploy (`20261112000000_r2_generations_and_presets`) require explicit operator execution/approval and live `.env` credentials (`DATABASE_URL`, `CLOUDFLARE_R2_WORKER_URL`, `CLOUDFLARE_R2_WORKER_HMAC_SECRET`).
+- When `CLOUDFLARE_R2_WORKER_URL` is unset in local development, `/api/sync/save-all` safely records commits in Postgres (if reachable) and preserves outbox drafts on failure; `/api/storage/verify` returns 503 Worker-not-configured.
+- Live AI endpoints (`/api/ai/*`, `/ai-search`) fail closed with HTTP `503` until a real `GEMINI_API_KEY` replaces any placeholder in `.env`.
+- Admin session auth gates `/api/sync/*`, `/api/storage/*`, `/api/cloud/*`, and `/api/admin/*`.
 
 ## Future Roadmap
 
-- Add a YouTube adapter with the same normalized metadata and manifest model.
-- Expand into multi-platform adapters beyond Dailymotion.
-- Expand DB-backed Channel Explorer persistence into saved-library workflows, cleanup tooling, and event/audit timelines.
-- Enable `pgvector` and semantic search once embeddings are introduced.
-- Add authentication and user-account flows on top of the existing Supabase SSR foundation.
-- Expand saved collections and library workflows beyond the current placeholder page.
-- Add AI indexing, structured AI outputs, and retrieval-friendly metadata pipelines.
-- Add pagination or virtualization for very large manifests and result sets.
-- Add production monitoring, observability, and operational dashboards for fetch behavior and AI route health.
+- Deploy `cloudflare/workers/dailymotion-discovery-api` to Cloudflare Workers with `DM_BUCKET = dailymotion-discovery-private` and set `CLOUDFLARE_R2_WORKER_URL` + `CLOUDFLARE_R2_WORKER_HMAC_SECRET`.
+- Apply pending migrations (`20261011183739_workspace_cloud_persistence`, `20261112000000_r2_generations_and_presets`) via `CONFIRM_DB_APPLY=true npm run db:apply` against the active Postgres project.
+- Add multi-user Supabase Auth owner scoping when user login expands beyond single-admin mode.
 
 ## Agent Instructions
 
-- Read this ledger first before making structural changes.
-- Do not rebuild the app from scratch unless a human explicitly requests that approach.
-- Prefer minimal, surgical edits that respect the current manifest-first architecture.
-- Keep secrets server-only and do not print them in logs or docs.
-- Treat `DATABASE_URL` as the canonical DB variable.
-- Do not reintroduce `DIRECT_URL` as an active env variable, override, fallback, or duplicate database URL.
-- Preserve separation between Search Manifest, Channel Manifest, Saved Library, and AI scopes.
-- Do not turn this product into a downloader, scraper, or rehosting tool.
-- Update this ledger and `PROJECT_LEDGER.md` after meaningful architecture, workflow, or env-contract changes.
-- Check `README.md`, `PROJECT_LEDGER.md`, and repo-local `.agents/skills/` guidance when working on Supabase, Prisma, or operational flows.
+- Read `AGENTS.md` and this ledger before making structural changes.
+- Keep `prisma`, `@prisma/client`, and `@prisma/adapter-pg` aligned on **Prisma ORM 7 (`7.10.1`)** unless explicitly migrating to a new stable major version.
+- Use a root `.env` file (never `.env.local`) with `DATABASE_URL` primary and optional `SUPABASE_DATABASE_URL_CONNECTION_STRING` backup; never introduce `DIRECT_URL` or `DATABASE_URL_CONNECTION_STRING`.
+- Keep secrets server-only (`SUPABASE_SECRET_KEY`, `GEMINI_API_KEY`, `PRIVATE_DAILYMOTION_API_KEY_*`, `DATABASE_URL`) and preserve `requireAdmin()` gating on `/api/cloud/*` and `/api/admin/*`.
+- Never turn this product into a video downloader, rehosting tool, or private-stream scraper.
+- Update this ledger and `README.md` / `docs/migrations/*` whenever schema, env contracts, or route architecture change.

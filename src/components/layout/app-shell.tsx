@@ -6,6 +6,7 @@ import type { ReactNode } from "react";
 import {
   Archive,
   ArrowUpRight,
+  BookmarkCheck,
   Bot,
   Compass,
   Database,
@@ -84,7 +85,12 @@ const groups: { label: string; links: { label: string; href: string; icon: typeo
   {
     label: "Workspace",
     links: [
+      { label: "Saved Items", href: "/saved-items", icon: BookmarkCheck },
       { label: "History & Saved", href: "/workspace", icon: Archive },
+      { label: "Collections", href: "/collections", icon: Library },
+      { label: "Saved Searches", href: "/saved-searches", icon: Search },
+      { label: "Search History", href: "/history", icon: Database },
+      { label: "Storage & R2", href: "/storage", icon: Database },
       { label: "Settings", href: "/settings", icon: Settings },
       { label: "API Docs", href: "/docs", icon: FileText },
     ],

@@ -13,14 +13,38 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { optionalServerEnv } from "@/lib/config/env";
 
 export const ADMIN_COOKIE_NAME = "dm_admin_session";
+export const CANONICAL_ADMIN_USERNAME = "asdy";
+export const CANONICAL_ADMIN_EMAIL = "asdy@dailymotion.discov.com";
 
 function adminConfig() {
   return {
-    username: optionalServerEnv.ADMIN_DEFAULT_USERNAME || "admin",
+    username: optionalServerEnv.ADMIN_DEFAULT_USERNAME || CANONICAL_ADMIN_USERNAME,
+    email: (process.env.ADMIN_EMAIL || CANONICAL_ADMIN_EMAIL).trim().toLowerCase(),
     password: optionalServerEnv.ADMIN_INITIAL_PASSWORD ?? "",
     secret: optionalServerEnv.ADMIN_SESSION_SECRET ?? "",
     ttlSeconds: optionalServerEnv.ADMIN_SESSION_TTL_SECONDS || 604800,
   };
+}
+
+/**
+ * Resolves a username or email input to the canonical Supabase Auth email.
+ * Accepts "asdy", "asdy@dailymotion.discov.com", or legacy "admin" (for test environments).
+ * Returns null if unrecognized.
+ */
+export function resolveAdminEmail(input: string): string | null {
+  const normalized = input.trim().toLowerCase();
+  const config = adminConfig();
+  const validUsernames = [
+    config.username.toLowerCase(),
+    config.email.toLowerCase(),
+    CANONICAL_ADMIN_USERNAME.toLowerCase(),
+    CANONICAL_ADMIN_EMAIL.toLowerCase(),
+    "admin",
+  ];
+  if (validUsernames.includes(normalized)) {
+    return config.email;
+  }
+  return null;
 }
 
 export function isAdminConfigured(): boolean {
@@ -38,7 +62,15 @@ function safeEqual(a: string, b: string): boolean {
 export function verifyAdminCredentials(username: string, password: string): boolean {
   const config = adminConfig();
   if (!isAdminConfigured()) return false;
-  return safeEqual(username.trim(), config.username) && safeEqual(password, config.password);
+  const normalized = username.trim().toLowerCase();
+  const valid = [
+    config.username.toLowerCase(),
+    config.email.toLowerCase(),
+    CANONICAL_ADMIN_USERNAME.toLowerCase(),
+    "admin",
+  ];
+  const userMatches = valid.some((cand) => cand.length === normalized.length && safeEqual(cand, normalized));
+  return userMatches && safeEqual(password, config.password);
 }
 
 interface AdminPayload {

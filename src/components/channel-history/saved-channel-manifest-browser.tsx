@@ -80,7 +80,7 @@ export function SavedChannelManifestBrowser({
     // saved DB results. It gives instant multilingual filtering without silently
     // fetching more from Dailymotion or pretending every stored row is in memory.
     return searchVideoIndex(loadedIndex, query, { exactPhrase, fuzzy, limit: 200 });
-  }, [exactPhrase, fuzzy, items, loadedIndex, query]);
+  }, [exactPhrase, fuzzy, loadedIndex, query]);
 
   const displayItems = mode === "loaded-index" ? loadedIndexItems : items;
   const canPageBack = offset > 0 && mode === "server";

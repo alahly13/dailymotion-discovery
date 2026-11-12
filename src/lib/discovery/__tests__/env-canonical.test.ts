@@ -26,11 +26,9 @@ const CANONICAL = [
   "DAILYMOTION_LOCALIZATION",
   "TOKEN_CACHE_ENCRYPTION_KEY",
   "TOKEN_CACHE_SAFETY_MARGIN_SECONDS",
-  "DATABASE_URL_CONNECTION_STRING",
   "DATABASE_URL",
-  "DATABASE_URL_DIRECT",
+  "SUPABASE_DATABASE_URL_CONNECTION_STRING",
   "SUPABASE_SECRET_KEY",
-  "SUPABASE_SERVICE_ROLE_KEY",
   "NEXT_PUBLIC_SUPABASE_URL",
   "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY",
   "GEMINI_API_KEY",
@@ -64,5 +62,12 @@ describe("canonical environment documentation", () => {
       expect(EXAMPLE).toContain(`${name}=""`);
     }
     expect(EXAMPLE).toMatch(/Deprecated aliases/);
+  });
+
+  it("does not offer the retired service-role key as configuration", () => {
+    // SUPABASE_SERVICE_ROLE_KEY is retired: no active `NAME="..."` assignment
+    // may exist (a mention inside the deprecation note is allowed).
+    const assignments = EXAMPLE.split("\n").filter((line) => /^\s*SUPABASE_SERVICE_ROLE_KEY\s*=/.test(line));
+    expect(assignments).toEqual([]);
   });
 });

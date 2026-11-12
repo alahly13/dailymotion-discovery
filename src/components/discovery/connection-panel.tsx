@@ -11,7 +11,7 @@
 
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import type { ApiVersion } from "@/lib/discovery/types";
 import type { ConnectionTestResult } from "@/lib/discovery/connection-test";
 
@@ -44,11 +44,11 @@ export function readLastSuccess(version: ApiVersion): string | null {
 export function ConnectionPanel({ version, title, status }: { version: ApiVersion; title: string; status: ProfileStatus | null }) {
   const [testing, setTesting] = useState(false);
   const [result, setResult] = useState<ConnectionTestResult | null>(null);
-  const [lastSuccess, setLastSuccess] = useState<string | null>(null);
-
-  useEffect(() => {
-    setLastSuccess(readLastSuccess(version));
-  }, [version]);
+  const [lastSuccessByVersion, setLastSuccessByVersion] = useState<Partial<Record<ApiVersion, string | null>>>(() => ({
+    v1: readLastSuccess("v1"),
+    v2: readLastSuccess("v2"),
+  }));
+  const lastSuccess = lastSuccessByVersion[version] ?? null;
 
   const runTest = useCallback(async () => {
     if (testing) return; // duplicate-click guard
@@ -64,7 +64,7 @@ export function ConnectionPanel({ version, title, status }: { version: ApiVersio
         } catch {
           /* storage optional */
         }
-        setLastSuccess(data.testedAt);
+        setLastSuccessByVersion((prev) => ({ ...prev, [version]: data.testedAt }));
       }
     } catch {
       setResult({

@@ -29,6 +29,8 @@ export interface V1RawVideo {
   tags?: string[] | string | null;
   url?: string | null;
   mode?: string | null;
+  explicit?: boolean | null;
+  is_created_for_kids?: boolean | null;
 }
 
 export interface V1RawUser {
@@ -115,7 +117,12 @@ export function normalizeV1Video(raw: V1RawVideo): DiscoveryItem | null {
     ownerId: raw.owner ?? null,
     ownerName: raw["owner.screenname"] ?? raw.owner ?? null,
     views: zeroSafeNumber(raw.views_total),
-    extra: { channelName: raw["channel.name"] ?? raw.channel ?? null, mode: raw.mode ?? null },
+    extra: {
+      channelName: raw["channel.name"] ?? raw.channel ?? null,
+      mode: raw.mode ?? null,
+      explicit: typeof raw.explicit === "boolean" ? raw.explicit : null,
+      is_created_for_kids: typeof raw.is_created_for_kids === "boolean" ? raw.is_created_for_kids : null,
+    },
   };
 }
 

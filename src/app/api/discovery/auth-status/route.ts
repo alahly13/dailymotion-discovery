@@ -46,9 +46,7 @@ export async function GET() {
     supabase: storageConfigStatus(),
     database: {
       // Names only — never values. Actual target validated by db:validate.
-      connectionSource: (process.env.DATABASE_URL_CONNECTION_STRING ?? "").trim()
-        ? "DATABASE_URL_CONNECTION_STRING"
-        : "DATABASE_URL (deprecated fallback)",
+      connectionSource: "DATABASE_URL",
     },
     filters: {
       // Tri-state echo (boolean|null) — safe default visible, never a secret.

@@ -2,10 +2,13 @@
 
 import { useState } from "react";
 import type { ReactNode } from "react";
-import { CalendarDays, Clock3, ExternalLink, Eye, Languages, PlayCircle, UserRound } from "lucide-react";
+import { Bookmark, BookmarkCheck, CalendarDays, Check, Clock3, Copy, ExternalLink, Eye, Languages, PlayCircle, UserRound } from "lucide-react";
 import type { ManifestResultViewMode, NormalizedVideoMetadata, VideoCollectionProvenance } from "@/types/video";
 import { Card } from "@/components/ui/card";
 import { VideoHoverPreview } from "./video-hover-preview";
+import { useDiscoveryWorkspace } from "@/stores/discovery-workspace-store";
+import { useMergedDataset } from "@/lib/local-first/use-merged-dataset";
+import type { DiscoveryItem } from "@/lib/discovery/types";
 
 const numberFormatter = new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 });
 const dateFormatter = new Intl.DateTimeFormat("en", { month: "short", day: "numeric", year: "numeric" });
@@ -57,8 +60,37 @@ function Chip({ children, tone = "neutral" }: { children: ReactNode; tone?: "neu
   return <span className={`metadata-chip inline-flex min-w-0 max-w-full rounded-md border px-2 py-1 text-[11px] font-black uppercase leading-snug ${toneClass}`}>{children}</span>;
 }
 
+function toDiscoveryItem(video: NormalizedVideoMetadata): DiscoveryItem {
+  return {
+    kind: "video",
+    apiVersion: "v1",
+    id: video.id,
+    title: video.title,
+    description: video.description ?? null,
+    thumbnail: video.thumbnail ?? null,
+    url: video.url ?? null,
+    duration: video.duration ?? null,
+    language: video.language ?? null,
+    country: null,
+    category: video.channelName ?? null,
+    createdAt: video.createdAt ?? null,
+    year: video.year ?? null,
+    tags: video.tags ?? [],
+    ownerId: video.ownerId ?? null,
+    ownerName: video.ownerName ?? video.channelName ?? null,
+    views: video.views ?? null,
+    extra: {},
+    raw: video,
+  };
+}
+
 export function VideoCard({ video, resultViewMode = "combined" }: { video: NormalizedVideoMetadata; resultViewMode?: ManifestResultViewMode }) {
   const [preview, setPreview] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const workspace = useDiscoveryWorkspace();
+  const merged = useMergedDataset();
+  const cKey = `v1:video:${video.id}`;
+  const isSaved = merged.savedKeys.has(cKey) || workspace.isItemSaved("v1", "video", video.id);
   const channel = video.channelName ?? video.ownerName ?? "Unknown channel";
   const provenance = video.collectionProvenance ? { ...video.collectionProvenance, resultViewMode } : undefined;
   const sourceLabel = provenance?.sourceName ?? provenance?.sourceHandle ?? channel;
@@ -125,17 +157,52 @@ export function VideoCard({ video, resultViewMode = "combined" }: { video: Norma
           {provenance?.collectedAt ? <Chip>Added {provenance.collectedAt.slice(0, 10)}</Chip> : null}
         </div>
 
-        {video.url ? (
-          <a
-            href={video.url}
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex min-h-9 max-w-full items-center justify-center gap-2 rounded-md border border-[var(--border)] bg-[var(--surface-container-low)] px-3 text-center text-sm font-bold text-[var(--foreground)] transition hover:border-[var(--primary)] hover:bg-[var(--surface-container-high)] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[var(--ring)]"
+        <div className="flex flex-wrap items-center gap-2 pt-1">
+          {video.url ? (
+            <a
+              href={video.url}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex min-h-9 max-w-full items-center justify-center gap-2 rounded-md border border-[var(--border)] bg-[var(--surface-container-low)] px-3 text-center text-sm font-bold text-[var(--foreground)] transition hover:border-[var(--primary)] hover:bg-[var(--surface-container-high)] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[var(--ring)]"
+            >
+              Open
+              <ExternalLink className="h-4 w-4" aria-hidden="true" />
+            </a>
+          ) : null}
+          <button
+            type="button"
+            aria-pressed={isSaved}
+            onClick={() => {
+              const item = toDiscoveryItem(video);
+              void merged.coordinator.toggleSaveItem(item);
+              if (workspace.isItemSaved("v1", "video", video.id)) {
+                workspace.removeItem("v1", "video", video.id);
+              } else {
+                workspace.saveItem(item);
+              }
+            }}
+            className={`inline-flex min-h-9 items-center gap-1.5 rounded-md border px-3 text-xs font-black uppercase transition ${
+              isSaved
+                ? "border-[var(--primary)] bg-[color-mix(in_srgb,var(--primary)_14%,transparent)] text-[var(--primary)]"
+                : "border-[var(--border)] bg-[var(--surface-container-low)] text-[var(--muted-foreground)] hover:border-[var(--primary)] hover:text-[var(--foreground)]"
+            }`}
           >
-            Open
-            <ExternalLink className="h-4 w-4" aria-hidden="true" />
-          </a>
-        ) : null}
+            {isSaved ? <BookmarkCheck className="h-3.5 w-3.5" aria-hidden="true" /> : <Bookmark className="h-3.5 w-3.5" aria-hidden="true" />}
+            {isSaved ? "Saved" : "Save"}
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              void navigator.clipboard?.writeText(video.id);
+              setCopied(true);
+              setTimeout(() => setCopied(false), 1500);
+            }}
+            className="inline-flex min-h-9 items-center gap-1.5 rounded-md border border-[var(--border)] bg-[var(--surface-container-low)] px-3 text-xs font-bold text-[var(--muted-foreground)] transition hover:border-[var(--primary)] hover:text-[var(--foreground)]"
+          >
+            {copied ? <Check className="h-3.5 w-3.5 text-[var(--success)]" aria-hidden="true" /> : <Copy className="h-3.5 w-3.5" aria-hidden="true" />}
+            {copied ? "Copied ID" : video.id}
+          </button>
+        </div>
       </div>
     </Card>
   );

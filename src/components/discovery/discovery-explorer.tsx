@@ -19,6 +19,15 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { getCapability } from "@/lib/discovery/capability-registry";
 import { mergeDiscoveryItems, type ApiVersion, type DiscoveryFailure, type DiscoveryItem, type DiscoveryResource } from "@/lib/discovery/types";
+import {
+  DEFAULT_DISCOVERY_LOCAL_FILTERS,
+  applyDiscoveryResultPipeline,
+  type LocalFilterState,
+} from "@/lib/filters/discovery-result-filters";
+import { DiscoveryLocalFilterPanel } from "./discovery-local-filter-panel";
+import { CountrySelector } from "./country-selector";
+import { discoveryCompositeKey } from "@/lib/resources/dailymotion-resource-taxonomy";
+import { useMergedDataset } from "@/lib/local-first/use-merged-dataset";
 import { ResultCard } from "./result-card";
 import { useDiscoveryWorkspace } from "@/stores/discovery-workspace-store";
 
@@ -115,6 +124,7 @@ export function DiscoveryExplorer({ version, resource, pageTitle, pageDescriptio
   const modes = useMemo(() => modesFor(resource, version), [resource, version]);
   const inputs = useMemo(() => serverInputsFor(resource, version), [resource, version]);
   const workspace = useDiscoveryWorkspace();
+  const merged = useMergedDataset();
 
   const [mode, setMode] = useState(() => searchParams.get("mode") ?? modes[0].value);
   const [fields, setFields] = useState<Record<string, string>>(() => {
@@ -134,7 +144,7 @@ export function DiscoveryExplorer({ version, resource, pageTitle, pageDescriptio
   const [failure, setFailure] = useState<DiscoveryFailure | null>(null);
   const [hasSearched, setHasSearched] = useState(false);
   const [meData, setMeData] = useState<unknown>(null);
-  const [local, setLocal] = useState({ query: "", language: "", category: "", minDuration: "", hasThumbnail: false });
+  const [localFilters, setLocalFilters] = useState<LocalFilterState>(DEFAULT_DISCOVERY_LOCAL_FILTERS);
   const [savedFlash, setSavedFlash] = useState<string | null>(null);
   const inflightKey = useRef<string | null>(null);
 
@@ -193,11 +203,21 @@ export function DiscoveryExplorer({ version, resource, pageTitle, pageDescriptio
       setHasSearched(true);
       router.replace(`?${params.toString()}`, { scroll: false });
       if (!append) {
+        const paramObj = Object.fromEntries(params.entries());
         workspace.addHistory({
           version, resource,
           label: `${capability.title}: ${fields.q || fields.id || fields.owner || fields.profileId || mode}`,
-          params: Object.fromEntries(params.entries()),
+          params: paramObj,
           resultCount: result.total ?? result.items.length,
+        });
+        void merged.coordinator.recordSearchHistory({
+          apiVersion: version,
+          resource,
+          mode,
+          query: fields.q || fields.id || fields.owner || fields.profileId || "",
+          apiParams: paramObj,
+          resultCount: result.total ?? result.items.length,
+          snapshotItems: result.items.slice(0, 100),
         });
         workspace.recordSearchOutcome(version, true, 1);
       } else {
@@ -217,24 +237,22 @@ export function DiscoveryExplorer({ version, resource, pageTitle, pageDescriptio
   // Auto-run when landing with URL params (preserved state / shared links).
   useEffect(() => {
     const hasQuery = [...searchParams.keys()].length > 0;
-    if (hasQuery) void runSearch(Number(searchParams.get("page") ?? 1), false);
+    if (!hasQuery) return;
+    let active = true;
+    const initialPage = Number(searchParams.get("page") ?? 1);
+    void Promise.resolve().then(() => {
+      if (active) void runSearch(initialPage, false);
+    });
+    return () => {
+      active = false;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const filtered = useMemo(() => {
-    const q = local.query.trim().toLowerCase();
-    const lang = local.language.trim().toLowerCase();
-    const cat = local.category.trim().toLowerCase();
-    const minDur = local.minDuration === "" ? null : Number(local.minDuration);
-    return items.filter((item) => {
-      if (q && !`${item.title} ${item.description ?? ""} ${item.ownerName ?? ""} ${item.id}`.toLowerCase().includes(q)) return false;
-      if (lang && (item.language ?? "").toLowerCase() !== lang) return false;
-      if (cat && (item.category ?? "").toLowerCase() !== cat) return false;
-      if (minDur !== null && Number.isFinite(minDur) && (item.duration ?? 0) < minDur * 60) return false;
-      if (local.hasThumbnail && !item.thumbnail) return false;
-      return true;
-    });
-  }, [items, local]);
+  const filtered = useMemo(
+    () => applyDiscoveryResultPipeline(items, localFilters),
+    [items, localFilters]
+  );
 
   const counterpartHref = useMemo(() => {
     const params = new URLSearchParams();
@@ -267,10 +285,26 @@ export function DiscoveryExplorer({ version, resource, pageTitle, pageDescriptio
   }, [filtered, resource, version]);
 
   const saveCurrentSearch = useCallback(() => {
-    workspace.saveSearch({ version, resource, label: `${capability.title}: ${fields.q || fields.id || fields.owner || fields.profileId || mode}`, params: Object.fromEntries(buildParams(1).entries()) });
-    setSavedFlash("Search saved to workspace.");
+    const label = `${capability.title}: ${fields.q || fields.id || fields.owner || fields.profileId || mode}`;
+    const apiParams = Object.fromEntries(buildParams(1).entries());
+    workspace.saveSearch({ version, resource, label, params: apiParams });
+    void merged.coordinator.saveSearchPreset({
+      name: label,
+      apiVersion: version,
+      resource,
+      mode,
+      query: fields.q || fields.id || fields.owner || fields.profileId || "",
+      apiParams,
+      localFilters: localFilters as unknown as Record<string, unknown>,
+      tags: [version, resource],
+      pinned: false,
+      cachedSnapshot: items.length > 0
+        ? { capturedAt: new Date().toISOString(), totalFetched: items.length, items: items.slice(0, 150) }
+        : undefined,
+    });
+    setSavedFlash("Saved search preset + offline snapshot.");
     setTimeout(() => setSavedFlash(null), 2500);
-  }, [buildParams, capability.title, fields, mode, resource, version, workspace]);
+  }, [buildParams, capability.title, fields, items, localFilters, merged.coordinator, mode, resource, version, workspace]);
 
   const needsId = mode === "lookup" || mode === "related";
   const needsOwner = mode === "owner" || (mode === "videos" && resource !== "videos" && version === "v1");
@@ -369,10 +403,13 @@ export function DiscoveryExplorer({ version, resource, pageTitle, pageDescriptio
           )}
           <div className="grid grid-cols-2 gap-3">
             {inputs.includes("country") && (
-              <div>
-                <label className={labelClass} htmlFor="dm-country">Country</label>
-                <input id="dm-country" className={inputClass} value={fields.country ?? ""} onChange={(e) => set("country", e.target.value)} placeholder="US" />
-              </div>
+              <CountrySelector
+                value={fields.country ?? ""}
+                onChange={(code) => set("country", code)}
+                mode="api"
+                label="Country"
+                placeholder="All / any country"
+              />
             )}
             {inputs.includes("languages") && (
               <div>
@@ -495,26 +532,9 @@ export function DiscoveryExplorer({ version, resource, pageTitle, pageDescriptio
           </div>
           {savedFlash && <p className="text-xs font-bold text-emerald-600">{savedFlash}</p>}
 
-          <details className="rounded-md border border-[var(--border)] p-3 text-xs leading-5 text-[var(--muted-foreground)]">
-            <summary className="cursor-pointer font-black uppercase">Local filters (retrieved results only)</summary>
-            <div className="mt-3 grid gap-2">
-              <input className={inputClass} value={local.query} onChange={(e) => setLocal((p) => ({ ...p, query: e.target.value }))} placeholder="Filter retrieved results…" />
-              <div className="grid grid-cols-2 gap-2">
-                <input className={inputClass} value={local.language} onChange={(e) => setLocal((p) => ({ ...p, language: e.target.value }))} placeholder="Language" />
-                <input className={inputClass} value={local.category} onChange={(e) => setLocal((p) => ({ ...p, category: e.target.value }))} placeholder="Category" />
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <input type="number" min={0} className={inputClass} value={local.minDuration} onChange={(e) => setLocal((p) => ({ ...p, minDuration: e.target.value }))} placeholder="Min minutes" />
-                <label className="flex items-center gap-2 font-semibold">
-                  <input type="checkbox" className="h-4 w-4 accent-[var(--primary)]" checked={local.hasThumbnail} onChange={(e) => setLocal((p) => ({ ...p, hasThumbnail: e.target.checked }))} />
-                  Has thumbnail
-                </label>
-              </div>
-              <button type="button" onClick={() => setLocal({ query: "", language: "", category: "", minDuration: "", hasThumbnail: false })} className="min-h-9 rounded-md border border-[var(--border)] text-xs font-black uppercase">
-                Reset local filters
-              </button>
-            </div>
-          </details>
+          <p className="rounded-md border border-[var(--border)] bg-[var(--surface-container-low)] p-3 text-xs leading-5 text-[var(--muted-foreground)]">
+            Loaded results can be filtered locally (zero API calls) using the filter bar above the results grid.
+          </p>
         </div>
 
         <div className="space-y-4">
@@ -542,17 +562,27 @@ export function DiscoveryExplorer({ version, resource, pageTitle, pageDescriptio
           )}
 
           {(hasSearched || items.length > 0) && meData === null && (
-            <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[var(--border)] bg-[var(--card)] px-4 py-3 text-xs font-bold text-[var(--muted-foreground)]">
-              <span>
-                Retrieved <strong className="text-[var(--foreground)]">{filtered.length}</strong>
-                {meta?.total !== null && meta?.total !== undefined ? <> of <strong className="text-[var(--foreground)]">{meta.total}</strong> reported</> : " (total not reported)"}
-                {meta?.hasMore ? " · more pages available" : " · end of results"}
-                {meta?.capped ? " · result-window cap reached — narrow with date filters" : ""}
-              </span>
-              <span className="flex gap-2">
-                <button type="button" onClick={exportJson} className="rounded-md border border-[var(--border)] px-2 py-1 uppercase">JSON</button>
-                <button type="button" onClick={exportCsv} className="rounded-md border border-[var(--border)] px-2 py-1 uppercase">CSV</button>
-              </span>
+            <div className="space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[var(--border)] bg-[var(--card)] px-4 py-3 text-xs font-bold text-[var(--muted-foreground)]">
+                <span>
+                  Retrieved <strong className="text-[var(--foreground)]">{filtered.length}</strong>
+                  {meta?.total !== null && meta?.total !== undefined ? <> of <strong className="text-[var(--foreground)]">{meta.total}</strong> reported</> : " (total not reported)"}
+                  {meta?.hasMore ? " · more pages available" : " · end of results"}
+                  {meta?.capped ? " · result-window cap reached — narrow with date filters" : ""}
+                </span>
+                <span className="flex gap-2">
+                  <button type="button" onClick={exportJson} className="rounded-md border border-[var(--border)] px-2 py-1 uppercase">JSON</button>
+                  <button type="button" onClick={exportCsv} className="rounded-md border border-[var(--border)] px-2 py-1 uppercase">CSV</button>
+                </span>
+              </div>
+              {items.length > 0 && (
+                <DiscoveryLocalFilterPanel
+                  value={localFilters}
+                  onChange={setLocalFilters}
+                  totalLoaded={items.length}
+                  filteredCount={filtered.length}
+                />
+              )}
             </div>
           )}
 
@@ -564,17 +594,34 @@ export function DiscoveryExplorer({ version, resource, pageTitle, pageDescriptio
           )}
 
           <div className="grid gap-4 md:grid-cols-2">
-            {filtered.map((item) => (
-              <ResultCard
-                key={`${item.apiVersion}:${item.kind}:${item.id}`}
-                item={item}
-                saved={workspace.isItemSaved(item.apiVersion, item.kind, item.id)}
-                onToggleSave={() => {
-                  if (workspace.isItemSaved(item.apiVersion, item.kind, item.id)) workspace.removeItem(item.apiVersion, item.kind, item.id);
-                  else workspace.saveItem(item);
-                }}
-              />
-            ))}
+            {filtered.map((item) => {
+              const cKey = discoveryCompositeKey(item.apiVersion, item.kind, item.id);
+              const isSavedLocal = merged.savedKeys.has(cKey) || workspace.isItemSaved(item.apiVersion, item.kind, item.id);
+              return (
+                <ResultCard
+                  key={cKey}
+                  item={item}
+                  saved={isSavedLocal}
+                  favorite={merged.favoriteKeys.has(cKey)}
+                  collections={merged.collections.map((c) => ({ id: c.id, name: c.name }))}
+                  onToggleFavorite={() => {
+                    if (!isSavedLocal) {
+                      void merged.coordinator.toggleSaveItem(item).then(() =>
+                        merged.coordinator.setSavedItemFavorite(cKey, true)
+                      );
+                    } else {
+                      void merged.coordinator.setSavedItemFavorite(cKey, !merged.favoriteKeys.has(cKey));
+                    }
+                  }}
+                  onAddToCollection={(colId) => void merged.coordinator.addItemToCollection(colId, item)}
+                  onToggleSave={() => {
+                    void merged.coordinator.toggleSaveItem(item);
+                    if (workspace.isItemSaved(item.apiVersion, item.kind, item.id)) workspace.removeItem(item.apiVersion, item.kind, item.id);
+                    else workspace.saveItem(item);
+                  }}
+                />
+              );
+            })}
           </div>
 
           {hasSearched && filtered.length === 0 && !failure && meData === null && (

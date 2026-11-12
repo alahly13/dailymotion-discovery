@@ -20,6 +20,8 @@ export interface V2RawVideo {
   published_at?: string | null;
   tags?: string[] | null;
   video_url?: string | null;
+  is_explicit?: boolean | null;
+  is_for_kids?: boolean | null;
   source?: { duration?: number | null } | null;
   profile?: { profile_id?: string | null; name?: string | null; display_name?: string | null } | null;
   thumbnail?: { h1080_url?: string | null; h720_url?: string | null; h480_url?: string | null } | null;
@@ -113,7 +115,12 @@ export function normalizeV2Video(raw: V2RawVideo): DiscoveryItem | null {
     tags: Array.isArray(raw.tags) ? raw.tags.filter((t): t is string => typeof t === "string" && t.length > 0) : [],
     ownerId: raw.profile?.profile_id ?? null,
     ownerName: raw.profile?.display_name ?? raw.profile?.name ?? null,
-    extra: { visibility: raw.visibility ?? null, publishedAt: validIso(raw.published_at) },
+    extra: {
+      visibility: raw.visibility ?? null,
+      publishedAt: validIso(raw.published_at),
+      is_explicit: typeof raw.is_explicit === "boolean" ? raw.is_explicit : null,
+      is_for_kids: typeof raw.is_for_kids === "boolean" ? raw.is_for_kids : null,
+    },
   };
 }
 

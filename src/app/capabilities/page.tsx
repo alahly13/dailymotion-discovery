@@ -6,6 +6,7 @@
 
 import Link from "next/link";
 import { listCapabilities } from "@/lib/discovery/capability-registry";
+import { FILTER_CAPABILITY_MATRIX } from "@/lib/discovery/filter-capabilities";
 import type { DiscoveryResource } from "@/lib/discovery/types";
 
 const RESOURCE_ORDER: DiscoveryResource[] = ["general", "videos", "channels", "playlists", "users", "live"];
@@ -64,6 +65,52 @@ export default function CapabilitiesPage() {
           </section>
         );
       })}
+
+      <section className="space-y-3 pt-4">
+        <div>
+          <p className="text-xs font-black uppercase tracking-[0.2em] text-[var(--primary)]">Filter Execution Boundary</p>
+          <h2 className="mt-1 text-2xl font-black">Provider API vs Local Browser Filter Matrix</h2>
+          <p className="mt-1 max-w-3xl text-xs text-[var(--muted-foreground)]">
+            Every filter explicitly distinguishes whether execution runs upstream on Dailymotion (`api`) or post-fetch
+            inside browser memory (`local`, zero extra API calls).
+          </p>
+        </div>
+
+        <div className="overflow-x-auto rounded-lg border border-[var(--border)] bg-[var(--card)]">
+          <table className="w-full min-w-[760px] text-left text-xs">
+            <thead>
+              <tr className="border-b border-[var(--border)] text-[10px] font-black uppercase text-[var(--muted-foreground)]">
+                <th className="p-3">Filter Capability</th>
+                <th className="p-3">Category</th>
+                <th className="p-3">API v1 Layer</th>
+                <th className="p-3">API v2 Layer</th>
+                <th className="p-3">Notes</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-[var(--border)]">
+              {FILTER_CAPABILITY_MATRIX.map((cap) => (
+                <tr key={cap.key}>
+                  <td className="p-3 font-black">{cap.label}</td>
+                  <td className="p-3 uppercase text-[var(--muted-foreground)]">{cap.category}</td>
+                  <td className="p-3 font-black uppercase">
+                    <span className={cap.supportByVersion.v1 === "api" ? "text-[var(--primary)]" : "text-emerald-600 dark:text-emerald-400"}>
+                      {cap.supportByVersion.v1}
+                    </span>
+                    {cap.apiParamByVersion?.v1 ? ` (${cap.apiParamByVersion.v1})` : ""}
+                  </td>
+                  <td className="p-3 font-black uppercase">
+                    <span className={cap.supportByVersion.v2 === "api" ? "text-[var(--primary)]" : "text-emerald-600 dark:text-emerald-400"}>
+                      {cap.supportByVersion.v2}
+                    </span>
+                    {cap.apiParamByVersion?.v2 ? ` (${cap.apiParamByVersion.v2})` : ""}
+                  </td>
+                  <td className="p-3 text-[var(--muted-foreground)]">{cap.description}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
     </div>
   );
 }

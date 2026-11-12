@@ -1,0 +1,14 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "dailymotion-discovery-api",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-11-12",
+  "workers_dev": true,
+  "r2_buckets": [
+    {
+      "binding": "DM_BUCKET",
+      "bucket_name": "dailymotion-discovery-private",
+      "remote": true
+    }
+  ]
+}

@@ -1,0 +1,4 @@
+# Copy to .prod.vars for production `wrangler deploy --secrets-file .prod.vars` (never commit real .prod.vars).
+# WORKER_AUTH_SECRET must match the 64-character hex secret configured in the Next.js production CLOUDFLARE_R2_WORKER_HMAC_SECRET.
+WORKER_AUTH_SECRET="replace-with-matching-64-char-hex-secret-from-CLOUDFLARE_R2_WORKER_HMAC_SECRET"
+ALLOWED_ORIGINS="https://your-production-domain.com,https://your-preview-domain.com"

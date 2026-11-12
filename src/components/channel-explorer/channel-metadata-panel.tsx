@@ -1,8 +1,11 @@
 "use client";
 
-import { Database, RefreshCw, ShieldCheck } from "lucide-react";
+import { Bookmark, BookmarkCheck, Database, RefreshCw, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { useDiscoveryWorkspace } from "@/stores/discovery-workspace-store";
+import { useMergedDataset } from "@/lib/local-first/use-merged-dataset";
+import type { DiscoveryItem } from "@/lib/discovery/types";
 import type { ChannelCoverage, ChannelPersistenceMode, ChannelSourceMetadata } from "@/types/channel-fetch";
 
 function display(value: string | number | null | undefined) {
@@ -37,6 +40,45 @@ export function ChannelMetadataPanel({
   persistenceWarning: string | null;
   onRefresh: () => void;
 }) {
+  const merged = useMergedDataset();
+  const workspace = useDiscoveryWorkspace();
+  const channelId = metadata?.externalSourceId || metadata?.username || "";
+  const cKey = `v1:channel:${channelId}`;
+  const isSaved = channelId ? merged.savedKeys.has(cKey) || workspace.isItemSaved("v1", "channel", channelId) : false;
+
+  const handleToggleSaveChannel = () => {
+    if (!metadata || !channelId) return;
+    const channelItem: DiscoveryItem = {
+      kind: "channel",
+      apiVersion: "v1",
+      id: channelId,
+      title: metadata.displayName || metadata.username || channelId,
+      description: metadata.description ?? null,
+      thumbnail: metadata.avatarUrl ?? metadata.thumbnailUrl ?? null,
+      url: metadata.canonicalUrl ?? `https://www.dailymotion.com/${channelId}`,
+      duration: null,
+      language: metadata.language ?? null,
+      country: metadata.country ?? null,
+      category: null,
+      createdAt: null,
+      year: null,
+      tags: [],
+      ownerId: channelId,
+      ownerName: metadata.displayName ?? metadata.username ?? null,
+      views: null,
+      extra: {
+        reportedTotal: metadata.reportedTotalFromApi,
+      },
+      raw: metadata,
+    };
+    void merged.coordinator.toggleSaveItem(channelItem);
+    if (workspace.isItemSaved("v1", "channel", channelId)) {
+      workspace.removeItem("v1", "channel", channelId);
+    } else {
+      workspace.saveItem(channelItem);
+    }
+  };
+
   const persisted = persistence === "database" && !persistenceWarning;
   const persistenceCopy = persisted || (!metadata && !persistenceWarning)
     ? "Source metadata snapshots are stored in the database when manifest persistence is enabled."
@@ -71,10 +113,23 @@ export function ChannelMetadataPanel({
             </div>
           </div>
         </div>
-        <Button type="button" variant="secondary" onClick={onRefresh} disabled={loading}>
-          <RefreshCw className="h-4 w-4" aria-hidden="true" />
-          Refresh Metadata
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          {metadata && channelId ? (
+            <Button
+              type="button"
+              variant={isSaved ? "default" : "outline"}
+              onClick={handleToggleSaveChannel}
+              className="gap-1.5"
+            >
+              {isSaved ? <BookmarkCheck className="h-4 w-4" aria-hidden="true" /> : <Bookmark className="h-4 w-4" aria-hidden="true" />}
+              {isSaved ? "Saved Channel" : "Save Channel"}
+            </Button>
+          ) : null}
+          <Button type="button" variant="secondary" onClick={onRefresh} disabled={loading}>
+            <RefreshCw className="h-4 w-4" aria-hidden="true" />
+            Refresh Metadata
+          </Button>
+        </div>
       </div>
 
       <p className="max-w-3xl text-sm leading-6 text-[var(--muted-foreground)]">

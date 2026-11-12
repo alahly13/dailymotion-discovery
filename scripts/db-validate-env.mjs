@@ -54,20 +54,21 @@ function sanitizeMeta(raw) {
 }
 
 function validate() {
-  // Canonical first, legacy fallback (warns). Values never printed.
-  const canonical = process.env.DATABASE_URL_CONNECTION_STRING?.trim() || '';
-  const legacy = process.env.DATABASE_URL?.trim() || '';
-  const databaseUrl = canonical || legacy;
-  const usingLegacy = !canonical && !!legacy;
+  // DATABASE_URL is primary; the documented backup applies only when the
+  // primary is missing (warn loudly, never silently). Values never printed.
+  const primary = process.env.DATABASE_URL?.trim() || '';
+  const backup = !primary ? process.env.SUPABASE_DATABASE_URL_CONNECTION_STRING?.trim() || '' : '';
+  const databaseUrl = primary || backup;
+  const usingBackup = !primary && !!backup;
 
   if (isBlankOrPlaceholder(databaseUrl)) {
-    console.error('[ERROR] Missing required environment variable: DATABASE_URL_CONNECTION_STRING');
-    console.error('Set DATABASE_URL_CONNECTION_STRING in Vercel, GitHub Codespaces, GitHub Actions, your local shell, or a root .env.local file.');
+    console.error('[ERROR] Missing required environment variable: DATABASE_URL');
+    console.error('Set DATABASE_URL in Vercel, GitHub Codespaces, GitHub Actions, your local shell, or a root .env file.');
     process.exit(1);
   }
 
   if (!looksLikePostgres(databaseUrl)) {
-    console.error('[ERROR] DATABASE_URL_CONNECTION_STRING must be a postgres:// or postgresql:// URL.');
+    console.error('[ERROR] DATABASE_URL must be a postgres:// or postgresql:// URL.');
     console.error('If your password contains reserved characters such as #, @, ?, /, or $, percent-encode them before pasting the URL.');
     process.exit(1);
   }
@@ -76,27 +77,25 @@ function validate() {
 
   const databaseDetails = sanitizeMeta(databaseUrl);
   console.log(
-    `- connection: protocol=${databaseDetails.protocol}, host=${databaseDetails.host}, port=${databaseDetails.port}, database=${databaseDetails.database}, host_type=${databaseDetails.hostType}, query_params=${databaseDetails.queryParams}`
+    `- connection (${usingBackup ? "backup SUPABASE_DATABASE_URL_CONNECTION_STRING" : "primary DATABASE_URL"}): protocol=${databaseDetails.protocol}, host=${databaseDetails.host}, port=${databaseDetails.port}, database=${databaseDetails.database}, host_type=${databaseDetails.hostType}, query_params=${databaseDetails.queryParams}`
   );
 
-  if (usingLegacy) {
-    console.warn('[WARN] Using deprecated DATABASE_URL fallback. Migrate to DATABASE_URL_CONNECTION_STRING (canonical wins when both are set).');
+  if (usingBackup) {
+    console.warn('[WARN] DATABASE_URL is missing; using backup SUPABASE_DATABASE_URL_CONNECTION_STRING. Set DATABASE_URL as the primary connection.');
   }
 
-  console.log('[INFO] Prisma CLI and migrations use DATABASE_URL_CONNECTION_STRING (legacy DATABASE_URL fallback).');
+  console.log('[INFO] Prisma CLI and migrations use DATABASE_URL (primary).');
 
   if (classifyHost(databaseDetails.host) === 'supabase-direct') {
     console.warn(
       '[WARN] Connection looks like a Supabase direct host (db.<project-ref>.supabase.co). ' +
-        'This can fail in IPv4-only environments unless IPv6 or Supabase IPv4 add-on is available. ' +
-        'Use the Supabase Session Pooler shape: aws-0-<region>.pooler.supabase.com.'
+        'Direct connections need working IPv6 egress — verify with `npm run db:diagnose`.'
     );
   }
 
   if (databaseDetails.hostType === 'supabase-session-pooler' && databaseDetails.port !== '5432') {
     console.warn(
-      '[WARN] Connection uses a Supabase pooler host but not the documented Session Pooler port 5432. ' +
-        'This project expects the Session Pooler URL for Prisma CLI/status/apply diagnostics.'
+      '[WARN] Connection uses a Supabase pooler host but not the documented Session Pooler port 5432.'
     );
   }
 

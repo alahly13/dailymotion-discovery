@@ -113,31 +113,54 @@ export default function ChannelExplorerPage() {
     const params = new URLSearchParams(window.location.search);
     const source = params.get("source");
     const resumeJobId = params.get("resumeJobId");
+    if (!source && !resumeJobId) return;
 
     // Saved channel pages can hand a source and optional resumable job back to
-    // the explorer. This only pre-fills local controls; it does not make a
-    // Dailymotion request until the user explicitly analyzes or starts fetching.
-    if (source) setInput((current) => current || source);
-    if (resumeJobId) setFetchSettings((current) => ({ ...current, resumeJobId }));
+    // the explorer. Deferring via microtask preserves async React 19 mount flow
+    // and only pre-fills local controls until the user analyzes or fetches.
+    let active = true;
+    void Promise.resolve().then(() => {
+      if (!active) return;
+      if (source) setInput((current) => current || source);
+      if (resumeJobId) setFetchSettings((current) => ({ ...current, resumeJobId }));
+    });
+    return () => {
+      active = false;
+    };
   }, []);
 
-  useEffect(() => {
-    if (!safetyCaps) return;
-    setFetchSettings((current) => ({
-      ...current,
-      // The UI mirrors backend concurrency caps for usability, while the route
-      // handler remains authoritative. This prevents a stale browser form from
-      // displaying a worker count the server will never honor.
-      concurrency: Math.min(Math.max(current.concurrency ?? safetyCaps.defaultConcurrency, 1), safetyCaps.maxConcurrency),
-    }));
-  }, [safetyCaps]);
+  const effectiveFetchSettings = useMemo(() => {
+    if (!safetyCaps) return fetchSettings;
+    return {
+      ...fetchSettings,
+      // Mirror backend concurrency caps in derived UI settings while keeping the
+      // server route handler authoritative.
+      concurrency: Math.min(Math.max(fetchSettings.concurrency ?? safetyCaps.defaultConcurrency, 1), safetyCaps.maxConcurrency),
+    };
+  }, [fetchSettings, safetyCaps]);
 
   const selectedManifest = useMemo(() => {
     if (manifestSearchScope === "combined") return combinedManifest ?? currentAttemptManifest;
     if (manifestSearchScope === "attempt") return currentAttemptManifest ?? combinedManifest;
     return currentAttemptManifest ?? combinedManifest;
   }, [combinedManifest, currentAttemptManifest, manifestSearchScope]);
-  const selectedManifestItems = selectedManifest?.items ?? [];
+  const selectedManifestItems = useMemo(() => selectedManifest?.items ?? [], [selectedManifest]);
+  const aiManifestSummary = useMemo(() => {
+    if (!selectedManifest || selectedManifestItems.length === 0) return null;
+    return {
+      source: metadata?.displayName ?? selectedManifest.resolvedChannelName ?? selectedManifest.sourceInput ?? input,
+      totalCollected: selectedManifestItems.length,
+      sample: selectedManifestItems.slice(0, 35).map((item) => ({
+        id: item.id,
+        title: item.title,
+        duration: item.duration,
+        views: item.views,
+        language: item.language,
+        year: item.year,
+        tags: item.tags.slice(0, 5),
+      })),
+    };
+  }, [input, metadata?.displayName, selectedManifest, selectedManifestItems]);
   const manifestSearchIndex = useMemo(() => buildVideoSearchIndex(selectedManifestItems), [selectedManifestItems]);
   const searchedItems = useMemo(
     () => searchVideoIndex(manifestSearchIndex, manifestSearchQuery, { exactPhrase: manifestSearchExactPhrase, fuzzy: manifestSearchFuzzy, limit: 1000 }),
@@ -269,7 +292,7 @@ export default function ChannelExplorerPage() {
       const response = await fetch("/api/dailymotion/channel/jobs/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ input, requestId, settings: { ...fetchSettings, resumeJobId, continueFromLatest } }),
+        body: JSON.stringify({ input, requestId, settings: { ...effectiveFetchSettings, resumeJobId, continueFromLatest } }),
         signal: controller.signal,
       });
       const data = await readJson<ChannelFetchStartResponse>(response);
@@ -408,7 +431,7 @@ export default function ChannelExplorerPage() {
               </div>
             ))}
           </div>
-          <ChannelFetchConfigPanel settings={fetchSettings} safetyCaps={safetyCaps} loading={loading} primaryLabel={primaryFetchLabel} primaryCopy={primaryFetchCopy} hasSavedAttempts={hasSavedAttempts} onChange={setFetchSettings} onStart={runPrimaryFetch} onStartNew={() => startFetch(null, false)} onReset={() => setFetchSettings(defaultFetchSettings)} />
+          <ChannelFetchConfigPanel settings={effectiveFetchSettings} safetyCaps={safetyCaps} loading={loading} primaryLabel={primaryFetchLabel} primaryCopy={primaryFetchCopy} hasSavedAttempts={hasSavedAttempts} onChange={setFetchSettings} onStart={runPrimaryFetch} onStartNew={() => startFetch(null, false)} onReset={() => setFetchSettings(defaultFetchSettings)} />
         </div>
       </div>
 
@@ -427,7 +450,16 @@ export default function ChannelExplorerPage() {
         <ChannelManifestSearchPanel query={manifestSearchQuery} scope={manifestSearchScope} exactPhrase={manifestSearchExactPhrase} fuzzy={manifestSearchFuzzy} sourceCount={selectedManifestItems.length} matchedCount={searchedItems.length} filteredCount={filteredItems.length} sourceLabel={searchSourceLabel} onQueryChange={setManifestSearchQuery} onScopeChange={setManifestSearchScope} onExactPhraseChange={setManifestSearchExactPhrase} onFuzzyChange={setManifestSearchFuzzy} />
         <AdvancedFilterPanel filters={filters} onChange={setFilters} onReset={() => setFilters(defaultAdvancedVideoFilters)} />
       </div>
-      <ActiveFilterChips filters={filters} />
+      <ActiveFilterChips
+        filters={filters}
+        onRemove={(key) =>
+          setFilters((prev) => ({
+            ...prev,
+            [key]: defaultAdvancedVideoFilters[key],
+          }))
+        }
+        onReset={() => setFilters(defaultAdvancedVideoFilters)}
+      />
       <div className="space-y-4 rounded-lg border border-[var(--border)] bg-[var(--card)] p-5 shadow-[var(--shadow)]">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
@@ -493,7 +525,10 @@ export default function ChannelExplorerPage() {
           <button type="button" onClick={() => exportManifest(currentAttemptManifest, `dailymotion-attempt-${activeJob?.attemptNumber ?? "latest"}.ndjson`, "ndjson")} className="rounded-md border border-[var(--border)] bg-[var(--surface-container-low)] px-3 py-2 text-center text-sm font-bold text-[var(--muted-foreground)] transition hover:bg-[var(--surface-container-high)]">Export selected attempt NDJSON</button>
         </div>
       </div>
-      <AiHelperPanel />
+      <AiHelperPanel
+        manifestSummary={aiManifestSummary}
+        onApplyFilters={(suggested) => setFilters((prev) => ({ ...prev, ...suggested }))}
+      />
     </div>
   );
 }

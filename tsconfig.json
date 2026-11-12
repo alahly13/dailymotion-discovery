@@ -11,7 +11,7 @@
     "strict": true,
     "noEmit": true,
     "esModuleInterop": true,
-    "module": "esnext",
+    "module": "preserve",
     "moduleResolution": "bundler",
     "resolveJsonModule": true,
     "isolatedModules": true,
@@ -28,7 +28,10 @@
         "./src/*"
       ]
     },
-    "ignoreDeprecations": "6.0"
+    "ignoreDeprecations": "6.0",
+    "types": [
+      "node"
+    ]
   },
   "include": [
     "next-env.d.ts",
@@ -38,6 +41,27 @@
     ".next/dev/types/**/*.ts"
   ],
   "exclude": [
-    "node_modules"
+    "node_modules",
+    ".agents",
+    ".cursor",
+    ".claude",
+    ".devin",
+    ".continue",
+    ".autohand",
+    ".bob",
+    ".codeartsdoer",
+    ".codebuddy",
+    ".codemaker",
+    ".codestudio",
+    ".commandcode",
+    ".cortex",
+    ".crush",
+    ".mux",
+    ".qwen",
+    ".zcode",
+    ".zencoder",
+    ".augment",
+    ".aider-desk",
+    ".codex-screenshots"
   ]
 }
