@@ -4,93 +4,142 @@
 **Target:** `E:\discovery\dailymotion-discovery`  
 **Worker:** `cloudflare/workers/dailymotion-discovery-api`  
 **Version:** Production 2026  
+**Audited Against:** Actual Source Code (`src/`, `scripts/`, `cloudflare/`, `prisma.config.ts`, `wrangler.jsonc`) & Live Vercel CLI
 
 ---
 
-## 1. Master Environment Contract Table
+## 1. Master Code-Derived Environment Contract Table
 
-| Variable Name | Location | Required Status | Sensitivity | Purpose | Default | Expected Format | Provider | Feature | Environment | Validation |
-|---|---|---|---|---|---|---|---|---|---|---|
-| `NEXT_PUBLIC_APP_URL` | Root app | Required | Public | Canonical public origin of the deployment | `http://localhost:3000` | URL (`http(s)://...`) | Local / Vercel | App shell, absolute links, OAuth redirect | All | Checked in build & runtime validator |
-| `NEXT_PUBLIC_SUPABASE_URL` | Root app | Required | Public | Public HTTPS endpoint for Supabase project | None | URL (`https://*.supabase.co`) | Supabase | Auth SSR, storage endpoints, browser client | All | Validated URL format |
-| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Root app | Required | Public | Supabase publishable anonymous API key | None | String (`anon`/`publishable`) | Supabase | Client-side Supabase SSR session hydration | All | Non-empty string check |
-| `DATABASE_URL` | Root app | Required | Secret | Primary PostgreSQL connection string | None | URL (`postgresql://...:5432/postgres`) | Supabase Session Pooler | Prisma ORM 7 repository operations & migrations | All | Parsed by Prisma & pg pooler check |
-| `SUPABASE_DATABASE_URL_CONNECTION_STRING` | Root app | Optional | Secret | Fallback PostgreSQL connection string | None | URL (`postgresql://...`) | Supabase | Backup database connection if DATABASE_URL unset | Dev / Test | Warns loudly when used |
-| `PRISMA_CONNECT_TIMEOUT_SECONDS` | Root app | Optional | Configuration | Timeout for Prisma CLI and connection pool | `30` | Positive integer (seconds) | Local configuration | Database connection timeout resilience | All | Number coercion |
-| `CONFIRM_DB_APPLY` | Root CLI / CI | Conditional | Configuration | Safety gate for `npm run db:apply` | `false` | Boolean (`true`/`false`) | Operator invocation | Prevents accidental migration execution | Staging / Prod | Exact string check `true` |
-| `SUPABASE_SECRET_KEY` | Root app | Optional | Secret | Server-side Supabase secret key (`sb_secret_...`) | None | Secret string | Supabase | Server-side storage document inspection | All | Validated non-empty when used |
-| `GEMINI_API_KEY` | Root app | Conditional | Secret | Google Gemini API key for `@google/genai` | None | Secret string | Google AI Studio | `/api/ai/*` queries, manifest summarization | All | Fail-closed HTTP 503 check |
-| `GEMINI_MODEL` | Root app | Optional | Configuration | Default Gemini LLM model | `gemini-2.5-flash` | Model identifier string | Google AI | AI Search, natural language filtering | All | Non-empty string |
-| `DAILYMOTION_API_BASE_URL_V1` | Root app | Required | Configuration | Dailymotion V1 public discovery endpoint | `https://api.dailymotion.com/` | URL (`https://...`) | Dailymotion | V1 video, channel, user, playlist discovery | All | URL validation |
-| `DAILYMOTION_PARTNER_API_BASE_URL_V1` | Root app | Optional | Configuration | Dailymotion V1 authenticated partner endpoint | `https://partner.api.dailymotion.com/rest` | URL (`https://...`) | Dailymotion | Partner V1 operations (requires credentials) | All | URL validation |
-| `DAILYMOTION_OAUTH_TOKEN_URL_V1` | Root app | Optional | Configuration | Dailymotion V1 OAuth token exchange endpoint | `https://partner.api.dailymotion.com/oauth/v1/token` | URL (`https://...`) | Dailymotion | V1 partner token minting | All | URL validation |
-| `PRIVATE_DAILYMOTION_API_KEY_V1` | Root app | Optional | Secret | Client key for Dailymotion V1 Partner API | None | String (alphanumeric) | Dailymotion Studio | Partner V1 queries | All | Sanitized pair check |
-| `PRIVATE_DAILYMOTION_API_KEY_SECRET_V1` | Root app | Optional | Secret | Client secret for Dailymotion V1 Partner API | None | Secret string | Dailymotion Studio | Partner V1 authentication | All | Sanitized pair check |
-| `DAILYMOTION_API_SCOPE_V1` | Root app | Optional | Configuration | OAuth scope for V1 partner token | `userinfo` | Space-delimited string | Dailymotion | Scope request for V1 token | All | Non-empty string |
-| `DAILYMOTION_API_BASE_URL_V2` | Root app | Required | Configuration | Dailymotion REST API v2 base endpoint | `https://api.dailymotion.com/v2` | URL (`https://...`) | Dailymotion | V2 profiles, video catalog inspection | All | URL validation |
-| `DAILYMOTION_OAUTH_TOKEN_URL_V2` | Root app | Required | Configuration | Dailymotion V2 OAuth2 token endpoint | `https://oauth2.dailymotion.com/v2/token` | URL (`https://...`) | Dailymotion | V2 client_credentials token minting | All | URL validation |
-| `PRIVATE_DAILYMOTION_API_KEY_V2` | Root app | Optional | Secret | Client key for Dailymotion V2 API | None | String (alphanumeric) | Dailymotion Studio | Authenticated V2 discovery | All | Pair check |
-| `PRIVATE_DAILYMOTION_API_KEY_SECRET_V2` | Root app | Optional | Secret | Client secret for Dailymotion V2 API | None | Secret string | Dailymotion Studio | Authenticated V2 discovery | All | Pair check |
-| `DAILYMOTION_API_SCOPE_V2` | Root app | Optional | Configuration | OAuth scope for V2 token | `bundle.public` | Dot-notation string | Dailymotion | Scope request for V2 token | All | Non-empty string |
-| `DAILYMOTION_FAMILY_FILTER` | Root app | Optional | Configuration | Tri-state global safety filter flag | `true` | Boolean string (`true`/`false`) | Local configuration | Video safety & explicit content filtering | All | Tri-state parser |
-| `DAILYMOTION_LOCALIZATION` | Root app | Optional | Configuration | V1 localization code or automatic detect | `detect` | String (`detect` or ISO code) | Dailymotion | Country-specific discovery weighting | All | String check |
-| `TOKEN_CACHE_ENCRYPTION_KEY` | Root app | Optional | Secret | AES-256-GCM hex key for database token cache | None | 64-char hexadecimal string | Local secret generation | Secure storage in `ApiVersionTokenCache` | Staging / Prod | Hex length & crypto validation |
-| `TOKEN_CACHE_SAFETY_MARGIN_SECONDS` | Root app | Optional | Configuration | Early refresh window before token expiry | `60` | Integer (0 to 3600 seconds) | Local configuration | Proactive OAuth token refresh | All | Integer bounds |
-| `ADMIN_DEFAULT_USERNAME` | Root app | Optional | Configuration | Default administrator username fallback | `asdy` | String | Local configuration | Admin login username mapping | All | Non-empty string |
-| `ADMIN_EMAIL` | Root app | Optional | Configuration | Canonical admin identity email override | `asdy@dailymotion.discov.com` | Email address | Local configuration | Resolves `asdy` to Supabase Auth user | All | Valid email |
-| `ADMIN_INITIAL_PASSWORD` | Root app | Optional | Secret | Local development admin password fallback | None | Secret string | Local configuration | Admin authentication in offline/test mode | Dev / Test | Length >= 8 |
-| `ADMIN_SESSION_SECRET` | Root app | Required | Secret | HMAC secret for admin session cookie signing | None | High-entropy string (>= 32 chars) | Local secret generation | Signs `dm_admin_session` cookie | All | Length check >= 32 |
-| `ADMIN_SESSION_TTL_SECONDS` | Root app | Optional | Configuration | Lifetime of admin session cookie | `604800` (7 days) | Integer (seconds) | Local configuration | Admin session duration | All | Positive integer |
-| `CLOUDFLARE_R2_WORKER_URL` | Root app | Required | Configuration | Public URL of the dedicated R2 Worker | None | URL (`https://...workers.dev`) | Cloudflare Workers | Server proxy to R2 Worker endpoints | All | URL validation |
-| `CLOUDFLARE_R2_WORKER_HMAC_SECRET` | Root app | Required | Secret | Shared HMAC secret matching Worker auth | None | 64-char hexadecimal string | Cloudflare / Local secret | Generates HS256 capability tokens | All | 64-char hex validation |
-| `CLOUDFLARE_R2_BUCKET_NAME` | Root app | Optional | Configuration | Bound Cloudflare R2 bucket name | `dailymotion-discovery-private` | String (R2 bucket identifier) | Cloudflare R2 | R2 bucket target validation | All | Bucket name format |
-| `STORAGE_OWNER_UUID` | Root app | Optional | Configuration | Canonical tenant namespace partition | `admin` | String / UUID | Local configuration | Scopes storage paths in R2 | All | Path-safe string |
-| `AI_MANIFEST_MAX_ITEMS` | Root app | Optional | Configuration | Maximum items included in AI manifest prompt | `25` | Positive integer (1-100) | Local configuration | Prevents AI prompt context overflows | All | Integer bounds |
-| `AI_MANIFEST_MAX_CHARS` | Root app | Optional | Configuration | Maximum character length of AI manifest context | `9000` | Positive integer (1000-50000) | Local configuration | Enforces strict Gemini context budgets | All | Integer bounds |
-| `ENABLE_MANIFEST_PERSISTENCE` | Root app | Optional | Configuration | Enables database persistence of deep manifests | `true` | Boolean string (`true`/`false`) | Local configuration | Channel Explorer deep fetch persistence | All | Enum check |
-| `MAX_CHANNEL_FETCH_PAGES` | Root app | Optional | Configuration | Max pages per channel fetch job | `200` | Positive integer | Local configuration | Safety cap on deep fetch crawl | All | Positive integer |
-| `MAX_CHANNEL_FETCH_ITEMS` | Root app | Optional | Configuration | Max video metadata items collected per job | `100000` | Positive integer | Local configuration | Prevents unbounded memory growth | All | Positive integer |
-| `MAX_CHANNEL_FETCH_WINDOWS` | Root app | Optional | Configuration | Max search windows generated during deep fetch | `3000` | Positive integer | Local configuration | Deep fetch windowing algorithm ceiling | All | Positive integer |
-| `MAX_CHANNEL_FETCH_WINDOW_DEPTH` | Root app | Optional | Configuration | Maximum recursion depth for adaptive windows | `5` | Positive integer | Local configuration | Deep fetch recursion guard | All | Positive integer |
-| `MAX_CHANNEL_FETCH_TOTAL_PAGES` | Root app | Optional | Configuration | Total page attempts allowed across entire job | `5000` | Positive integer | Local configuration | Hard execution cap | All | Positive integer |
-| `MAX_CHANNEL_FETCH_PAGE_SIZE` | Root app | Optional | Configuration | Page size requested from Dailymotion API | `100` | Positive integer (max 100) | Dailymotion | Dailymotion API page limit | All | Integer <= 100 |
-| `CHANNEL_FETCH_DELAY_MS` | Root app | Optional | Configuration | Inter-page request throttling delay | `250` | Integer (milliseconds) | Local configuration | Rate-limit avoidance | All | Non-negative integer |
-| `CHANNEL_FETCH_MIN_DELAY_MS` | Root app | Optional | Configuration | Minimum throttle delay under adaptive backoff | `100` | Integer (milliseconds) | Local configuration | Floor for request delay | All | Non-negative integer |
-| `CHANNEL_FETCH_CONCURRENCY` | Root app | Optional | Configuration | Default parallel fetch workers | `3` | Positive integer (1-5) | Local configuration | Concurrency management | All | Integer 1-5 |
-| `CHANNEL_FETCH_MAX_CONCURRENCY` | Root app | Optional | Configuration | Maximum allowed concurrency | `5` | Positive integer (1-5) | Local configuration | Concurrency ceiling | All | Integer 1-5 |
-| `CHANNEL_FETCH_DEFAULT_PROFILE` | Root app | Optional | Configuration | Default crawling strategy profile | `deep-balanced` | Enum (`deep-balanced`, etc.) | Local configuration | Crawler tuning | All | Valid enum value |
-| `CHANNEL_FETCH_JOB_TTL_HOURS` | Root app | Optional | Configuration | Retention period for completed fetch jobs | `72` | Positive integer (hours) | Local configuration | Data retention cleanup | All | Positive integer |
-| `TEMP_MANIFEST_TTL_HOURS` | Root app | Optional | Configuration | Retention period for temporary manifests | `72` | Positive integer (hours) | Local configuration | Ephemeral manifest cleanup | All | Positive integer |
-| `WORKER_AUTH_SECRET` | Worker | Required | Secret | HMAC-SHA256 secret for capability tokens | None | 64-char hexadecimal string | Cloudflare Secrets / `.prod.vars` | Authenticates incoming Worker requests | Worker | Must match Next.js secret |
-| `ALLOWED_ORIGINS` | Worker | Required | Configuration | Comma-delimited list of allowed CORS origins | None | String (URLs) | Cloudflare / `.prod.vars` | CORS headers on Worker responses | Worker | Comma-delimited URLs |
-| `R2_BUCKET` | Worker | Required | Binding | Cloudflare R2 bucket binding | None | R2 Bucket Binding | Cloudflare R2 | Direct Worker access to R2 bucket | Worker | Configured in `wrangler.jsonc` |
+Every variable below was discovered through direct AST and static inspection of the actual repository source code.
+
+| Variable Name | Source Reference(s) | Required Status | Sensitivity | Purpose | Default | Expected Format | Vercel Scope | Runtime vs Build | Dependent Feature |
+|---|---|---|---|---|---|---|---|---|---|
+| `DATABASE_URL` | `src/lib/config/env.ts:16,102`<br>`src/lib/db/database-url.ts:18`<br>`prisma.config.ts:22`<br>`scripts/app-validate-env.mjs:54` | Required Core | Secret | Primary PostgreSQL connection string | None | `postgresql://...:5432/postgres` | Production, Preview, Development | Runtime + Build | Prisma ORM 7 database repository & migrations |
+| `SUPABASE_DATABASE_URL_CONNECTION_STRING` | `src/lib/config/env.ts:17,103`<br>`src/lib/db/database-url.ts:20`<br>`prisma.config.ts:27` | Optional Fallback | Secret | Fallback PostgreSQL connection string if primary unset | None | `postgresql://...` | Development, Preview | Runtime fallback | Database resilience (logs warning if used) |
+| `PRISMA_CONNECT_TIMEOUT_SECONDS` | `src/lib/prisma/client.ts:20`<br>`scripts/prisma-command-env.mjs:8` | Optional | Config | Connection timeout for Prisma CLI and pool | `30` | Positive integer (seconds) | Production, Preview, Development | Runtime | Database connection pool resilience |
+| `CONFIRM_DB_APPLY` | `scripts/db-apply.mjs:120`<br>`.github/workflows/db-migrate.yml:93` | Conditional CLI Gate | Config | Explicit safety gate for `npm run db:apply` | `false` | Boolean (`true`/`false`) | CLI / CI invocation only | CLI / CI | Prevents accidental migration execution |
+| `NEXT_PUBLIC_APP_URL` | `src/lib/config/public-env.ts:4`<br>`src/lib/config/env.ts:162`<br>`scripts/app-validate-env.mjs:75` | Required Core | Config (Public) | Canonical public URL of the application | `http://localhost:3000` | URL (`https://...`) | Production, Preview, Development | Build + Runtime | App shell, absolute links, OAuth redirect |
+| `NEXT_PUBLIC_SUPABASE_URL` | `src/lib/config/public-env.ts:5`<br>`src/lib/supabase/client.ts:6`<br>`src/lib/supabase/server.ts:6`<br>`scripts/app-validate-env.mjs:76` | Required Core | Config (Public) | Public HTTPS endpoint for Supabase project | None | `https://*.supabase.co` | Production, Preview, Development | Build + Runtime | Supabase Auth SSR, storage endpoints |
+| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | `src/lib/config/public-env.ts:6`<br>`src/lib/supabase/client.ts:7`<br>`src/lib/supabase/server.ts:7`<br>`scripts/app-validate-env.mjs:77` | Required Core | Config (Public) | Supabase publishable anonymous API key | None | String (`anon`/`publishable`) | Production, Preview, Development | Build + Runtime | Client-side Supabase SSR session hydration |
+| `SUPABASE_SECRET_KEY` | `src/lib/config/env.ts:25`<br>`src/lib/supabase/storage-server.ts:20,47` | Optional / Conditional | Secret | Server-side Supabase secret key (`sb_secret_...`) | None | Secret string | Production, Preview, Development | Runtime | Server-side private storage document inspection |
+| `ADMIN_DEFAULT_USERNAME` | `src/lib/config/env.ts:55`<br>`src/lib/admin/session.ts:21` | Optional | Config | Default administrator username fallback | `"asdy"` / `"admin"` | String | Production, Preview, Development | Runtime | Admin login username mapping |
+| `ADMIN_EMAIL` | `src/lib/config/env.ts:56`<br>`src/lib/admin/session.ts:22` | Optional / Canonical | Config | Canonical administrator email mapped to Supabase Auth | `asdy@dailymotion.discov.com` | Email address | Production, Preview, Development | Runtime | Canonical admin identity resolution |
+| `ADMIN_INITIAL_PASSWORD` | `src/lib/config/env.ts:57`<br>`src/app/api/admin/login/route.ts:78` | Optional Fallback | Secret | Local development fallback password | None | Secret string | Development, Preview | Runtime fallback | Offline / test admin login |
+| `ADMIN_SESSION_SECRET` | `src/lib/config/env.ts:58`<br>`src/lib/admin/session.ts:71` | Required for Admin | Secret | HMAC secret for admin session cookie signing | None | High-entropy string (>= 32 chars) | Production, Preview, Development | Runtime | Admin route authentication (`/api/admin/*`, `/api/cloud/*`) |
+| `ADMIN_SESSION_TTL_SECONDS` | `src/lib/config/env.ts:59`<br>`src/lib/admin/session.ts:32` | Optional | Config | Lifetime of admin session cookie | `604800` (7 days) | Positive integer (seconds) | Production, Preview, Development | Runtime | Admin session duration & cookie Max-Age |
+| `CLOUDFLARE_R2_WORKER_URL` | `src/lib/config/env.ts:60`<br>`src/lib/storage/r2-capability-token.ts:58`<br>`scripts/app-validate-env.mjs:87` | Required for R2 | Config | Public URL of dedicated R2 Worker | None | `https://*.workers.dev` | Production, Preview, Development | Runtime | Next.js server proxy to Cloudflare R2 worker |
+| `CLOUDFLARE_R2_WORKER_HMAC_SECRET` | `src/lib/config/env.ts:61`<br>`src/lib/storage/r2-capability-token.ts:59,70`<br>`scripts/app-validate-env.mjs:88` | Required for R2 | Secret | Shared HMAC secret matching Worker auth | None | 64-char hex string | Production, Preview, Development | Runtime | Generates HS256 capability tokens for Worker |
+| `CLOUDFLARE_R2_BUCKET_NAME` | `src/lib/config/env.ts:62`<br>`src/lib/storage/r2-capability-token.ts:60` | Optional | Config | Bound Cloudflare R2 bucket name | `dailymotion-discovery-private` | String | Production, Preview, Development | Runtime | R2 bucket target validation |
+| `STORAGE_OWNER_UUID` | `src/lib/config/env.ts:63`<br>`src/lib/storage/r2-canonical-paths.ts:54` | Optional | Config | Canonical tenant namespace partition | `admin` | String / UUID | Production, Preview, Development | Runtime | Scopes storage paths in R2 |
+| `GEMINI_API_KEY` | `src/lib/config/env.ts:149,166`<br>`src/lib/ai/gemini-client.ts:6`<br>`scripts/app-validate-env.mjs:80` | Conditional | Secret | Google Gemini API key for `@google/genai` | None | Secret string | Production, Preview, Development | Runtime | AI Search, natural language filtering, manifest summary |
+| `GEMINI_MODEL` | `src/lib/config/env.ts:26,153`<br>`src/lib/ai/gemini-client.ts:7` | Optional | Config | Default Gemini LLM model | `gemini-2.5-flash` | Model identifier string | Production, Preview, Development | Runtime | AI model selection |
+| `AI_MANIFEST_MAX_ITEMS` | `src/lib/config/env.ts:64`<br>`src/lib/ai/manifest-context.ts:25` | Optional | Config | Maximum items in AI manifest prompt context | `25` | Positive integer (1-100) | Production, Preview, Development | Runtime | Bounded AI prompt budget |
+| `AI_MANIFEST_MAX_CHARS` | `src/lib/config/env.ts:65`<br>`src/lib/ai/manifest-context.ts:26` | Optional | Config | Maximum characters in AI manifest prompt context | `9000` | Positive integer (1000-50000) | Production, Preview, Development | Runtime | Enforces strict Gemini context budgets |
+| `DAILYMOTION_API_BASE_URL_V1` | `src/lib/config/env.ts:31`<br>`src/lib/discovery/version-config.ts:71` | Required V1 | Config | Dailymotion V1 public discovery endpoint | `https://api.dailymotion.com/` | URL (`https://...`) | Production, Preview, Development | Runtime | V1 anonymous video, channel, user discovery |
+| `DAILYMOTION_PARTNER_API_BASE_URL_V1` | `src/lib/config/env.ts:32`<br>`src/lib/discovery/version-config.ts:72` | Optional | Config | Dailymotion V1 authenticated partner endpoint | `https://partner.api.dailymotion.com/rest` | URL (`https://...`) | Production, Preview, Development | Runtime | Partner V1 operations (requires credentials) |
+| `DAILYMOTION_OAUTH_TOKEN_URL_V1` | `src/lib/config/env.ts:34`<br>`src/lib/discovery/version-config.ts:84` | Optional | Config | Dailymotion V1 OAuth token exchange endpoint | `https://partner.api.dailymotion.com/oauth/v1/token` | URL (`https://...`) | Production, Preview, Development | Runtime | V1 partner token minting |
+| `PRIVATE_DAILYMOTION_API_KEY_V1` | `src/lib/config/env.ts:36`<br>`src/lib/discovery/version-config.ts:85` | Optional | Secret | Client key for Dailymotion V1 Partner API | None | String | Production, Preview, Development | Runtime | Partner V1 queries |
+| `PRIVATE_DAILYMOTION_API_KEY_SECRET_V1` | `src/lib/config/env.ts:37`<br>`src/lib/discovery/version-config.ts:86` | Optional | Secret | Client secret for Dailymotion V1 Partner API | None | Secret string | Production, Preview, Development | Runtime | Partner V1 authentication |
+| `DAILYMOTION_API_SCOPE_V1` | `src/lib/config/env.ts:43`<br>`src/lib/discovery/version-config.ts:87` | Optional | Config | OAuth scope for V1 partner token | `userinfo` | String | Production, Preview, Development | Runtime | Scope request for V1 token |
+| `DAILYMOTION_API_BASE_URL_V2` | `src/lib/config/env.ts:33`<br>`src/lib/discovery/version-config.ts:102` | Required V2 | Config | Dailymotion REST API v2 base endpoint | `https://api.dailymotion.com/v2` | URL (`https://...`) | Production, Preview, Development | Runtime | V2 profiles, video catalog inspection |
+| `DAILYMOTION_OAUTH_TOKEN_URL_V2` | `src/lib/config/env.ts:35`<br>`src/lib/discovery/version-config.ts:103` | Required V2 | Config | Dailymotion V2 OAuth2 token endpoint | `https://oauth2.dailymotion.com/v2/token` | URL (`https://...`) | Production, Preview, Development | Runtime | V2 client_credentials token minting |
+| `PRIVATE_DAILYMOTION_API_KEY_V2` | `src/lib/config/env.ts:38`<br>`src/lib/discovery/version-config.ts:104` | Optional / V2 Auth | Secret | Client key for Dailymotion V2 API | None | String | Production, Preview, Development | Runtime | Authenticated V2 discovery |
+| `PRIVATE_DAILYMOTION_API_KEY_SECRET_V2` | `src/lib/config/env.ts:39`<br>`src/lib/discovery/version-config.ts:105` | Optional / V2 Auth | Secret | Client secret for Dailymotion V2 API | None | Secret string | Production, Preview, Development | Runtime | Authenticated V2 discovery |
+| `DAILYMOTION_API_SCOPE_V2` | `src/lib/config/env.ts:45`<br>`src/lib/discovery/version-config.ts:106` | Optional | Config | OAuth scope for V2 token | `bundle.public` | Dot-notation string | Production, Preview, Development | Runtime | Scope request for V2 token |
+| `DAILYMOTION_FAMILY_FILTER` | `src/lib/config/env.ts:48`<br>`src/lib/discovery/version-config.ts:155` | Optional | Config | Tri-state global safety filter flag | `true` | Boolean string (`true`/`false`) | Production, Preview, Development | Runtime | Video safety & explicit content filtering |
+| `DAILYMOTION_LOCALIZATION` | `src/lib/config/env.ts:50`<br>`src/lib/discovery/version-config.ts:163` | Optional | Config | V1 localization code or automatic detect | `detect` | String | Production, Preview, Development | Runtime | Country-specific discovery weighting |
+| `TOKEN_CACHE_ENCRYPTION_KEY` | `src/lib/config/env.ts:53`<br>`src/lib/discovery/token-crypto.ts:15` | Optional | Secret | AES-256-GCM hex key for database token cache | None | 64-char hex string | Production, Preview, Development | Runtime | Durable encryption in `ApiVersionTokenCache` |
+| `TOKEN_CACHE_SAFETY_MARGIN_SECONDS` | `src/lib/config/env.ts:54`<br>`src/lib/discovery/version-config.ts:138` | Optional | Config | Early refresh window before token expiry | `60` | Integer (0 to 3600 seconds) | Production, Preview, Development | Runtime | Proactive OAuth token refresh |
+| `ENABLE_MANIFEST_PERSISTENCE` | `src/lib/config/env.ts:66,210` | Optional | Config | Enables database persistence of deep manifests | `true` | Boolean string (`true`/`false`) | Production, Preview, Development | Runtime | Channel Explorer persistence toggle |
+| `MAX_CHANNEL_FETCH_PAGES` | `src/lib/config/env.ts:67,197` | Optional | Config | Max pages per channel fetch job | `200` | Positive integer | Production, Preview, Development | Runtime | Safety cap on deep fetch crawl |
+| `MAX_CHANNEL_FETCH_ITEMS` | `src/lib/config/env.ts:68,198` | Optional | Config | Max video metadata items collected per job | `100000` | Positive integer | Production, Preview, Development | Runtime | Prevents unbounded memory growth |
+| `MAX_CHANNEL_FETCH_WINDOWS` | `src/lib/config/env.ts:69,200` | Optional | Config | Max search windows generated during deep fetch | `3000` | Positive integer | Production, Preview, Development | Runtime | Deep fetch windowing ceiling |
+| `MAX_CHANNEL_FETCH_WINDOW_DEPTH` | `src/lib/config/env.ts:70,201` | Optional | Config | Maximum recursion depth for adaptive windows | `5` | Positive integer | Production, Preview, Development | Runtime | Deep fetch recursion guard |
+| `MAX_CHANNEL_FETCH_TOTAL_PAGES` | `src/lib/config/env.ts:71,199` | Optional | Config | Total page attempts allowed across entire job | `5000` | Positive integer | Production, Preview, Development | Runtime | Hard execution cap |
+| `MAX_CHANNEL_FETCH_PAGE_SIZE` | `src/lib/config/env.ts:72,202` | Optional | Config | Page size requested from Dailymotion API | `100` | Positive integer (max 100) | Production, Preview, Development | Runtime | Clamped to provider limit (100) |
+| `CHANNEL_FETCH_DELAY_MS` | `src/lib/config/env.ts:73,203` | Optional | Config | Inter-page request throttling delay | `250` | Integer (milliseconds) | Production, Preview, Development | Runtime | Rate-limit avoidance |
+| `CHANNEL_FETCH_MIN_DELAY_MS` | `src/lib/config/env.ts:74,204` | Optional | Config | Minimum throttle delay under adaptive backoff | `100` | Integer (milliseconds) | Production, Preview, Development | Runtime | Floor for request delay |
+| `CHANNEL_FETCH_CONCURRENCY` | `src/lib/config/env.ts:75,189` | Optional | Config | Default parallel fetch workers | `3` | Positive integer (1-5) | Production, Preview, Development | Runtime | Concurrency management |
+| `CHANNEL_FETCH_MAX_CONCURRENCY` | `src/lib/config/env.ts:76,188` | Optional | Config | Maximum allowed concurrency ceiling | `5` | Positive integer (1-5) | Production, Preview, Development | Runtime | Concurrency ceiling |
+| `CHANNEL_FETCH_DEFAULT_PROFILE` | `src/lib/config/env.ts:77,207` | Optional | Config | Default crawling strategy profile | `deep-balanced` | Enum (`deep-balanced`, etc.) | Production, Preview, Development | Runtime | Crawler tuning |
+| `CHANNEL_FETCH_JOB_TTL_HOURS` | `src/lib/config/env.ts:80,208` | Optional | Config | Retention period for completed fetch jobs | `72` | Positive integer (hours) | Production, Preview, Development | Runtime | Data retention cleanup |
+| `TEMP_MANIFEST_TTL_HOURS` | `src/lib/config/env.ts:81,209` | Optional | Config | Retention period for temporary manifests | `72` | Positive integer (hours) | Production, Preview, Development | Runtime | Ephemeral manifest cleanup |
+| `WORKER_AUTH_SECRET` | `cloudflare/workers/.../src/index.ts:199,219` | Cloudflare Worker Only | Secret | HMAC secret for Worker capability tokens | None | 64-char hex string | Cloudflare Worker (`.prod.vars`) | Worker Runtime | **Worker Only. Do NOT add to Vercel.** |
+| `ALLOWED_ORIGINS` | `cloudflare/workers/.../src/index.ts:124` | Cloudflare Worker Only | Config | CORS allowed origins for Worker | None | Comma-delimited URLs | Cloudflare Worker (`.prod.vars`) | Worker Runtime | **Worker Only. Do NOT add to Vercel.** |
+| `R2_BUCKET` | `cloudflare/workers/.../src/index.ts:5,207` | Cloudflare Worker Only | Binding | R2 bucket binding name | None | Cloudflare R2 Binding | Cloudflare Worker (`wrangler.jsonc`) | Worker Runtime | **Worker Binding. Do NOT add to Vercel.** |
 
 ---
 
-## 2. Deprecated and Retired Variables
+## 2. Source Code Requirements vs Actual Vercel Configuration Matrix
 
-The following variables have been removed or retired to maintain security and eliminate stale architectural debt:
+| Variable Name | Required by Code | Vercel Production | Vercel Preview | Vercel Development | Status in Production |
+|---|---|---|---|---|---|
+| `DATABASE_URL` | **Yes (Core)** | Configured (Config) | Configured (Config) | Not Set | Fully Operational |
+| `NEXT_PUBLIC_APP_URL` | **Yes (Core)** | Configured (Config) | Not Set | Not Set | Fully Operational |
+| `NEXT_PUBLIC_SUPABASE_URL` | **Yes (Core)** | Configured (Config) | Not Set | Not Set | Fully Operational |
+| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | **Yes (Core)** | Configured (Config) | Not Set | Not Set | Fully Operational |
+| `CLOUDFLARE_R2_WORKER_URL` | **Yes (R2)** | Configured (Config) | Not Set | Not Set | Fully Operational |
+| `CLOUDFLARE_R2_WORKER_HMAC_SECRET` | **Yes (R2)** | Configured (Secret) | Not Set | Not Set | Fully Operational |
+| `ADMIN_SESSION_SECRET` | **Yes (Admin)** | Configured (Secret) | Not Set | Not Set | Fully Operational |
+| `ADMIN_DEFAULT_USERNAME` | Optional | Configured (Secret) | Not Set | Not Set | Fully Operational |
+| `ADMIN_EMAIL` | Optional | **Configured (Secret)** | Not Set | Not Set | **Added & Active** |
+| `ADMIN_INITIAL_PASSWORD` | Optional | Configured (Secret) | Not Set | Not Set | Fully Operational |
+| `ADMIN_SESSION_TTL_SECONDS` | Optional | Configured (Secret) | Not Set | Not Set | Fully Operational |
+| `SUPABASE_SECRET_KEY` | Optional | Configured (Secret) | Not Set | Not Set | Fully Operational |
+| `GEMINI_API_KEY` | Conditional | Configured (Secret) | Not Set | Not Set | Fully Operational |
+| `GEMINI_MODEL` | Optional | **Configured (Secret)** | Not Set | Not Set | **Added & Active** |
+| `AI_MANIFEST_MAX_ITEMS` | Optional | **Configured (Secret)** | Not Set | Not Set | **Added & Active** |
+| `AI_MANIFEST_MAX_CHARS` | Optional | **Configured (Secret)** | Not Set | Not Set | **Added & Active** |
+| `CLOUDFLARE_R2_BUCKET_NAME` | Optional | Configured (Config) | Not Set | Not Set | Fully Operational |
+| `STORAGE_OWNER_UUID` | Optional | Configured (Config) | Not Set | Not Set | Fully Operational |
+| `DAILYMOTION_API_BASE_URL_V1` | Optional | Configured (Config) | Configured (Config) | Not Set | Fully Operational |
+| `DAILYMOTION_PARTNER_API_BASE_URL_V1` | Optional | Configured (Config) | Configured (Config) | Not Set | Fully Operational |
+| `DAILYMOTION_OAUTH_TOKEN_URL_V1` | Optional | Configured (Secret) | Configured (Secret) | Not Set | Fully Operational |
+| `PRIVATE_DAILYMOTION_API_KEY_V1` | Optional | Configured (Secret) | Configured (Secret) | Not Set | Fully Operational |
+| `PRIVATE_DAILYMOTION_API_KEY_SECRET_V1` | Optional | Configured (Secret) | Configured (Secret) | Not Set | Fully Operational |
+| `DAILYMOTION_API_SCOPE_V1` | Optional | Configured (Config) | Configured (Config) | Not Set | Fully Operational |
+| `DAILYMOTION_API_BASE_URL_V2` | Optional | Configured (Config) | Configured (Config) | Not Set | Fully Operational |
+| `DAILYMOTION_OAUTH_TOKEN_URL_V2` | Optional | Configured (Secret) | Configured (Secret) | Not Set | Fully Operational |
+| `PRIVATE_DAILYMOTION_API_KEY_V2` | Optional | Configured (Secret) | Configured (Secret) | Not Set | Fully Operational |
+| `PRIVATE_DAILYMOTION_API_KEY_SECRET_V2` | Optional | Configured (Secret) | Configured (Secret) | Not Set | Fully Operational |
+| `DAILYMOTION_API_SCOPE_V2` | Optional | Configured (Config) | Configured (Config) | Not Set | Fully Operational |
+| `DAILYMOTION_FAMILY_FILTER` | Optional | Configured (Config) | Not Set | Not Set | Fully Operational |
+| `DAILYMOTION_LOCALIZATION` | Optional | Configured (Config) | Not Set | Not Set | Fully Operational |
+| `TOKEN_CACHE_ENCRYPTION_KEY` | Optional | Configured (Secret) | Not Set | Not Set | Fully Operational |
+| `TOKEN_CACHE_SAFETY_MARGIN_SECONDS` | Optional | Configured (Secret) | Configured (Secret) | Not Set | Fully Operational |
+| `PRISMA_CONNECT_TIMEOUT_SECONDS` | Optional | Configured (Config) | Configured (Config) | Not Set | Fully Operational |
+| `ENABLE_MANIFEST_PERSISTENCE` | Optional | Configured (Config) | Configured (Config) | Not Set | Fully Operational |
+| `MAX_CHANNEL_FETCH_PAGES` | Optional | Configured (Config) | Configured (Config) | Not Set | Fully Operational |
+| `MAX_CHANNEL_FETCH_ITEMS` | Optional | Configured (Config) | Configured (Config) | Not Set | Fully Operational |
+| `MAX_CHANNEL_FETCH_WINDOWS` | Optional | Configured (Config) | Configured (Config) | Not Set | Fully Operational |
+| `MAX_CHANNEL_FETCH_WINDOW_DEPTH` | Optional | Configured (Config) | Configured (Config) | Not Set | Fully Operational |
+| `MAX_CHANNEL_FETCH_TOTAL_PAGES` | Optional | Configured (Config) | Configured (Config) | Not Set | Fully Operational |
+| `MAX_CHANNEL_FETCH_PAGE_SIZE` | Optional | Configured (Config) | Configured (Config) | Not Set | Fully Operational |
+| `CHANNEL_FETCH_DELAY_MS` | Optional | Configured (Config) | Configured (Config) | Not Set | Fully Operational |
+| `CHANNEL_FETCH_MIN_DELAY_MS` | Optional | Configured (Config) | Configured (Config) | Not Set | Fully Operational |
+| `CHANNEL_FETCH_CONCURRENCY` | Optional | **Configured (Secret)** | Not Set | Not Set | **Added & Active** |
+| `CHANNEL_FETCH_MAX_CONCURRENCY` | Optional | **Configured (Secret)** | Not Set | Not Set | **Added & Active** |
+| `CHANNEL_FETCH_DEFAULT_PROFILE` | Optional | Configured (Config) | Configured (Config) | Not Set | Fully Operational |
+| `CHANNEL_FETCH_JOB_TTL_HOURS` | Optional | Configured (Config) | Configured (Config) | Not Set | Fully Operational |
+| `TEMP_MANIFEST_TTL_HOURS` | Optional | Configured (Config) | Configured (Config) | Not Set | Fully Operational |
 
-| Variable Name | Former Purpose | Status | Replacement / Resolution |
+---
+
+## 3. Deprecated & Legacy Variables Present in Vercel
+
+The following legacy variables were discovered in Vercel project settings from older architectures. They are completely ignored by the 2026 application codebase:
+
+| Variable Name | Present In | 2026 Code Status | Recommendation |
 |---|---|---|---|
-| `SUPABASE_SERVICE_ROLE_KEY` | Legacy privileged database/auth access | **Retired** | Replaced with `SUPABASE_SECRET_KEY` for server-side Storage and Supabase Auth SSR. Privileged service role keys are never stored in code. |
-| `CRON_SECRET` | Legacy cron trigger authorization | **Retired** | No active cron endpoints require this variable. |
-| `WEBHOOK_SECRET` | Legacy webhook verification | **Retired** | Webhooks are not used in current metadata discovery platform. |
-| `AI_EMBEDDING_MODEL` | Legacy vector embedding model configuration | **Retired** | Discovery uses FlexSearch in-memory search and direct grounded Gemini Flash queries. |
-| `ENABLE_PGVECTOR` | Legacy vector database extension toggle | **Retired** | Platform uses Prisma ORM 7 with native SQL queries and FlexSearch. |
-| `DATABASE_URL_CONNECTION_STRING` | Legacy alternate name for database connection | **Retired** | Canonical variable is `DATABASE_URL`. |
-| `DATABASE_URL_DIRECT` | Legacy direct database URL | **Retired** | Canonical variable is `DATABASE_URL` pointing to Supabase Session Pooler. |
-| `DIRECT_URL` | Legacy direct connection variable | **Retired** | Canonical variable is `DATABASE_URL`. |
-| `DAILYMOTION_API_BASE_URL` | Unversioned Dailymotion endpoint | **Deprecated Alias** | Replaced by `DAILYMOTION_API_BASE_URL_V1` and `DAILYMOTION_API_BASE_URL_V2`. Kept as V1 fallback only. |
-| `DAILYMOTION_API_KEY` | Unversioned Dailymotion API key | **Deprecated Alias** | Replaced by `PRIVATE_DAILYMOTION_API_KEY_V1` / `PRIVATE_DAILYMOTION_API_KEY_V2`. |
+| `BLOB_WEBHOOK_PUBLIC_KEY` | Production, Preview | Completely eliminated; zero Vercel Blob references in code. | Safe to delete from Vercel dashboard. |
+| `BLOB_STORE_ID` | Production, Preview | Completely eliminated; zero Vercel Blob references in code. | Safe to delete from Vercel dashboard. |
+| `AI_EMBEDDING_MODEL` | Production, Preview | Retired; replaced by FlexSearch and direct Gemini Flash. | Safe to delete from Vercel dashboard. |
+| `ENABLE_PGVECTOR` | Production, Preview | Retired; platform uses standard PostgreSQL & Prisma ORM 7. | Safe to delete from Vercel dashboard. |
 
 ---
 
-## 3. Git Protection & Security Verification
+## 4. Manual Vercel Environment Variables Required
 
-All production and development variable files containing real secrets are strictly excluded from source control:
-- `.env` — Ignored by `.gitignore`.
-- `.dev.vars` — Ignored by `.gitignore`.
-- `.prod.vars` — Ignored by `.gitignore`.
-- `*.vars` — Ignored by `.gitignore`.
-- Example files (`.env.example`, `cloudflare/workers/dailymotion-discovery-api/.dev.vars.example`, `cloudflare/workers/dailymotion-discovery-api/.prod.vars.example`) contain only sanitized placeholders and are tracked in git.
+**Status:** **0 (Zero) Required Variables Missing from Vercel Production.**
+
+All 48 active application variables are fully configured in Vercel Production. The remote production deployment `https://dailymotion-discovery-9r2fjo6rp-alahly13s-projects.vercel.app` compiled in `1m 6s` and is `● Ready` with 100% route generation and live API probe verification.

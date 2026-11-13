@@ -2034,6 +2034,47 @@ CONFIRM_DB_APPLY=true npm run db:apply
 - Database preflight: `npm run db:validate` exited 0.
 - Git security check: `git check-ignore .env .dev.vars .prod.vars` confirmed 100% ignored. Zero secrets exposed.
 
+## 2026-11-13 Code-Derived Environment Variables Audit, Vercel Production Reconciliation & Remote Deployment
+
+### 1. Source Code-First Discovery Methodology
+- **Single Source of Truth**: Conducted exhaustive codebase scan across `src/` (App Router, API routes, Server/Client Components, Supabase SSR, Dailymotion V1/V2 clients, Gemini AI, R2 Worker client, admin session), `scripts/`, `cloudflare/` (worker implementation & `wrangler.jsonc`), `prisma.config.ts`, `prisma/`, and `.github/workflows/`.
+- **Zero reliance on `.env` / `.env.example` as discovery authority**: Local `.env` was treated as an incomplete dev aid; actual code imports, Zod schemas (`env.ts`, `public-env.ts`), and `process.env` access points served as the sole canonical discovery source.
+- **Inventory Discovered**: Exactly 48 active application environment variables + 2 legacy backward-compatibility aliases + 3 dedicated Cloudflare Worker variables.
+
+### 2. Vercel Production Reconciliation
+- **Vercel Project**: Linked to `dailymotion-discovery` (`prj_9CDQFRrhBzS0o0nihUiARHFqjO7m`) under team `alahly13s-projects`.
+- **Initial Production State**: 46 variables configured.
+- **Missing Code-Required Variables Added**:
+  1. `ADMIN_EMAIL`: Added to Production (`asdy@dailymotion.discov.com`, resolves canonical administrator identity).
+  2. `GEMINI_MODEL`: Added to Production (`gemini-2.5-flash`, Google AI Studio model identifier).
+  3. `AI_MANIFEST_MAX_ITEMS`: Added to Production (`25`, bounded prompt item cap).
+  4. `AI_MANIFEST_MAX_CHARS`: Added to Production (`9000`, bounded prompt character budget).
+  5. `CHANNEL_FETCH_CONCURRENCY`: Added to Production (`3`, crawl parallel worker ceiling).
+  6. `CHANNEL_FETCH_MAX_CONCURRENCY`: Added to Production (`5`, absolute concurrency ceiling).
+- **Final Production State**: 52 variables configured (100% of code-required variables satisfied).
+- **Cloudflare Worker Boundary**: Verified that `WORKER_AUTH_SECRET`, `ALLOWED_ORIGINS`, and `R2_BUCKET` remain exclusively in Cloudflare Worker configuration and are NOT present in Vercel.
+
+### 3. Remote Production Redeployment & Verification
+- Initiated zero-local-build remote redeployment: `vercel redeploy https://dailymotion-discovery-6zbb19boi-alahly13s-projects.vercel.app`.
+- New deployment: `https://dailymotion-discovery-9r2fjo6rp-alahly13s-projects.vercel.app` (`dpl_FagXkMZT4EWmjdbZayVTZv1jkY3N`).
+- Remote build duration: `1m 6s` on Vercel 2 vCPU / 8192 MiB basic runner.
+- Status: **`● Ready`** with 68 static and dynamic routes compiled, aliased to `https://dailymotion-discovery.vercel.app`.
+- Live HTTPS runtime verification via `vercel curl`:
+  - `GET /api/discovery/auth-status`: HTTP 200 with `database.connectionSource: "DATABASE_URL"`, `supabase: { urlConfigured: true, secretConfigured: true }`, `tokenCache: { enabled: true }`, `v1.keyConfigured: true`, `v2.keyConfigured: true`.
+  - `GET /api/admin/migrations/status`: HTTP 401 Unauthorized gate active (`{"ok":false,"error":"Administrator sign-in required.","reason":"unauthorized"}`).
+  - `GET /`: HTTP 200 OK.
+  - `GET /saved-items`: HTTP 200 OK.
+
+### 4. Code & Documentation Sync
+- Updated `docs/ENVIRONMENT_VARIABLES.md` with:
+  - Exact source code file and line references for all variables.
+  - Production vs Preview vs Development cross-reference audit table.
+  - Vercel Secret vs Config categorization.
+- Verified all automated checks:
+  - `node scripts/validate-all-env.mjs`: Exit 0.
+  - `npm test`: 29 test files passed, 132/132 tests passed.
+  - `npm run typecheck`: Exit 0 (zero errors).
+
 ## Known Limitations
 
 - Live AI endpoints (`/api/ai/*`, `/ai-search`) fail closed with HTTP `503 missing_config` until a real `GEMINI_API_KEY` replaces the placeholder in `.env` or Vercel Environment Variables.
