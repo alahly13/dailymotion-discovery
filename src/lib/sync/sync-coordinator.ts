@@ -98,6 +98,8 @@ export class SyncCoordinator {
       collectionIds?: string[];
       note?: string;
       tags?: string[];
+      country?: string;
+      category?: string;
     }
   ): Promise<LocalSavedItemRecord> {
     const compositeKey = discoveryCompositeKey(item.apiVersion, item.kind, item.id);

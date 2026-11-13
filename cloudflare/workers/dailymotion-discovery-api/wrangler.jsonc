@@ -6,7 +6,7 @@
   "workers_dev": true,
   "r2_buckets": [
     {
-      "binding": "DM_BUCKET",
+      "binding": "R2_BUCKET",
       "bucket_name": "dailymotion-discovery-private",
       "remote": true
     }

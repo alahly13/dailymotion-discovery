@@ -121,7 +121,7 @@ describe("Cloudflare R2 Canonical Paths, Serializer, and Worker Client", () => {
     const bucket = new InMemoryBucket();
     const secret = "integration-worker-secret-0123456789abcdef0123456789";
     const env: Env = {
-      DM_BUCKET: bucket,
+      R2_BUCKET: bucket,
       WORKER_AUTH_SECRET: secret,
       ALLOWED_ORIGINS: "http://localhost:3000",
     };

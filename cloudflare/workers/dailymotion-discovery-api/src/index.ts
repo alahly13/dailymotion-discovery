@@ -2,7 +2,7 @@
  * Dailymotion Discovery — Dedicated Cloudflare R2 Worker API
  *
  * Worker Name: dailymotion-discovery-api
- * R2 Binding:  env.DM_BUCKET -> dailymotion-discovery-private (Private)
+ * R2 Binding:  env.R2_BUCKET -> dailymotion-discovery-private (Private)
  *
  * Security invariants:
  *   1. Native R2 binding only (zero S3 SDKs, zero AWS credentials, zero public bucket URLs).
@@ -50,7 +50,7 @@ export interface R2BucketLike {
 }
 
 export interface Env {
-  DM_BUCKET: R2BucketLike;
+  R2_BUCKET: R2BucketLike;
   WORKER_AUTH_SECRET?: string;
   ALLOWED_ORIGINS?: string;
 }
@@ -195,7 +195,7 @@ export async function handleWorkerRequest(request: Request, env: Env): Promise<R
         ok: true,
         worker: WORKER_IDENTITY,
         bucket: "dailymotion-discovery-private",
-        binding_configured: Boolean(env.DM_BUCKET),
+        binding_configured: Boolean(env.R2_BUCKET),
         secret_configured: Boolean(env.WORKER_AUTH_SECRET),
         timestamp: new Date().toISOString(),
       },
@@ -204,8 +204,8 @@ export async function handleWorkerRequest(request: Request, env: Env): Promise<R
     );
   }
 
-  if (!env.DM_BUCKET) {
-    return jsonResponse({ ok: false, error: "DM_BUCKET R2 binding not configured." }, 500, headers);
+  if (!env.R2_BUCKET) {
+    return jsonResponse({ ok: false, error: "R2_BUCKET R2 binding not configured." }, 500, headers);
   }
 
   // GET /list?prefix=...&cursor=...&delimiter=...
@@ -219,7 +219,7 @@ export async function handleWorkerRequest(request: Request, env: Env): Promise<R
     const auth = await verifyCapabilityToken(request.headers.get("Authorization"), env.WORKER_AUTH_SECRET, "list", prefix);
     if (!auth.valid) return jsonResponse({ ok: false, error: auth.error }, auth.status, headers);
 
-    const listed = await env.DM_BUCKET.list({
+    const listed = await env.R2_BUCKET.list({
       prefix,
       cursor: url.searchParams.get("cursor") || undefined,
       delimiter: url.searchParams.get("delimiter") || undefined,
@@ -305,7 +305,7 @@ export async function handleWorkerRequest(request: Request, env: Env): Promise<R
       }
 
       const immutable = isImmutablePartKey(key);
-      const putObj = await env.DM_BUCKET.put(key, rawBinary, {
+      const putObj = await env.R2_BUCKET.put(key, rawBinary, {
         onlyIf: immutable ? { etagDoesNotMatch: "*" } : undefined,
         httpMetadata: { contentType: "application/json; charset=utf-8" },
         customMetadata: {
@@ -364,7 +364,7 @@ export async function handleWorkerRequest(request: Request, env: Env): Promise<R
         failures.push({ key, reason: "OUTSIDE_SCOPE" });
         continue;
       }
-      const obj = await env.DM_BUCKET.get(key);
+      const obj = await env.R2_BUCKET.get(key);
       if (!obj || !obj.arrayBuffer) {
         failures.push({ key, reason: "NOT_FOUND" });
         continue;
@@ -408,7 +408,7 @@ export async function handleWorkerRequest(request: Request, env: Env): Promise<R
     if (request.method === "GET") {
       const auth = await verifyCapabilityToken(request.headers.get("Authorization"), env.WORKER_AUTH_SECRET, "download", key);
       if (!auth.valid) return jsonResponse({ ok: false, error: auth.error }, auth.status, headers);
-      const obj = await env.DM_BUCKET.get(key);
+      const obj = await env.R2_BUCKET.get(key);
       if (!obj || !obj.arrayBuffer) return jsonResponse({ ok: false, error: "Object not found." }, 404, headers);
       const outHeaders = new Headers(headers);
       outHeaders.set("Content-Type", obj.httpMetadata?.contentType || "application/json; charset=utf-8");
@@ -420,7 +420,7 @@ export async function handleWorkerRequest(request: Request, env: Env): Promise<R
     if (request.method === "HEAD") {
       const auth = await verifyCapabilityToken(request.headers.get("Authorization"), env.WORKER_AUTH_SECRET, "head", key);
       if (!auth.valid) return new Response(null, { status: auth.status, headers });
-      const obj = await env.DM_BUCKET.head(key);
+      const obj = await env.R2_BUCKET.head(key);
       if (!obj) return new Response(null, { status: 404, headers });
       const outHeaders = new Headers(headers);
       outHeaders.set("Content-Length", String(obj.size));
@@ -441,7 +441,7 @@ export async function handleWorkerRequest(request: Request, env: Env): Promise<R
       }
       const immutable = isImmutablePartKey(key);
       const sha256 = bytesToHex(await crypto.subtle.digest("SHA-256", bytes));
-      const putObj = await env.DM_BUCKET.put(key, bytes, {
+      const putObj = await env.R2_BUCKET.put(key, bytes, {
         onlyIf: immutable ? { etagDoesNotMatch: "*" } : undefined,
         httpMetadata: { contentType: "application/json; charset=utf-8" },
         customMetadata: { sha256, owner: auth.claims.storage_owner_uuid },
@@ -453,7 +453,7 @@ export async function handleWorkerRequest(request: Request, env: Env): Promise<R
     if (request.method === "DELETE") {
       const auth = await verifyCapabilityToken(request.headers.get("Authorization"), env.WORKER_AUTH_SECRET, "delete", key);
       if (!auth.valid) return jsonResponse({ ok: false, error: auth.error }, auth.status, headers);
-      await env.DM_BUCKET.delete(key);
+      await env.R2_BUCKET.delete(key);
       return jsonResponse({ ok: true, deleted: key }, 200, headers);
     }
   }

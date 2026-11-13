@@ -20,7 +20,7 @@ This document provides the authoritative, step-by-step production deployment gui
 +-----------------------------------------------------------+
 |              Cloudflare Worker (Dedicated)                |
 |             Worker Name: dailymotion-discovery-api        |
-|             Binding: DM_BUCKET (Native R2 Binding)        |
+|             Binding: R2_BUCKET (Native R2 Binding)        |
 +-----------------------------------------------------------+
                              |
                   Native Native R2 Binding
@@ -141,13 +141,13 @@ npm test -- src/lib/storage/__tests__/r2-storage.test.ts
 - **Cause**: `CLOUDFLARE_R2_WORKER_HMAC_SECRET` in Next.js `.env` does not match `WORKER_AUTH_SECRET` in `.prod.vars`.
 - **Fix**: Run `npm run env:validate:all` to detect secret mismatch, synchronize the values, and redeploy with `--secrets-file .prod.vars`.
 
-### Issue: `500 DM_BUCKET R2 binding not configured`
+### Issue: `500 R2_BUCKET R2 binding not configured`
 - **Cause**: The bucket `dailymotion-discovery-private` was not bound or `wrangler.jsonc` was modified.
 - **Fix**: Verify `wrangler.jsonc` has:
   ```jsonc
   "r2_buckets": [
     {
-      "binding": "DM_BUCKET",
+      "binding": "R2_BUCKET",
       "bucket_name": "dailymotion-discovery-private",
       "remote": true
     }

@@ -1,7 +1,10 @@
 import type { Metadata } from "next";
-import { JetBrains_Mono, Public_Sans } from "next/font/google";
+import { JetBrains_Mono, Public_Sans, Geist } from "next/font/google";
 import "./globals.css";
 import { AppShell } from "@/components/layout/app-shell";
+import { cn } from "@/lib/utils";
+
+const geist = Geist({subsets:['latin'],variable:'--font-sans'});
 
 const publicSans = Public_Sans({
   subsets: ["latin"],
@@ -23,7 +26,7 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="en" className={`${publicSans.variable} ${jetBrainsMono.variable}`} suppressHydrationWarning>
+    <html lang="en" className={cn(publicSans.variable, jetBrainsMono.variable, "font-sans", geist.variable)} suppressHydrationWarning>
       <head>
         {/* Theme bootstrapping belongs to the root shell so every page paints in
             the persisted light/dark mode before AppShell hydrates. Future UI

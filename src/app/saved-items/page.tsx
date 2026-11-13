@@ -28,7 +28,7 @@ import { useMergedDataset } from "@/lib/local-first/use-merged-dataset";
 import type { LocalSavedItemRecord } from "@/lib/local-first/indexeddb-store";
 import { CountrySelector } from "@/components/discovery/country-selector";
 import { RawJsonDrawer } from "@/components/discovery/raw-json-drawer";
-import { canonicalDailymotionUrl } from "@/lib/resources/dailymotion-resource-taxonomy";
+import { canonicalDailymotionUrl, toDiscoveryKind } from "@/lib/resources/dailymotion-resource-taxonomy";
 
 type TabFilter = "all" | "videos" | "channels";
 type SortOption = "newest" | "oldest" | "title_asc" | "title_desc" | "views_desc" | "duration_desc";
@@ -84,9 +84,12 @@ export default function SavedItemsPage() {
   }, [savedItems]);
 
   // Tab counts
-  const videoCount = useMemo(() => savedItems.filter((i) => i.resourceType === "video").length, [savedItems]);
+  const videoCount = useMemo(
+    () => savedItems.filter((i) => i.resourceType === "VIDEO" || i.resourceType === "LIVESTREAM").length,
+    [savedItems]
+  );
   const channelCount = useMemo(
-    () => savedItems.filter((i) => i.resourceType === "channel" || i.resourceType === "user").length,
+    () => savedItems.filter((i) => i.resourceType === "CHANNEL" || i.resourceType === "USER" || i.resourceType === "PROFILE").length,
     [savedItems]
   );
 
@@ -95,8 +98,8 @@ export default function SavedItemsPage() {
     return savedItems
       .filter((item) => {
         // Tab filter
-        if (activeTab === "videos" && item.resourceType !== "video") return false;
-        if (activeTab === "channels" && item.resourceType !== "channel" && item.resourceType !== "user") return false;
+        if (activeTab === "videos" && item.resourceType !== "VIDEO" && item.resourceType !== "LIVESTREAM") return false;
+        if (activeTab === "channels" && item.resourceType !== "CHANNEL" && item.resourceType !== "USER" && item.resourceType !== "PROFILE") return false;
 
         // Country filter
         if (selectedCountry) {
@@ -274,10 +277,10 @@ export default function SavedItemsPage() {
       {lastReceipt && (
         <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-4 py-2.5 text-xs">
           <span className="font-semibold text-emerald-800 dark:text-emerald-300">
-            Last Cloud Sync: <strong>{lastReceipt.stage}</strong> · Generation: <code>{lastReceipt.generationId}</code>
+            Last Cloud Sync: <strong>{lastReceipt.stage}</strong> · Generation: <code>{Object.values(lastReceipt.generationIds).join(", ") || lastReceipt.batchId}</code>
           </span>
           <span className="text-[var(--muted-foreground)]">
-            {new Date(lastReceipt.timestamp).toLocaleTimeString()}
+            {new Date(lastReceipt.completedAt || lastReceipt.startedAt).toLocaleTimeString()}
           </span>
         </div>
       )}
@@ -515,7 +518,7 @@ export default function SavedItemsPage() {
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {filteredItems.map((item) => {
             const isSelected = selectedKeys.has(item.compositeKey);
-            const openUrl = canonicalDailymotionUrl(item.resourceType, item.id, item.url);
+            const openUrl = canonicalDailymotionUrl(toDiscoveryKind(item.resourceType), item.id, item.url);
             const durationLabel = formatDuration(item.duration);
             const stableId = item.stableId || `dailymotion:${item.resourceType}:${item.id}`;
 
@@ -533,7 +536,11 @@ export default function SavedItemsPage() {
                     <img src={item.thumbnail} alt="" loading="lazy" className="h-full w-full object-cover" />
                   ) : (
                     <div className="flex h-full w-full items-center justify-center text-[var(--muted-foreground)]">
-                      {item.resourceType === "channel" ? <Compass className="h-8 w-8" /> : <Tv className="h-8 w-8" />}
+                      {item.resourceType === "CHANNEL" || item.resourceType === "USER" || item.resourceType === "PROFILE" ? (
+                        <Compass className="h-8 w-8" />
+                      ) : (
+                        <Tv className="h-8 w-8" />
+                      )}
                     </div>
                   )}
 
@@ -570,7 +577,7 @@ export default function SavedItemsPage() {
                   <div className="flex flex-wrap items-center gap-1.5 text-[10px] font-black uppercase">
                     <span
                       className={`rounded px-1.5 py-0.5 ${
-                        item.resourceType === "channel"
+                        item.resourceType === "CHANNEL" || item.resourceType === "USER" || item.resourceType === "PROFILE"
                           ? "bg-blue-500/15 text-blue-600 dark:text-blue-400"
                           : "bg-purple-500/15 text-purple-600 dark:text-purple-400"
                       }`}
@@ -696,7 +703,7 @@ export default function SavedItemsPage() {
         <div className="divide-y divide-[var(--border)] rounded-xl border border-[var(--border)] bg-[var(--card)]">
           {filteredItems.map((item) => {
             const isSelected = selectedKeys.has(item.compositeKey);
-            const openUrl = canonicalDailymotionUrl(item.resourceType, item.id, item.url);
+            const openUrl = canonicalDailymotionUrl(toDiscoveryKind(item.resourceType), item.id, item.url);
             const stableId = item.stableId || `dailymotion:${item.resourceType}:${item.id}`;
 
             return (
@@ -720,7 +727,11 @@ export default function SavedItemsPage() {
                       <img src={item.thumbnail} alt="" loading="lazy" className="h-full w-full object-cover" />
                     ) : (
                       <div className="flex h-full w-full items-center justify-center text-[var(--muted-foreground)]">
-                        {item.resourceType === "channel" ? <Compass className="h-5 w-5" /> : <Tv className="h-5 w-5" />}
+                        {item.resourceType === "CHANNEL" || item.resourceType === "USER" || item.resourceType === "PROFILE" ? (
+                          <Compass className="h-5 w-5" />
+                        ) : (
+                          <Tv className="h-5 w-5" />
+                        )}
                       </div>
                     )}
                   </div>
@@ -790,7 +801,7 @@ export default function SavedItemsPage() {
         open={Boolean(inspectedItem)}
         onClose={() => setInspectedItem(null)}
         title={inspectedItem?.title ?? "Saved Item Snapshot"}
-        data={inspectedItem?.snapshot ?? inspectedItem}
+        payload={inspectedItem?.snapshot ?? inspectedItem}
       />
     </div>
   );

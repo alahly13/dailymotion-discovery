@@ -117,7 +117,7 @@ export function ChannelMetadataPanel({
           {metadata && channelId ? (
             <Button
               type="button"
-              variant={isSaved ? "default" : "outline"}
+              variant={isSaved ? "secondary" : "primary"}
               onClick={handleToggleSaveChannel}
               className="gap-1.5"
             >

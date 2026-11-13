@@ -63,7 +63,7 @@
 | `TEMP_MANIFEST_TTL_HOURS` | Root app | Optional | Configuration | Retention period for temporary manifests | `72` | Positive integer (hours) | Local configuration | Ephemeral manifest cleanup | All | Positive integer |
 | `WORKER_AUTH_SECRET` | Worker | Required | Secret | HMAC-SHA256 secret for capability tokens | None | 64-char hexadecimal string | Cloudflare Secrets / `.prod.vars` | Authenticates incoming Worker requests | Worker | Must match Next.js secret |
 | `ALLOWED_ORIGINS` | Worker | Required | Configuration | Comma-delimited list of allowed CORS origins | None | String (URLs) | Cloudflare / `.prod.vars` | CORS headers on Worker responses | Worker | Comma-delimited URLs |
-| `DM_BUCKET` | Worker | Required | Binding | Cloudflare R2 bucket binding | None | R2 Bucket Binding | Cloudflare R2 | Direct Worker access to R2 bucket | Worker | Configured in `wrangler.jsonc` |
+| `R2_BUCKET` | Worker | Required | Binding | Cloudflare R2 bucket binding | None | R2 Bucket Binding | Cloudflare R2 | Direct Worker access to R2 bucket | Worker | Configured in `wrangler.jsonc` |
 
 ---
 

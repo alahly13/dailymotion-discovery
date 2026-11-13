@@ -39,3 +39,6 @@ data/
 .qwen/
 .zcode/
 .zencoder/
+
+.vercel
+.env*

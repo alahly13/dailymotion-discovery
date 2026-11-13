@@ -74,7 +74,7 @@ describe("R2 Two-Phase Save All, Integrity Verify, and Hydration", () => {
     const bucket = new TestR2Bucket();
     const secret = "sync-integration-secret-0123456789abcdef0123456789";
     const env: Env = {
-      DM_BUCKET: bucket,
+      R2_BUCKET: bucket,
       WORKER_AUTH_SECRET: secret,
       ALLOWED_ORIGINS: "http://localhost:3000",
     };

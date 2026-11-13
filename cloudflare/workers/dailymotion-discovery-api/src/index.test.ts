@@ -68,7 +68,7 @@ const SECRET = "test-worker-hmac-secret-0123456789abcdef0123456789abcdef";
 
 function makeEnv(): Env {
   return {
-    DM_BUCKET: new MemoryR2Bucket(),
+    R2_BUCKET: new MemoryR2Bucket(),
     WORKER_AUTH_SECRET: SECRET,
     ALLOWED_ORIGINS: "http://localhost:3000",
   };

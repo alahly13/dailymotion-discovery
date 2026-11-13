@@ -5,7 +5,7 @@ Dedicated Cloudflare Worker mediating private Cloudflare R2 storage (`dailymotio
 ## Architecture & Security Invariants
 
 - **Dedicated Worker:** `dailymotion-discovery-api` (isolated from other discovery platforms).
-- **Private Authoritative R2 Bucket:** `DM_BUCKET -> dailymotion-discovery-private`.
+- **Private Authoritative R2 Bucket:** `R2_BUCKET -> dailymotion-discovery-private`.
 - **HMAC Capability Token Security:** Every data request requires an ephemeral Web Crypto HS256 JWT signed with `WORKER_AUTH_SECRET` (`iss: "dailymotion-discovery-web"`, `aud: "dailymotion-discovery-api"`).
 - **Secret Separation:** Secrets (`WORKER_AUTH_SECRET`) are loaded securely via `.prod.vars` using `--secrets-file .prod.vars`.
 - **Allowed Origins:** `ALLOWED_ORIGINS` restricts CORS access.

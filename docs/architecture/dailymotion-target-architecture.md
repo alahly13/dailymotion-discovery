@@ -57,7 +57,7 @@ flowchart LR
 
 ## 3. Worker Security Model (`cloudflare/workers/dailymotion-discovery-api`)
 
-- Native Cloudflare R2 binding (`env.DM_BUCKET -> dailymotion-discovery-private`). Zero S3 SDKs or AWS keys.
+- Native Cloudflare R2 binding (`env.R2_BUCKET -> dailymotion-discovery-private`). Zero S3 SDKs or AWS keys.
 - Every request (except `GET /health`) requires `Authorization: Bearer <HS256 capability token>` verified via Web Crypto HMAC-SHA256.
 - Claims validate `iss`, `aud === "dailymotion-discovery-api"`, `exp > now`, `operation`, `storage_owner_uuid`, and `key`/`prefix` containment.
 - Path sanitizer blocks `..`, `\`, control characters, and keys outside `dailymotion/(persistence|temp)/<owner>/...`.

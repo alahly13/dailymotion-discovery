@@ -1,8 +1,8 @@
 # Dailymotion Discovery Platform Ledger
 
-Updated: 2026-11-12
+Updated: 2026-11-13
 Repo path: `E:\discovery\dailymotion-discovery`
-Scope: Project source-of-truth ledger, updated after Supabase Auth SSR single-identity (`asdy`), searchable CountrySelector & multi-level filters, Cloudflare R2 Worker deployment preparation, Vercel Blob total elimination, and full Vitest / TypeScript verification.
+Scope: Project source-of-truth ledger, updated after Cloudflare Dedicated Worker R2 binding reconciliation (`R2_BUCKET -> dailymotion-discovery-private`), Supabase Auth SSR 7-day session TTL enforcement, zero-local-build remote Vercel deployment architecture, full documentation suite authoring, and 100% Vitest / TypeScript verification.
 
 ## Table of Contents
 
@@ -1982,18 +1982,68 @@ CONFIRM_DB_APPLY=true npm run db:apply
 - `npm run db:validate`: exit 0 (primary `DATABASE_URL` Supabase Session Pooler verified).
 - `node scripts/app-validate-env.mjs`: exit 0.
 
+## 2026-11-13 Final Architecture Standardization, Cloudflare R2 Binding (R2_BUCKET), Supabase Auth 7-Day Session TTL, Zero-Local-Build Policy & Vercel Remote Deployment
+
+### 1. Cloudflare Dedicated Worker Binding Standardization (`R2_BUCKET`)
+- Reconciled authoritative Cloudflare R2 binding name from `DM_BUCKET` to **`R2_BUCKET`** across all files:
+  - `cloudflare/workers/dailymotion-discovery-api/wrangler.jsonc`: binding set to `"R2_BUCKET"` with `"bucket_name": "dailymotion-discovery-private"` and `"remote": true`.
+  - `cloudflare/workers/dailymotion-discovery-api/src/index.ts`: `Env.R2_BUCKET`, `env.R2_BUCKET` calls across `/health`, `/list`, `/batch/upload`, `/batch/verify`, and `/objects/*` (PUT/GET/HEAD/DELETE).
+  - `cloudflare/workers/dailymotion-discovery-api/src/index.test.ts`: test harness initialized with `R2_BUCKET: new MemoryR2Bucket()`.
+  - Next.js test harnesses in `src/lib/persistence/__tests__/r2-sync-service.test.ts` and `src/lib/storage/__tests__/r2-storage.test.ts` updated to `R2_BUCKET: bucket`.
+  - Documentation files updated (`README.md`, `docs/CLOUDFLARE_DEPLOYMENT.md`, `docs/ENVIRONMENT_VARIABLES.md`, `docs/architecture/dailymotion-target-architecture.md`).
+- Zero references to `DM_BUCKET` remain in application code or configuration.
+
+### 2. Supabase Auth SSR & 7-Day Session TTL Enforcement
+- Server-side admin session TTL enforced via `ADMIN_SESSION_TTL_SECONDS="604800"` (7 days = 604,800 seconds).
+- Validated in `src/lib/config/env.ts` with `z.coerce.number().int().positive().default(604800)`.
+- Enforced in `src/lib/admin/session.ts` via HMAC-SHA256 cookie validation (`parsed.exp * 1000 < Date.now()`).
+- Endpoint `POST /api/admin/login` sets `dm_admin_session` with `httpOnly: true`, `sameSite: "lax"`, `secure: production`, `path: "/"`, and `maxAge: 604800`.
+- Protected endpoints (`/api/cloud/*`, `/api/admin/*`, `/api/sync/*`, `/api/storage/*`) fail closed with 401 Unauthorized if the session cookie is missing, tampered, or expired.
+- Canonical administrator mapping `asdy` -> `asdy@dailymotion.discov.com` preserved; zero passwords stored in PostgreSQL.
+
+### 3. Standardized Package Scripts & Zero-Local-Build Policy
+- Enforced strict user resource policy: **ZERO LOCAL PRODUCTION BUILDS** (`npm run build`, `next build`, `vercel build` prohibited in local automated check sequences).
+- Standardized `package.json` scripts:
+  - `db:validate`: `node scripts/db-validate-env.mjs` (validates connection parameters, host, port, protocol, query parameters in <1s without blocking on Windows pipes).
+  - `worker:dev`: `wrangler dev --config cloudflare/workers/dailymotion-discovery-api/wrangler.jsonc`
+  - `worker:deploy:dry-run`: `wrangler deploy --config cloudflare/workers/dailymotion-discovery-api/wrangler.jsonc --dry-run`
+  - `worker:deploy`: `wrangler deploy --config cloudflare/workers/dailymotion-discovery-api/wrangler.jsonc --secrets-file cloudflare/workers/dailymotion-discovery-api/.prod.vars`
+  - `worker:tail`: `wrangler tail dailymotion-discovery-api`
+  - `env:validate:all`: `node scripts/validate-all-env.mjs`
+
+### 4. Supabase UI & shadcn Component Integration
+- `components.json` configured with `@supabase` registry: `"@supabase": "https://supabase.com/ui/r/{name}.json"`.
+- Cleaned up root re-exports in `src/lib/utils.ts` (`export { cn } from "./utils/cn"`), `src/lib/client.ts`, `src/lib/server.ts`, and `src/lib/middleware.ts` to seamlessly bridge shadcn components with canonical Supabase SSR clients.
+- Cleaned up `/saved-items` (`src/app/saved-items/page.tsx`): resolved TypeScript comparisons against `DailymotionResourceType` ("VIDEO", "CHANNEL", "USER", "PROFILE", "LIVESTREAM"), mapped to `toDiscoveryKind()`, formatted sync receipts with `completedAt || startedAt`, and wired `RawJsonDrawer payload`.
+
+### 5. Complete Documentation Suite Authored in `docs/`
+- `docs/DATABASE_ARCHITECTURE.md`: Complete architectural breakdown of the 23 PostgreSQL canonical tables in the Supabase Session Pooler instance, Prisma models, enums, relationships, indexes, unique constraints, and owner scoping.
+- `docs/DATABASE_MIGRATIONS.md`: Details of all 3 applied migrations (`20260506`, `20261011`, `20261112`), migration runner, and forward-only non-destructive migration policies.
+- `docs/SUPABASE_AUTH.md`: Administrator single identity (`asdy`), Supabase Auth SSR, 7-day session TTL, cookie encryption, and server-side route gating.
+- `docs/STORAGE_ARCHITECTURE.md`: Dedicated Cloudflare Worker (`dailymotion-discovery-api`), `R2_BUCKET` binding, capability tokens, canonical path hierarchy, and two-phase batch commit with SHA-256 verification.
+- `docs/MANIFEST_FORMAT.md`: Canonical manifest JSON schema (`dailymotion-manifest-v1`), SHA-256 integrity digest verification, and immutable generation parts.
+- `docs/VERCEL_DEPLOYMENT.md`: Zero-local-build remote compilation architecture, production environment variable contract, and remote inspection commands.
+- `docs/CLOUDFLARE_DEPLOYMENT.md`: Step-by-step PowerShell commands for private bucket creation, dry-run deployment, and production worker deployment.
+- `docs/ENVIRONMENT_VARIABLES.md`: Comprehensive 57-variable contract with locations, sensitivity, defaults, and validation rules.
+
+### 6. Full Verification Evidence
+- TypeScript compilation: `next typegen && tsc --noEmit` exited 0 (zero errors).
+- Vitest test suite: 29/29 test files passed, 132/132 tests passed (`npm test`).
+- Environment preflight: `npm run env:validate:all` exited 0.
+- Database preflight: `npm run db:validate` exited 0.
+- Git security check: `git check-ignore .env .dev.vars .prod.vars` confirmed 100% ignored. Zero secrets exposed.
+
 ## Known Limitations
 
-- Remote Cloudflare Worker deployment (`dailymotion-discovery-api`), private R2 bucket provisioning (`dailymotion-discovery-private`), and remote SQL migration deploy (`20261112000000_r2_generations_and_presets`) require explicit operator execution/approval and live `.env` credentials (`DATABASE_URL`, `CLOUDFLARE_R2_WORKER_URL`, `CLOUDFLARE_R2_WORKER_HMAC_SECRET`).
-- When `CLOUDFLARE_R2_WORKER_URL` is unset in local development, `/api/sync/save-all` safely records commits in Postgres (if reachable) and preserves outbox drafts on failure; `/api/storage/verify` returns 503 Worker-not-configured.
-- Live AI endpoints (`/api/ai/*`, `/ai-search`) fail closed with HTTP `503` until a real `GEMINI_API_KEY` replaces any placeholder in `.env`.
+- Live AI endpoints (`/api/ai/*`, `/ai-search`) fail closed with HTTP `503 missing_config` until a real `GEMINI_API_KEY` replaces the placeholder in `.env` or Vercel Environment Variables.
 - Admin session auth gates `/api/sync/*`, `/api/storage/*`, `/api/cloud/*`, and `/api/admin/*`.
+- Cloudflare Worker production deployment (`worker:deploy`) is ready for operator execution using Cloudflare CLI credentials.
 
 ## Future Roadmap
 
-- Deploy `cloudflare/workers/dailymotion-discovery-api` to Cloudflare Workers with `DM_BUCKET = dailymotion-discovery-private` and set `CLOUDFLARE_R2_WORKER_URL` + `CLOUDFLARE_R2_WORKER_HMAC_SECRET`.
-- Apply pending migrations (`20261011183739_workspace_cloud_persistence`, `20261112000000_r2_generations_and_presets`) via `CONFIRM_DB_APPLY=true npm run db:apply` against the active Postgres project.
-- Add multi-user Supabase Auth owner scoping when user login expands beyond single-admin mode.
+- Deploy `cloudflare/workers/dailymotion-discovery-api` using `npm run worker:deploy`.
+- Monitor remote production build on Vercel after Git push.
+- Expand multi-user Supabase Auth owner scoping when multi-user tenancy is introduced.
 
 ## Agent Instructions
 
