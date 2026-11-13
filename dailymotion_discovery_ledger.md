@@ -1984,7 +1984,8 @@ CONFIRM_DB_APPLY=true npm run db:apply
 
 ## 2026-11-13 Final Architecture Standardization, Cloudflare R2 Binding (R2_BUCKET), Supabase Auth 7-Day Session TTL, Zero-Local-Build Policy & Vercel Remote Deployment
 
-### 1. Cloudflare Dedicated Worker Binding Standardization (`R2_BUCKET`)
+### 1. Cloudflare Dedicated Worker Binding Standardization (`R2_BUCKET`) & Prisma 7 Schema Fix
+- Resolved Prisma 7.10.1 P1012 schema validation error: removed deprecated `url = env("DATABASE_URL")` from `prisma/schema.prisma` (in Prisma ORM 7, connection URLs for Migrate live exclusively in `prisma.config.ts` via `datasource.url: resolvePrismaCliDatabaseUrl()`).
 - Reconciled authoritative Cloudflare R2 binding name from `DM_BUCKET` to **`R2_BUCKET`** across all files:
   - `cloudflare/workers/dailymotion-discovery-api/wrangler.jsonc`: binding set to `"R2_BUCKET"` with `"bucket_name": "dailymotion-discovery-private"` and `"remote": true`.
   - `cloudflare/workers/dailymotion-discovery-api/src/index.ts`: `Env.R2_BUCKET`, `env.R2_BUCKET` calls across `/health`, `/list`, `/batch/upload`, `/batch/verify`, and `/objects/*` (PUT/GET/HEAD/DELETE).
