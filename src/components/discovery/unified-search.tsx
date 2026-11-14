@@ -55,6 +55,7 @@ import {
   type LocalFilterState,
 } from "@/lib/filters/discovery-result-filters";
 import { DiscoveryLocalFilterPanel } from "./discovery-local-filter-panel";
+import { ApiErrorAlert } from "./api-error-alert";
 import { classifyDiscoveryItem, discoveryCompositeKey } from "@/lib/resources/dailymotion-resource-taxonomy";
 import { useMergedDataset } from "@/lib/local-first/use-merged-dataset";
 import { ResultCard } from "./result-card";
@@ -140,7 +141,7 @@ function ParamControl({ def, value, onChange }: { def: ParamDef; value: string; 
               aria-checked={value === o.v}
               onClick={() => onChange(o.v)}
               className={`min-h-8 rounded px-2 text-[11px] font-black uppercase transition cursor-pointer ${
-                value === o.v ? "bg-[var(--primary)] text-white" : "text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
+                value === o.v ? "bg-primary text-primary-foreground shadow-xs font-bold" : "text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
               }`}
             >
               {o.label}
@@ -609,7 +610,7 @@ export function UnifiedSearch() {
           <button
             type="button"
             onClick={() => void runSearch(1, false)}
-            className="inline-flex min-h-9 items-center gap-1.5 rounded-lg bg-[var(--primary)] px-3 text-xs font-black text-white cursor-pointer hover:opacity-90"
+            className="inline-flex min-h-9 items-center gap-1.5 rounded-lg bg-primary px-3 text-xs font-black text-primary-foreground cursor-pointer hover:opacity-90 shadow-xs"
           >
             <Sparkles className="h-3.5 w-3.5" />
             Run Live Search Again
@@ -626,7 +627,7 @@ export function UnifiedSearch() {
               type="button"
               onClick={() => switchVersion("v1")}
               className={`rounded-md px-3.5 py-1.5 text-xs font-black transition cursor-pointer ${
-                version === "v1" ? "bg-[var(--primary)] text-white shadow-xs" : "text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
+                version === "v1" ? "bg-primary text-primary-foreground shadow-xs" : "text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
               }`}
             >
               V1 — Legacy
@@ -635,7 +636,7 @@ export function UnifiedSearch() {
               type="button"
               onClick={() => switchVersion("v2")}
               className={`rounded-md px-3.5 py-1.5 text-xs font-black transition cursor-pointer ${
-                version === "v2" ? "bg-[var(--primary)] text-white shadow-xs" : "text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
+                version === "v2" ? "bg-primary text-primary-foreground shadow-xs" : "text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
               }`}
             >
               V2 — Current
@@ -655,7 +656,7 @@ export function UnifiedSearch() {
               <SlidersHorizontal className="h-3.5 w-3.5" />
               <span>API Parameters</span>
               {activeApiFiltersCount > 0 && (
-                <span className="rounded-full bg-[var(--primary)] px-1.5 py-0.2 text-[10px] font-black text-white">
+                <span className="rounded-full bg-primary px-1.5 py-0.2 text-[10px] font-black text-primary-foreground">
                   {activeApiFiltersCount}
                 </span>
               )}
@@ -710,7 +711,7 @@ export function UnifiedSearch() {
             <button
               type="submit"
               disabled={loading}
-              className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-[var(--primary)] px-4 text-xs font-black text-white transition hover:opacity-95 disabled:opacity-50 cursor-pointer"
+              className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-primary px-4 text-xs font-black text-primary-foreground shadow-xs transition hover:opacity-95 disabled:opacity-50 cursor-pointer"
             >
               <Search className="h-3.5 w-3.5" />
               <span>{loading ? "Searching…" : "Search"}</span>
@@ -893,20 +894,19 @@ export function UnifiedSearch() {
       )}
 
       {failure && (
-        <div className="rounded-xl border border-red-500/50 bg-red-500/10 p-4 text-sm leading-6" role="alert">
-          <p className="font-black text-red-500">
-            Search failed on {version.toUpperCase()} ({failure.reason})
-          </p>
-          <p className="mt-1 text-xs">{failure.error}</p>
-          {failure.remedy && <p className="mt-1 text-xs font-semibold">{failure.remedy}</p>}
-          <button
-            type="button"
-            onClick={() => void runSearch(meta?.page ?? 1, false)}
-            className="mt-3 min-h-9 rounded-lg bg-[var(--primary)] px-4 text-xs font-black uppercase text-white cursor-pointer"
-          >
-            Retry Request
-          </button>
-        </div>
+        <ApiErrorAlert
+          error={{
+            error: failure.error,
+            reason: failure.reason,
+            remedy: failure.remedy,
+            status: failure.status,
+            apiVersion: version,
+            endpoint: failure.endpoint,
+            retryable: failure.retryable,
+          }}
+          onRetry={() => void runSearch(meta?.page ?? 1, false)}
+          onSwitchVersion={(target) => switchVersion(target)}
+        />
       )}
 
       {/* ── 12-Column Results Workspace ──────────────────────────────────── */}
@@ -923,7 +923,7 @@ export function UnifiedSearch() {
                   onClick={() => setActiveTabKind("ALL")}
                   className={`inline-flex items-center gap-1 rounded-lg px-2.5 py-1 text-xs font-bold transition cursor-pointer ${
                     activeTabKind === "ALL"
-                      ? "bg-[var(--primary)] text-white shadow-xs"
+                      ? "bg-primary text-primary-foreground shadow-xs"
                       : "bg-[var(--surface-container-low)] text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
                   }`}
                 >
@@ -936,7 +936,7 @@ export function UnifiedSearch() {
                     onClick={() => setActiveTabKind("VIDEO")}
                     className={`inline-flex items-center gap-1 rounded-lg px-2.5 py-1 text-xs font-bold transition cursor-pointer ${
                       activeTabKind === "VIDEO"
-                        ? "bg-[var(--primary)] text-white shadow-xs"
+                        ? "bg-primary text-primary-foreground shadow-xs"
                         : "bg-[var(--surface-container-low)] text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
                     }`}
                   >
@@ -951,7 +951,7 @@ export function UnifiedSearch() {
                     onClick={() => setActiveTabKind("CHANNEL")}
                     className={`inline-flex items-center gap-1 rounded-lg px-2.5 py-1 text-xs font-bold transition cursor-pointer ${
                       activeTabKind === "CHANNEL"
-                        ? "bg-[var(--primary)] text-white shadow-xs"
+                        ? "bg-primary text-primary-foreground shadow-xs"
                         : "bg-[var(--surface-container-low)] text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
                     }`}
                   >
@@ -966,7 +966,7 @@ export function UnifiedSearch() {
                     onClick={() => setActiveTabKind("PLAYLIST")}
                     className={`inline-flex items-center gap-1 rounded-lg px-2.5 py-1 text-xs font-bold transition cursor-pointer ${
                       activeTabKind === "PLAYLIST"
-                        ? "bg-[var(--primary)] text-white shadow-xs"
+                        ? "bg-primary text-primary-foreground shadow-xs"
                         : "bg-[var(--surface-container-low)] text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
                     }`}
                   >
@@ -1050,7 +1050,7 @@ export function UnifiedSearch() {
                     <button
                       type="button"
                       onClick={() => void saveSelectedItems()}
-                      className="rounded-md bg-[var(--primary)] px-3 py-1 font-black uppercase text-white cursor-pointer"
+                      className="rounded-md bg-primary px-3 py-1 font-black uppercase text-primary-foreground shadow-xs cursor-pointer hover:opacity-90"
                     >
                       Save Selected
                     </button>
@@ -1164,7 +1164,7 @@ export function UnifiedSearch() {
                     type="button"
                     disabled={loading}
                     onClick={() => void runSearch(meta.page + 1, true)}
-                    className="min-h-9 rounded-lg bg-[var(--primary)] px-4 text-xs font-black text-white hover:opacity-95 disabled:opacity-50 cursor-pointer"
+                    className="min-h-9 rounded-lg bg-primary px-4 text-xs font-black text-primary-foreground shadow-xs hover:opacity-95 disabled:opacity-50 cursor-pointer"
                   >
                     Load More (Append)
                   </button>

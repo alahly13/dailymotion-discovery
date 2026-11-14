@@ -11,6 +11,13 @@
 import { getV2Profile } from "./version-config";
 import { getVersionTokenResult, invalidateVersionToken } from "./auth";
 import type { DiscoveryFailureReason } from "./types";
+import {
+  calculateBackoffMs,
+  parseRetryAfterHeader,
+  normalizeDailymotionError,
+  logDailymotionError,
+  type DailymotionNormalizedError,
+} from "@/lib/dailymotion/errors";
 
 export interface V2Pagination {
   page?: number;
@@ -35,6 +42,7 @@ export interface V2ClientError {
   status: number;
   retryable: boolean;
   code: string | null;
+  normalized?: DailymotionNormalizedError;
 }
 
 function withTimeout(ms = 12_000) {
@@ -101,8 +109,9 @@ async function v2FetchRaw(path: string, params: Record<string, string>, options:
       json = null;
     }
     if ((status === 429 || status >= 500) && attempt < (options.retries ?? 2)) {
-      const retryAfter = Number(response.headers.get("retry-after"));
-      await sleep(Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : Math.min(1000 * 2 ** attempt, 5000));
+      const retryAfterMs = parseRetryAfterHeader(response.headers.get("retry-after"));
+      const backoff = calculateBackoffMs(attempt, 1000, 5000, retryAfterMs);
+      await sleep(backoff);
       return v2FetchRaw(path, params, options, attempt + 1, refreshed);
     }
     // Genuine 401 (v2 always attaches a token): invalidate, reacquire once,
@@ -114,7 +123,7 @@ async function v2FetchRaw(path: string, params: Record<string, string>, options:
     return { noAuth: false as const, status, json };
   } catch (error) {
     if (attempt < (options.retries ?? 2)) {
-      await sleep(Math.min(1000 * 2 ** attempt, 5000));
+      await sleep(calculateBackoffMs(attempt, 1000, 5000));
       return v2FetchRaw(path, params, options, attempt + 1);
     }
     const aborted = error instanceof DOMException && error.name === "AbortError";
@@ -124,16 +133,24 @@ async function v2FetchRaw(path: string, params: Record<string, string>, options:
   }
 }
 
-function toFailure(status: number, json: unknown): V2ClientError {
+function toFailure(status: number, json: unknown, endpoint?: string): V2ClientError {
   const envelope = (json ?? {}) as V2ErrorEnvelope;
   const code = envelope.error?.code ?? null;
   const classified = classifyV2(status, code);
+  const normalized = normalizeDailymotionError({
+    status,
+    rawJson: json,
+    apiVersion: "v2",
+    endpoint,
+  });
+  logDailymotionError(normalized);
   return {
     error: envelope.error?.message ?? `Dailymotion v2 request failed (${status}).`,
     status,
     retryable: classified.retryable,
     reason: classified.reason,
     code,
+    normalized,
   };
 }
 
@@ -146,8 +163,14 @@ export async function v2List<T>(
     const raw = await v2FetchRaw(path, params, options, 0);
     if (raw.noAuth) return { ok: false, failure: raw.failure };
     if (raw.status === 200 || raw.status === 206) return { ok: true, data: (raw.json ?? {}) as V2Collection<T>, status: raw.status };
-    return { ok: false, failure: toFailure(raw.status, raw.json) };
+    return { ok: false, failure: toFailure(raw.status, raw.json, path) };
   } catch (error) {
+    const normalized = normalizeDailymotionError({
+      error,
+      apiVersion: "v2",
+      endpoint: path,
+    });
+    logDailymotionError(normalized);
     return {
       ok: false,
       failure: {
@@ -156,6 +179,7 @@ export async function v2List<T>(
         status: 503,
         retryable: true,
         code: null,
+        normalized,
       },
     };
   }
@@ -170,8 +194,14 @@ export async function v2Get<T>(
     const raw = await v2FetchRaw(path, params, options, 0);
     if (raw.noAuth) return { ok: false, failure: raw.failure };
     if (raw.status >= 200 && raw.status < 300) return { ok: true, data: raw.json as T, status: raw.status };
-    return { ok: false, failure: toFailure(raw.status, raw.json) };
+    return { ok: false, failure: toFailure(raw.status, raw.json, path) };
   } catch (error) {
+    const normalized = normalizeDailymotionError({
+      error,
+      apiVersion: "v2",
+      endpoint: path,
+    });
+    logDailymotionError(normalized);
     return {
       ok: false,
       failure: {
@@ -180,6 +210,7 @@ export async function v2Get<T>(
         status: 503,
         retryable: true,
         code: null,
+        normalized,
       },
     };
   }

@@ -65,8 +65,8 @@ const navSections: NavSection[] = [
         href: "/global-search",
         icon: Search,
         sublinks: [
-          { label: "V1 — Legacy", href: "/global-search?v=v1", version: "v1" },
-          { label: "V2 — Current", href: "/global-search?v=v2", version: "v2" },
+          { label: "V1 — Legacy API", href: "/global-search?v=v1", version: "v1" },
+          { label: "V2 — Current API", href: "/global-search?v=v2", version: "v2" },
         ],
       },
       {
@@ -74,8 +74,8 @@ const navSections: NavSection[] = [
         href: "/link-explorer",
         icon: LinkIcon,
         sublinks: [
-          { label: "V1 — Legacy", href: "/link-explorer?v=v1", version: "v1" },
-          { label: "V2 — Current", href: "/link-explorer?v=v2", version: "v2" },
+          { label: "V1 — Legacy API", href: "/link-explorer?v=v1", version: "v1" },
+          { label: "V2 — Current API", href: "/link-explorer?v=v2", version: "v2" },
         ],
       },
     ],
@@ -299,8 +299,8 @@ export function AppShell({ children }: { children: ReactNode }) {
                         <span className="truncate">{link.label}</span>
                       </Link>
 
-                      {/* Nested Version Sub-Links (V1 — Legacy / V2 — Current) */}
-                      {link.sublinks && active && (
+                      {/* Nested Version Sub-Links (V1 — Legacy API / V2 — Current API) */}
+                      {link.sublinks && (
                         <div className="ml-4 pl-2.5 border-l border-[var(--border)] space-y-0.5 pt-0.5">
                           {link.sublinks.map((sub) => {
                             const subActive = isSublinkActive(sub);
@@ -312,14 +312,14 @@ export function AppShell({ children }: { children: ReactNode }) {
                                 className={cn(
                                   "flex items-center gap-2 rounded px-2 py-1 text-[11px] font-semibold transition",
                                   subActive
-                                    ? "bg-[var(--primary)] text-white shadow-2xs font-bold"
+                                    ? "bg-primary text-primary-foreground shadow-2xs font-bold"
                                     : "text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--surface-container-high)]"
                                 )}
                               >
                                 <span
                                   className={cn(
                                     "h-1.5 w-1.5 rounded-full",
-                                    subActive ? "bg-white" : "bg-[var(--muted-foreground)]"
+                                    subActive ? "bg-primary-foreground" : "bg-[var(--muted-foreground)]"
                                   )}
                                 />
                                 <span>{sub.label}</span>
@@ -420,7 +420,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                             <span>{link.label}</span>
                           </Link>
 
-                          {link.sublinks && active && (
+                          {link.sublinks && (
                             <div className="ml-4 pl-2.5 border-l border-[var(--border)] space-y-0.5 pt-0.5">
                               {link.sublinks.map((sub) => {
                                 const subActive = isSublinkActive(sub);
@@ -435,14 +435,14 @@ export function AppShell({ children }: { children: ReactNode }) {
                                     className={cn(
                                       "flex items-center gap-2 rounded px-2 py-1 text-[11px] font-semibold transition",
                                       subActive
-                                        ? "bg-[var(--primary)] text-white shadow-2xs font-bold"
+                                        ? "bg-primary text-primary-foreground shadow-2xs font-bold"
                                         : "text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--surface-container-high)]"
                                     )}
                                   >
                                     <span
                                       className={cn(
                                         "h-1.5 w-1.5 rounded-full",
-                                        subActive ? "bg-white" : "bg-[var(--muted-foreground)]"
+                                        subActive ? "bg-primary-foreground" : "bg-[var(--muted-foreground)]"
                                       )}
                                     />
                                     <span>{sub.label}</span>

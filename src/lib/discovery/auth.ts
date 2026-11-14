@@ -18,6 +18,7 @@
 import { getVersionProfile, tokenSafetyMarginSeconds, type VersionProfile } from "./version-config";
 import { clearDurableToken, readDurableToken, writeDurableToken } from "./token-cache-store";
 import type { ApiVersion } from "./types";
+import { logDailymotionError, normalizeDailymotionError } from "@/lib/dailymotion/errors";
 
 interface TokenCacheEntry {
   token: string;
@@ -170,7 +171,42 @@ async function acquireToken(profile: VersionProfile): Promise<{ ok: true; value:
     bodyText = "";
   }
   if (!response.ok) {
-    return { ok: false, value: classifyTokenError(response.status, bodyText, version) };
+    // Resilient fallback for scope mismatch:
+    // If V2 was requesting bundle.public but the client key requires granular read scopes,
+    // retry once with "read_videos read_channels read_playlists read_users".
+    if (
+      version === "v2" &&
+      response.status === 400 &&
+      bodyText.toLowerCase().includes("scope") &&
+      profile.scope !== "read_videos read_channels read_playlists read_users"
+    ) {
+      const fallbackProfile: VersionProfile = { ...profile, scope: "read_videos read_channels read_playlists read_users" };
+      return acquireToken(fallbackProfile);
+    }
+
+    // If V1 was requesting userinfo but the partner host requires manage_videos,
+    // retry once with "manage_videos".
+    if (
+      version === "v1" &&
+      (response.status === 400 || response.status === 401 || response.status === 422) &&
+      bodyText.toLowerCase().includes("scope") &&
+      profile.scope !== "manage_videos"
+    ) {
+      const fallbackProfile: VersionProfile = { ...profile, scope: "manage_videos" };
+      return acquireToken(fallbackProfile);
+    }
+
+    const failure = classifyTokenError(response.status, bodyText, version);
+    logDailymotionError(
+      normalizeDailymotionError({
+        status: response.status,
+        customCode: "AUTH_REFRESH_FAILED",
+        customMessage: failure.error,
+        apiVersion: version,
+        endpoint: profile.tokenUrl,
+      })
+    );
+    return { ok: false, value: failure };
   }
   let data: { access_token?: unknown; expires_in?: unknown; scope?: unknown };
   try {

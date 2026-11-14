@@ -235,7 +235,7 @@ export default function SavedItemsPage() {
             type="button"
             disabled={syncing}
             onClick={() => void saveAll()}
-            className="inline-flex min-h-10 items-center gap-2 rounded-lg bg-[var(--primary)] px-4 text-xs font-black uppercase text-white shadow-sm transition hover:opacity-90 disabled:opacity-50"
+            className="inline-flex min-h-10 items-center gap-2 rounded-lg bg-primary px-4 text-xs font-black uppercase text-primary-foreground shadow-sm transition hover:opacity-90 disabled:opacity-50"
           >
             {syncing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Cloud className="h-4 w-4" />}
             {syncing ? "Syncing..." : pendingCount > 0 ? `Save All to Cloud (${pendingCount})` : "Save All to Cloud"}
@@ -256,7 +256,7 @@ export default function SavedItemsPage() {
             <button
               type="button"
               onClick={() => setViewMode("grid")}
-              className={`rounded-md p-1.5 transition ${viewMode === "grid" ? "bg-[var(--primary)] text-white" : "text-[var(--muted-foreground)] hover:text-[var(--foreground)]"}`}
+              className={`rounded-md p-1.5 transition ${viewMode === "grid" ? "bg-primary text-primary-foreground shadow-xs font-bold" : "text-[var(--muted-foreground)] hover:text-[var(--foreground)]"}`}
               aria-label="Grid view"
             >
               <Grid3X3 className="h-4 w-4" />
@@ -264,7 +264,7 @@ export default function SavedItemsPage() {
             <button
               type="button"
               onClick={() => setViewMode("list")}
-              className={`rounded-md p-1.5 transition ${viewMode === "list" ? "bg-[var(--primary)] text-white" : "text-[var(--muted-foreground)] hover:text-[var(--foreground)]"}`}
+              className={`rounded-md p-1.5 transition ${viewMode === "list" ? "bg-primary text-primary-foreground shadow-xs font-bold" : "text-[var(--muted-foreground)] hover:text-[var(--foreground)]"}`}
               aria-label="List view"
             >
               <List className="h-4 w-4" />
@@ -439,7 +439,7 @@ export default function SavedItemsPage() {
                     type="button"
                     disabled={!targetCollectionId}
                     onClick={() => void handleBulkAssignCollection()}
-                    className="inline-flex h-8 items-center gap-1 rounded-md bg-[var(--primary)] px-2.5 text-xs font-bold text-white disabled:opacity-50"
+                    className="inline-flex h-8 items-center gap-1 rounded-md bg-primary px-2.5 text-xs font-bold text-primary-foreground shadow-xs disabled:opacity-50"
                   >
                     <FolderPlus className="h-3.5 w-3.5" />
                     Assign
@@ -481,14 +481,14 @@ export default function SavedItemsPage() {
           </p>
           <div className="mt-5 flex flex-wrap justify-center gap-3">
             <Link
-              href="/videos-v1"
-              className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-[var(--primary)] px-4 text-xs font-black uppercase text-white transition hover:opacity-90"
+              href="/global-search?type=video"
+              className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-primary px-4 text-xs font-black uppercase text-primary-foreground shadow-xs transition hover:opacity-90"
             >
               <Tv className="h-3.5 w-3.5" />
               Discover Videos
             </Link>
             <Link
-              href="/channels-v1"
+              href="/channel-explorer"
               className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-[var(--border)] bg-[var(--card)] px-4 text-xs font-bold transition hover:bg-[var(--surface-container-high)]"
             >
               <Compass className="h-3.5 w-3.5" />

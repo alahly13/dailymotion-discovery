@@ -138,7 +138,7 @@ export function ResultCard({
       {exploreLink && (
         <Link
           href={exploreLink}
-          className="inline-flex min-h-8 items-center gap-1.5 rounded-md border border-[var(--primary)]/40 bg-[color-mix(in_srgb,var(--primary)_12%,transparent)] px-2.5 text-xs font-bold text-[var(--primary)] transition hover:bg-[var(--primary)] hover:text-white"
+          className="inline-flex min-h-8 items-center gap-1.5 rounded-md border border-primary/40 bg-[color-mix(in_srgb,var(--primary)_12%,transparent)] px-2.5 text-xs font-bold text-primary transition hover:bg-primary hover:text-primary-foreground"
         >
           <Tv className="h-3.5 w-3.5" />
           <span>{exploreLabel || "Explore"}</span>
@@ -151,8 +151,8 @@ export function ResultCard({
         aria-pressed={saved}
         className={`inline-flex min-h-8 items-center gap-1.5 rounded-md border px-2.5 text-xs font-bold transition cursor-pointer ${
           saved
-            ? "border-[var(--primary)] bg-[var(--primary)] text-white shadow-xs"
-            : "border-[var(--border)] bg-[var(--surface-container-low)] text-[var(--foreground)] hover:border-[var(--primary)]"
+            ? "border-primary bg-primary text-primary-foreground shadow-xs"
+            : "border-[var(--border)] bg-[var(--surface-container-low)] text-[var(--foreground)] hover:border-primary"
         }`}
         title={saved ? "Unsave from local storage" : "Save to local storage"}
       >

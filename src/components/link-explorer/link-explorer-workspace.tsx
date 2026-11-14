@@ -47,6 +47,7 @@ import {
 } from "@/lib/link-explorer/link-explorer-service";
 import { ResultCard, formatDuration, formatViews } from "@/components/discovery/result-card";
 import { RawJsonDrawer } from "@/components/discovery/raw-json-drawer";
+import { ApiErrorAlert } from "@/components/discovery/api-error-alert";
 import { useDiscoveryWorkspace } from "@/stores/discovery-workspace-store";
 import { useMergedDataset } from "@/lib/local-first/use-merged-dataset";
 import { discoveryCompositeKey } from "@/lib/resources/dailymotion-resource-taxonomy";
@@ -399,24 +400,22 @@ export function LinkExplorerWorkspace() {
 
       {/* Error State */}
       {resolution && !resolution.ok && (
-        <div className="rounded-xl border border-destructive/30 bg-destructive/10 p-5 space-y-2">
-          <div className="flex items-center gap-2 text-destructive font-semibold">
-            <AlertCircle className="h-5 w-5" />
-            <span>Resolution Failed</span>
-          </div>
-          <p className="text-sm text-destructive/90">{resolution.error}</p>
-          {resolution.reason === "auth_missing" && (
-            <div className="mt-3 p-3 rounded-lg border border-border bg-surface text-xs space-y-1">
-              <p className="font-semibold text-foreground">API v2 Authentication Required:</p>
-              <p className="text-muted-foreground">
-                Dailymotion API v2 requires client credentials. Configure <code>PRIVATE_DAILYMOTION_API_KEY_V2</code> in Settings.
-              </p>
-              <Link href="/settings" className="inline-block text-primary underline mt-1 font-medium">
-                Go to Settings &rarr;
-              </Link>
-            </div>
-          )}
-        </div>
+        <ApiErrorAlert
+          error={resolution.normalized || {
+            error: resolution.error,
+            reason: resolution.reason,
+            status: resolution.status,
+            apiVersion: resolution.version,
+            remedy: resolution.reason === "auth_missing" ? "Dailymotion API v2 requires client credentials. Configure PRIVATE_DAILYMOTION_API_KEY_V2 in Settings." : null,
+          }}
+          onRetry={() => void executeResolution(input, version)}
+          onSwitchVersion={(target) => {
+            setVersion(target);
+            const params = new URLSearchParams(searchParams.toString());
+            params.set("v", target);
+            router.replace(`/link-explorer?${params.toString()}`);
+          }}
+        />
       )}
 
       {/* Resolution Workspace Display */}
@@ -607,7 +606,7 @@ export function LinkExplorerWorkspace() {
                     type="button"
                     disabled={loadingMore}
                     onClick={() => void handleLoadMore()}
-                    className="inline-flex min-h-10 items-center gap-2 rounded-lg bg-[var(--primary)] px-5 text-xs font-black text-white hover:opacity-95 disabled:opacity-50 transition-all cursor-pointer shadow-xs"
+                    className="inline-flex min-h-10 items-center gap-2 rounded-lg bg-primary px-5 text-xs font-black text-primary-foreground hover:opacity-95 disabled:opacity-50 transition-all cursor-pointer shadow-xs"
                   >
                     {loadingMore ? (
                       <>

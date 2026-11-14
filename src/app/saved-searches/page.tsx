@@ -70,7 +70,7 @@ export default function SavedSearchesPage() {
           </button>
           <Link
             href="/search"
-            className="inline-flex min-h-10 items-center rounded-md bg-[var(--primary)] px-4 text-xs font-black uppercase text-white"
+            className="inline-flex min-h-10 items-center rounded-md bg-primary px-4 text-xs font-black uppercase text-primary-foreground hover:opacity-90"
           >
             + New Search
           </Link>
@@ -174,7 +174,7 @@ export default function SavedSearchesPage() {
                 <div className="mt-4 flex flex-wrap gap-2 border-t border-[var(--border)] pt-3">
                   <Link
                     href={buildLiveSearchHref(preset)}
-                    className="inline-flex min-h-9 items-center gap-1.5 rounded-md bg-[var(--primary)] px-3 text-xs font-black uppercase text-white"
+                    className="inline-flex min-h-9 items-center gap-1.5 rounded-md bg-primary px-3 text-xs font-black uppercase text-primary-foreground hover:opacity-90"
                   >
                     <Play className="h-3.5 w-3.5" aria-hidden="true" />
                     Re-run Live API Query

@@ -91,7 +91,7 @@ export default function ComparePage() {
           placeholder={operation === "video-lookup" ? "Video ID (e.g. x5auisp)" : "Profile ID (e.g. lequipe)"}
           className="min-h-11 rounded-md border border-[var(--border)] bg-[var(--surface-container-low)] px-3 text-sm font-semibold"
         />
-        <button type="button" disabled={loading || !input.trim()} onClick={() => void run()} className="min-h-11 rounded-md bg-[var(--primary)] px-5 text-sm font-black text-white disabled:opacity-60">
+        <button type="button" disabled={loading || !input.trim()} onClick={() => void run()} className="min-h-11 rounded-md bg-primary px-5 text-sm font-black text-primary-foreground hover:opacity-90 disabled:opacity-60 cursor-pointer">
           {loading ? "Comparing…" : "Compare"}
         </button>
       </div>

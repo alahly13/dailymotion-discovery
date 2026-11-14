@@ -56,7 +56,7 @@ export default function AdminLoginPage() {
           <input id="admin-pass" type="password" className={inputClass} value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" />
         </div>
         {error && <p className="text-sm font-bold text-red-500" role="alert">{error}</p>}
-        <button type="submit" disabled={loading} className="min-h-11 w-full rounded-md bg-[var(--primary)] text-sm font-black text-white disabled:opacity-60">
+        <button type="submit" disabled={loading} className="min-h-11 w-full rounded-md bg-primary text-sm font-black text-primary-foreground hover:opacity-95 disabled:opacity-60 cursor-pointer">
           {loading ? "Signing in…" : "Sign in"}
         </button>
       </form>

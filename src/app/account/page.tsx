@@ -184,7 +184,7 @@ export default function AccountPage() {
           ) : (
             <Link
               href="/admin/login"
-              className="inline-flex min-h-9 items-center gap-1.5 rounded-lg bg-[var(--primary)] px-4 text-xs font-black text-white hover:opacity-95 cursor-pointer"
+              className="inline-flex min-h-9 items-center gap-1.5 rounded-lg bg-primary px-4 text-xs font-black text-primary-foreground hover:opacity-95 cursor-pointer"
             >
               <Lock className="h-3.5 w-3.5" />
               Sign In to Administrator
@@ -272,7 +272,7 @@ export default function AccountPage() {
           <button
             type="submit"
             disabled={pwLoading}
-            className="min-h-10 rounded-lg bg-[var(--primary)] px-4 text-xs font-black uppercase text-white hover:opacity-95 disabled:opacity-50 cursor-pointer"
+            className="min-h-10 rounded-lg bg-primary px-4 text-xs font-black uppercase text-primary-foreground hover:opacity-95 disabled:opacity-50 cursor-pointer"
           >
             {pwLoading ? "Updating..." : "Update Password"}
           </button>

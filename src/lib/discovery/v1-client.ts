@@ -18,6 +18,13 @@
 import { getV1Profile } from "./version-config";
 import { getVersionTokenResult, invalidateVersionToken } from "./auth";
 import type { DiscoveryFailureReason } from "./types";
+import {
+  calculateBackoffMs,
+  parseRetryAfterHeader,
+  normalizeDailymotionError,
+  logDailymotionError,
+  type DailymotionNormalizedError,
+} from "@/lib/dailymotion/errors";
 
 export interface V1ListEnvelope<T> {
   page?: number;
@@ -33,6 +40,7 @@ export interface V1ClientError {
   reason: DiscoveryFailureReason;
   status: number;
   retryable: boolean;
+  normalized?: DailymotionNormalizedError;
 }
 
 const TRANSIENT_REASONS: DiscoveryFailureReason[] = ["rate_limited", "network_error", "upstream_error"];
@@ -125,9 +133,9 @@ async function v1FetchRaw(
       json = null;
     }
     if ((status === 429 || status >= 500) && attempt < (options.retries ?? 2)) {
-      const backoff = Math.min(1000 * 2 ** attempt, 5000);
-      const retryAfter = Number(response.headers.get("retry-after"));
-      await sleep(Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : backoff);
+      const retryAfterMs = parseRetryAfterHeader(response.headers.get("retry-after"));
+      const backoff = calculateBackoffMs(attempt, 1000, 5000, retryAfterMs);
+      await sleep(backoff);
       return v1FetchRaw(path, params, options, attempt + 1, refreshed);
     }
     // Genuine 401 with an attached token: invalidate that version's cache,
@@ -163,9 +171,16 @@ export async function v1List<T>(
     const envelope = (json ?? {}) as V1ListEnvelope<T>;
     if (envelope.error?.message) {
       const classified = classifyStatus(typeof envelope.error.code === "number" ? envelope.error.code : status, profile.hasCredentials);
+      const normalized = normalizeDailymotionError({
+        status,
+        rawJson: envelope,
+        apiVersion: "v1",
+        endpoint: path,
+      });
+      logDailymotionError(normalized);
       return {
         ok: false,
-        failure: { error: envelope.error.message, status, retryable: classified.retryable, reason: classified.reason },
+        failure: { error: envelope.error.message, status, retryable: classified.retryable, reason: classified.reason, normalized },
       };
     }
     if (status === 401 || status === 403 || status === 429 || status >= 500) {
@@ -174,21 +189,42 @@ export async function v1List<T>(
         classified.reason === "auth_missing"
           ? " Anonymous v1 access is blocked for this filter. Configure v1 credentials or use the documented alternative."
           : "";
+      const errorMsg = `Dailymotion v1 request failed (${status}).${hint}`;
+      const normalized = normalizeDailymotionError({
+        status,
+        rawJson: envelope,
+        apiVersion: "v1",
+        endpoint: path,
+        customMessage: errorMsg,
+      });
+      logDailymotionError(normalized);
       return {
         ok: false,
         failure: {
-          error: `Dailymotion v1 request failed (${status}).${hint}`,
+          error: errorMsg,
           status,
           retryable: classified.retryable,
           reason: classified.reason,
+          normalized,
         },
       };
     }
     if (status === 404 || !json) {
-      return { ok: false, failure: { error: "Resource not found.", reason: "not_found", status: 404, retryable: false } };
+      const normalized = normalizeDailymotionError({
+        status: 404,
+        apiVersion: "v1",
+        endpoint: path,
+      });
+      return { ok: false, failure: { error: "Resource not found.", reason: "not_found", status: 404, retryable: false, normalized } };
     }
     return { ok: true, data: envelope, status };
   } catch (error) {
+    const normalized = normalizeDailymotionError({
+      error,
+      apiVersion: "v1",
+      endpoint: path,
+    });
+    logDailymotionError(normalized);
     return {
       ok: false,
       failure: {
@@ -196,6 +232,7 @@ export async function v1List<T>(
         reason: "network_error",
         status: 503,
         retryable: true,
+        normalized,
       },
     };
   }
@@ -215,17 +252,37 @@ export async function v1Get<T>(
     if (record.error?.message) {
       const code = typeof record.error.code === "number" ? record.error.code : status;
       const classified = classifyStatus(code, profile.hasCredentials);
-      return { ok: false, failure: { error: record.error.message, status: code, retryable: classified.retryable, reason: classified.reason } };
+      const normalized = normalizeDailymotionError({
+        status: code,
+        rawJson: record,
+        apiVersion: "v1",
+        endpoint: path,
+      });
+      logDailymotionError(normalized);
+      return { ok: false, failure: { error: record.error.message, status: code, retryable: classified.retryable, reason: classified.reason, normalized } };
     }
     if (!(status >= 200 && status < 300)) {
       const classified = classifyStatus(status, profile.hasCredentials);
+      const normalized = normalizeDailymotionError({
+        status,
+        rawJson: record,
+        apiVersion: "v1",
+        endpoint: path,
+      });
+      logDailymotionError(normalized);
       return {
         ok: false,
-        failure: { error: status === 404 ? "Resource not found." : `Dailymotion v1 request failed (${status}).`, ...classified, retryable: classified.retryable },
+        failure: { error: status === 404 ? "Resource not found." : `Dailymotion v1 request failed (${status}).`, ...classified, retryable: classified.retryable, normalized },
       };
     }
     return { ok: true, data: json as T, status };
   } catch (error) {
+    const normalized = normalizeDailymotionError({
+      error,
+      apiVersion: "v1",
+      endpoint: path,
+    });
+    logDailymotionError(normalized);
     return {
       ok: false,
       failure: {
@@ -233,6 +290,7 @@ export async function v1Get<T>(
         reason: "network_error",
         status: 503,
         retryable: true,
+        normalized,
       },
     };
   }

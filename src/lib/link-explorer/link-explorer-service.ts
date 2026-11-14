@@ -13,6 +13,11 @@ import {
   type DailymotionResourceKind,
 } from "@/lib/platforms/dailymotion/dailymotion-url-analyzer";
 import { captureSearchSnapshot } from "@/lib/search-history/search-snapshot-service";
+import {
+  normalizeDailymotionError,
+  logDailymotionError,
+  type DailymotionNormalizedError,
+} from "@/lib/dailymotion/errors";
 
 export interface DiscoveryApiResponse {
   ok: boolean;
@@ -23,6 +28,8 @@ export interface DiscoveryApiResponse {
   reason?: string;
   hasMore?: boolean;
   total?: number;
+  status?: number;
+  code?: string;
 }
 
 export interface LinkExplorerResolution {
@@ -38,6 +45,8 @@ export interface LinkExplorerResolution {
   total?: number;
   error?: string;
   reason?: string;
+  status?: number | null;
+  normalized?: DailymotionNormalizedError;
 }
 
 export async function resolveLinkExplorerInput(
@@ -49,6 +58,12 @@ export async function resolveLinkExplorerInput(
   const analyzed = analyzeDailymotionUrlOrId(input);
 
   if (analyzed.kind === "unsupported") {
+    const normalized = normalizeDailymotionError({
+      customCode: "APP_INVALID_URL",
+      customMessage: analyzed.reason || "The input could not be recognized as a valid Dailymotion URL or ID.",
+      apiVersion: version,
+      endpoint: "LinkExplorer/analyze",
+    });
     return {
       ok: false,
       analyzed,
@@ -56,7 +71,9 @@ export async function resolveLinkExplorerInput(
       version,
       item: null,
       items: [],
-      error: analyzed.reason || "The input could not be recognized as a valid Dailymotion URL or ID.",
+      error: normalized.userMessage,
+      reason: "user_input_error",
+      normalized,
     };
   }
 
@@ -79,6 +96,15 @@ export async function resolveLinkExplorerInput(
       rawResponse = lookupData;
 
       if (!lookupData.ok) {
+        const normalized = normalizeDailymotionError({
+          status: lookupData.status,
+          customCode: lookupData.code as any,
+          customMessage: lookupData.error,
+          apiVersion: version,
+          endpoint: `GET /videos/${analyzed.identifier}`,
+          resourceType: "video",
+        });
+        logDailymotionError(normalized);
         return {
           ok: false,
           analyzed,
@@ -88,6 +114,8 @@ export async function resolveLinkExplorerInput(
           items: [],
           error: lookupData.error || `Failed to find video "${analyzed.identifier}" on API ${version}.`,
           reason: lookupData.reason,
+          status: lookupData.status,
+          normalized,
         };
       }
 
@@ -157,6 +185,15 @@ export async function resolveLinkExplorerInput(
       rawResponse = lookupData;
 
       if (!lookupData.ok) {
+        const normalized = normalizeDailymotionError({
+          status: lookupData.status,
+          customCode: lookupData.code as any,
+          customMessage: lookupData.error,
+          apiVersion: version,
+          endpoint: `GET /live/${analyzed.identifier}`,
+          resourceType: "livestream",
+        });
+        logDailymotionError(normalized);
         return {
           ok: false,
           analyzed,
@@ -166,21 +203,67 @@ export async function resolveLinkExplorerInput(
           items: [],
           error: lookupData.error || `Failed to find livestream "${analyzed.identifier}" on API ${version}.`,
           reason: lookupData.reason,
+          status: lookupData.status,
+          normalized,
         };
       }
       mainItem = lookupData.item ?? lookupData.result?.items?.[0] ?? lookupData.items?.[0] ?? null;
     } else if (effectiveKind === "search") {
+      // V2 strict architectural isolation: V2 does not have global search.
+      // Never silently fall back to V1 when V2 is explicitly requested!
+      if (version === "v2") {
+        const normalized = normalizeDailymotionError({
+          customCode: "APP_UNSUPPORTED_RESOURCE",
+          customMessage: "Dailymotion API v2 does not support global keyword search across all videos. All v2 catalog searches are profile-scoped. Switch to API v1 for global keyword search, or supply a channel/profile URL.",
+          apiVersion: "v2",
+          endpoint: "LinkExplorer/search",
+          resourceType: "search",
+        });
+        return {
+          ok: false,
+          analyzed,
+          effectiveKind: "search",
+          version: "v2",
+          item: null,
+          items: [],
+          error: "Dailymotion API v2 does not support global keyword search across all videos. Switch to API v1 for global search, or provide a channel/profile URL.",
+          reason: "unsupported_operation",
+          normalized,
+        };
+      }
+
       const searchRes = await fetch(
         `/api/discovery/v1/general?q=${encodeURIComponent(analyzed.identifier)}&pageSize=24`
       );
       const searchData = (await searchRes.json()) as DiscoveryApiResponse;
       rawResponse = searchData;
 
-      if (searchData.ok) {
-        items = searchData.items ?? searchData.result?.items ?? [];
-        hasMore = Boolean(searchData.hasMore ?? searchData.result?.hasMore);
-        total = searchData.total ?? searchData.result?.total ?? items.length;
+      if (!searchData.ok) {
+        const normalized = normalizeDailymotionError({
+          status: searchData.status,
+          customMessage: searchData.error,
+          apiVersion: "v1",
+          endpoint: "GET /videos?search",
+          resourceType: "search",
+        });
+        logDailymotionError(normalized);
+        return {
+          ok: false,
+          analyzed,
+          effectiveKind,
+          version: "v1",
+          item: null,
+          items: [],
+          error: searchData.error || `Failed to search "${analyzed.identifier}" on API v1.`,
+          reason: searchData.reason,
+          status: searchData.status,
+          normalized,
+        };
       }
+
+      items = searchData.items ?? searchData.result?.items ?? [];
+      hasMore = Boolean(searchData.hasMore ?? searchData.result?.hasMore);
+      total = searchData.total ?? searchData.result?.total ?? items.length;
     }
 
     // Persist to search history snapshot asynchronously
@@ -219,6 +302,12 @@ export async function resolveLinkExplorerInput(
       total,
     };
   } catch (err) {
+    const normalized = normalizeDailymotionError({
+      error: err,
+      apiVersion: version,
+      endpoint: "LinkExplorer/resolve",
+    });
+    logDailymotionError(normalized);
     return {
       ok: false,
       analyzed,
@@ -226,7 +315,10 @@ export async function resolveLinkExplorerInput(
       version,
       item: null,
       items: [],
-      error: err instanceof Error ? err.message : "An unexpected network error occurred while resolving the link.",
+      error: normalized.userMessage,
+      reason: normalized.code,
+      status: normalized.httpStatus,
+      normalized,
     };
   }
 }

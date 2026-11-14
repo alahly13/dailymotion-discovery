@@ -71,7 +71,7 @@ export default async function AttemptDetailPage({
         </Link>
         <div className="action-row">
           {resumable ? (
-            <Link href={explorerHref(source.sourceInput, job.id)} className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md bg-[var(--primary)] px-4 py-2 text-sm font-black text-white transition hover:bg-[var(--accent-strong)] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[var(--ring)]">
+            <Link href={explorerHref(source.sourceInput, job.id)} className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-black text-primary-foreground transition hover:opacity-90 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[var(--ring)]">
               <Play className="h-4 w-4" aria-hidden="true" />
               Resume Fetch
             </Link>

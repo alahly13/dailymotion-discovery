@@ -161,7 +161,7 @@ export default function CollectionsPage() {
           </Link>
           <Link
             href="/storage"
-            className="inline-flex min-h-10 items-center rounded-md bg-[var(--primary)] px-4 text-xs font-black uppercase text-white"
+            className="inline-flex min-h-10 items-center rounded-md bg-primary px-4 text-xs font-black uppercase text-primary-foreground hover:opacity-90"
           >
             Cloud Sync ({merged.pendingCount} pending)
           </Link>
@@ -202,7 +202,7 @@ export default function CollectionsPage() {
             />
             <button
               type="submit"
-              className="min-h-10 w-full rounded-md bg-[var(--primary)] px-4 text-xs font-black uppercase text-white"
+              className="min-h-10 w-full rounded-md bg-primary px-4 text-xs font-black uppercase text-primary-foreground hover:opacity-90"
             >
               Create Collection
             </button>
@@ -283,7 +283,7 @@ export default function CollectionsPage() {
                       <button
                         type="button"
                         onClick={() => void handleSaveEdit()}
-                        className="min-h-9 rounded-md bg-[var(--primary)] px-3 text-xs font-black uppercase text-white"
+                        className="min-h-9 rounded-md bg-primary px-3 text-xs font-black uppercase text-primary-foreground hover:opacity-90"
                       >
                         Save Details
                       </button>

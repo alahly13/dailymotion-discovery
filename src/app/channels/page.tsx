@@ -73,7 +73,7 @@ export default async function ChannelsPage() {
             These channels come from DB-backed Channel Explorer history. Search and filter surfaces use saved public metadata only.
           </p>
         </div>
-        <Link href="/link-explorer" className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md bg-[var(--primary)] px-4 text-center text-sm font-black text-white transition hover:bg-[var(--accent-strong)] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[var(--ring)]">
+        <Link href="/link-explorer" className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md bg-primary px-4 text-center text-sm font-black text-primary-foreground transition hover:opacity-90 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[var(--ring)]">
           <Play className="h-4 w-4" aria-hidden="true" />
           Link Explorer
         </Link>
@@ -88,7 +88,7 @@ export default async function ChannelsPage() {
           <Database className="h-7 w-7 text-[var(--primary)]" aria-hidden="true" />
           <h2 className="text-xl font-black">No saved channel attempts yet</h2>
           <p className="text-sm leading-6 text-[var(--muted-foreground)]">Analyze a public Dailymotion source, start a fetch, and stop or complete at least one chunk to populate persisted history here.</p>
-          <Link href="/link-explorer" className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md bg-[var(--primary)] px-4 py-2 text-sm font-black text-white transition hover:bg-[var(--accent-strong)] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[var(--ring)]">
+          <Link href="/link-explorer" className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-black text-primary-foreground transition hover:opacity-90 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[var(--ring)]">
             Start Explore
             <ArrowRight className="h-4 w-4" aria-hidden="true" />
           </Link>
@@ -118,7 +118,7 @@ export default async function ChannelsPage() {
                   </div>
                 </div>
                 <div className="action-row xl:justify-end">
-                  <Link href={`/channels/${source.id}`} className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md bg-[var(--primary)] px-4 py-2 text-center text-sm font-black text-white transition hover:bg-[var(--accent-strong)] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[var(--ring)]">
+                  <Link href={`/channels/${source.id}`} className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md bg-primary px-4 py-2 text-center text-sm font-black text-primary-foreground transition hover:opacity-90 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[var(--ring)]">
                     Open
                   </Link>
                   <Link href={`/channels/${source.id}#attempts`} className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md border border-[var(--border)] bg-[var(--surface)] px-4 py-2 text-center text-sm font-bold transition hover:bg-[var(--surface-muted)] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[var(--ring)]">
