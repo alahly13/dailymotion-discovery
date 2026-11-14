@@ -6,6 +6,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import {
   ArrowUpRight,
   BookmarkCheck,
+  BookmarkPlus,
   Compass,
   ExternalLink,
   FolderKanban,
@@ -14,6 +15,7 @@ import {
   Library,
   Link as LinkIcon,
   ListMusic,
+  LogOut,
   Menu,
   PanelLeftClose,
   PanelLeftOpen,
@@ -91,6 +93,7 @@ const navSections: NavSection[] = [
     label: "Library",
     links: [
       { label: "Saved Items", href: "/saved-items", icon: BookmarkCheck },
+      { label: "Saved Titles", href: "/saved-titles", icon: BookmarkPlus },
       { label: "Playlists", href: "/playlists", icon: ListMusic },
       { label: "Search History", href: "/search-history", icon: History },
       { label: "Collections", href: "/collections", icon: FolderKanban },
@@ -137,6 +140,15 @@ export function AppShell({ children }: { children: ReactNode }) {
       // Fallback
     }
   }, []);
+
+  async function handleSignOut() {
+    try {
+      await fetch("/api/auth/logout", { method: "POST" });
+    } catch {
+      // Best-effort
+    }
+    window.location.href = "/login";
+  }
 
   // Sync active API version from URL search string and version events without triggering useSearchParams CSR bailout
   useEffect(() => {
@@ -363,13 +375,34 @@ export function AppShell({ children }: { children: ReactNode }) {
           )}
         </nav>
 
-        {/* Footer info (only in expanded mode) */}
-        {isOpen && (
-          <div className="mt-auto border-t border-[var(--border)] pt-3 text-[11px] text-[var(--muted-foreground)] w-full">
-            <p className="font-semibold text-[var(--foreground)]">Metadata Research Only</p>
-            <p className="text-[10px] leading-4 text-[var(--muted-foreground)]">
-              Dailymotion V1/V2 APIs. No binary downloads.
-            </p>
+        {/* Footer info & Sign Out */}
+        {isOpen ? (
+          <div className="mt-auto border-t border-[var(--border)] pt-3 text-[11px] text-[var(--muted-foreground)] w-full space-y-2">
+            <button
+              type="button"
+              onClick={handleSignOut}
+              className="w-full inline-flex items-center justify-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface-container-low)] px-3 py-1.5 text-xs font-bold text-[var(--foreground)] hover:bg-[var(--surface-container-high)] hover:text-red-500 transition cursor-pointer"
+            >
+              <LogOut className="h-3.5 w-3.5" />
+              <span>Sign Out</span>
+            </button>
+            <div>
+              <p className="font-semibold text-[var(--foreground)]">Metadata Research Only</p>
+              <p className="text-[10px] leading-4 text-[var(--muted-foreground)]">
+                Dailymotion V1/V2 APIs. No binary downloads.
+              </p>
+            </div>
+          </div>
+        ) : (
+          <div className="mt-auto border-t border-[var(--border)] pt-2 w-full flex justify-center">
+            <button
+              type="button"
+              onClick={handleSignOut}
+              title="Sign Out"
+              className="h-8 w-8 inline-flex items-center justify-center rounded-lg border border-[var(--border)] bg-[var(--surface-container-low)] text-[var(--muted-foreground)] hover:text-red-500 hover:bg-[var(--surface-container-high)] transition cursor-pointer"
+            >
+              <LogOut className="h-4 w-4" />
+            </button>
           </div>
         )}
       </aside>
@@ -467,6 +500,18 @@ export function AppShell({ children }: { children: ReactNode }) {
                 </div>
               ))}
             </div>
+
+            {/* Mobile Drawer Sign Out */}
+            <div className="mt-auto border-t border-[var(--border)] pt-3">
+              <button
+                type="button"
+                onClick={handleSignOut}
+                className="w-full inline-flex items-center justify-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface-container-low)] px-3 py-2 text-xs font-bold text-[var(--foreground)] hover:bg-[var(--surface-container-high)] hover:text-red-500 transition cursor-pointer"
+              >
+                <LogOut className="h-4 w-4" />
+                <span>Sign Out</span>
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -563,6 +608,13 @@ export function AppShell({ children }: { children: ReactNode }) {
               >
                 <BookmarkCheck className="h-3.5 w-3.5 text-[var(--primary)]" />
                 <span className="hidden sm:inline">Saved Items</span>
+              </Link>
+              <Link
+                href="/saved-titles"
+                className="hidden xl:inline-flex h-8 items-center gap-1.5 rounded-md border border-purple-500/30 bg-purple-500/10 px-2.5 text-xs font-bold text-purple-600 dark:text-purple-300 transition hover:bg-purple-500/20"
+              >
+                <BookmarkPlus className="h-3.5 w-3.5" />
+                <span>Saved Titles</span>
               </Link>
               <ThemeToggle />
             </div>

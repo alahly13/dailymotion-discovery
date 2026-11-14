@@ -62,12 +62,12 @@ export default function AccountPage() {
 
   async function handleLogout() {
     try {
-      await fetch("/api/admin/logout", { method: "POST" });
+      await fetch("/api/auth/logout", { method: "POST" });
     } catch {
       // Best-effort network call
     }
     setAdmin((prev) => (prev ? { ...prev, authenticated: false, username: null, expiresAt: null } : prev));
-    window.location.href = "/admin/login";
+    window.location.href = "/login";
   }
 
   async function handleChangePassword(e: React.FormEvent) {
@@ -188,11 +188,11 @@ export default function AccountPage() {
             </button>
           ) : (
             <Link
-              href="/admin/login"
+              href="/login"
               className="inline-flex min-h-9 items-center gap-1.5 rounded-lg bg-primary px-4 text-xs font-black text-primary-foreground hover:opacity-95 cursor-pointer"
             >
               <Lock className="h-3.5 w-3.5" />
-              Sign In to Administrator
+              Sign In to Platform
             </Link>
           )}
 

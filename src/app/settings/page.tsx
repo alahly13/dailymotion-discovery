@@ -425,12 +425,12 @@ export default function SettingsPage() {
   async function handleSignOut() {
     setSigningOut(true);
     try {
-      await fetch("/api/admin/logout", { method: "POST" });
+      await fetch("/api/auth/logout", { method: "POST" });
     } catch {
       // Non-fatal
     }
     setAdmin((prev) => (prev ? { ...prev, authenticated: false, username: null, expiresAt: null } : prev));
-    window.location.href = "/admin/login";
+    window.location.href = "/login";
   }
 
   // Purge expired search snapshots
@@ -562,7 +562,7 @@ export default function SettingsPage() {
                   </p>
                 </div>
                 <Link
-                  href="/admin/login"
+                  href="/login"
                   className="inline-flex min-h-9 items-center gap-1.5 rounded-lg bg-primary px-4 text-xs font-black text-primary-foreground shadow-xs hover:opacity-90"
                 >
                   <Lock className="h-3.5 w-3.5" />
@@ -729,13 +729,20 @@ export default function SettingsPage() {
             </div>
           </div>
 
-          <div className="flex items-center gap-3 pt-2">
+          <div className="flex flex-wrap items-center gap-3 pt-2">
             <Link
               href="/storage"
               className="inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-[var(--border)] bg-[var(--surface-container-low)] px-3 text-xs font-bold text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
             >
               <Layers className="h-3.5 w-3.5" />
               <span>Open Storage Documents Explorer →</span>
+            </Link>
+            <Link
+              href="/saved-titles"
+              className="inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-purple-500/30 bg-purple-500/10 px-3 text-xs font-bold text-purple-600 dark:text-purple-300 hover:bg-purple-500/20"
+            >
+              <HardDrive className="h-3.5 w-3.5" />
+              <span>Open Saved Titles Workspace →</span>
             </Link>
           </div>
         </section>

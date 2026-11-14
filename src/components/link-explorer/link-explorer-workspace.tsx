@@ -146,7 +146,7 @@ export function LinkExplorerWorkspace() {
   async function executeResolution(targetInput: string, targetVersion: ApiVersion) {
     const clean = targetInput.trim();
     if (!clean) return;
-    void captureLinkSubmission(clean, targetVersion, analyzedPreview);
+    void captureLinkSubmission(clean, targetVersion, analyzedPreview ?? undefined);
     setLoading(true);
     setRestoredFromHistory(false);
     setCurrentPage(1);

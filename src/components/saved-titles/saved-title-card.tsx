@@ -252,7 +252,7 @@ export function SavedTitleCard({ entry, onEdit, onDelete }: SavedTitleCardProps)
       {/* Raw JSON inspection drawer */}
       {jsonDrawerOpen && (
         <RawJsonDrawer
-          isOpen={jsonDrawerOpen}
+          open={jsonDrawerOpen}
           onClose={() => setJsonDrawerOpen(false)}
           title={`Saved Title: ${entry.displayTitle}`}
           payload={entry}

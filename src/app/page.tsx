@@ -107,6 +107,16 @@ const PRIMARY_WORKSPACES: WorkspaceCardDef[] = [
     badgeColor: "bg-blue-500/15 text-blue-700 dark:text-blue-300 border-blue-500/30",
   },
   {
+    id: "saved-titles",
+    title: "Saved Titles & References",
+    category: "LIBRARY",
+    description: "Owner-scoped manifest of search queries, Dailymotion links, resource IDs, and manual references synced with Cloudflare R2.",
+    icon: HardDrive,
+    directHref: "/saved-titles",
+    badge: "Cloud-Synced Manifest",
+    badgeColor: "bg-purple-500/15 text-purple-700 dark:text-purple-300 border-purple-500/30",
+  },
+  {
     id: "search-history",
     title: "Search History Snapshots",
     category: "LIBRARY",

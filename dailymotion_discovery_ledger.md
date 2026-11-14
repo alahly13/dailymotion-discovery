@@ -24,58 +24,74 @@ Scope: Project source-of-truth ledger, updated after Search Architecture Consoli
 - [Future Roadmap](#future-roadmap)
 - [Agent Instructions](#agent-instructions)
 
-## 2026-11-14 Professional Luxury Deep Black (True OLED 2026) & WCAG AAA Button Contrast Shield
+## 2026-11-14 Secure Authentication, Owner-Scoped Application & Saved Titles Manifest System (End-to-End Cloudflare R2 Sync)
 
 **User intent addressed**
+- Eliminated unprotected access across the platform: unauthenticated visitors can no longer view the Dashboard, search tools, link explorer, libraries, admin sections, or internal data APIs.
+- Built a dedicated, high-contrast, accessible login portal at `/login` with full Supabase SSR authentication, password toggle, session remembrance, loading states, error diagnostics, and password recovery.
+- Preserved the authoritative Supabase administrator account `asdy` (`asdy@dailymotion.discov.com`) without altering credentials, inventing accounts, or exposing public signup forms.
+- Re-architected application-wide route authorization via Next.js 16 proxy interceptor (`src/proxy.ts` / `src/lib/supabase/middleware.ts`), strictly enforcing authentication on all private pages and APIs with server-side `auth.getUser()` and 7-day HMAC admin sessions (`ADMIN_SESSION_TTL_SECONDS=604800`).
+- Implemented comprehensive Sign Out across the App Shell (sidebar, rail, mobile drawer), Account page, and Settings page, properly invalidating Supabase sessions, clearing cookies, returning `no-store` headers, and redirecting to `/login`.
+- Created the dedicated Saved Titles Workspace (`/saved-titles`) under Library navigation with full local-first IndexedDB persistence, centralized automatic capture from Global Search & Link Explorer, server-verified manual admin addition, and safe 4-phase Cloudflare R2 cloud synchronization.
 
-- Fixed critical button contrast defect where buttons (e.g., `Open Global Search` in Hero Quick Actions) rendered white text on an off-white/light-silver button background in dark mode, causing text and icons to become completely unreadable.
-- Eliminated washed-out, dull charcoal gray tones across the application in dark mode.
-- Transformed the entire dark theme into the **2026 Professional Luxury Deep Black (True OLED Obsidian Palette)**: infinite contrast, pure pitch black background (`#000000`), deep obsidian cards/surfaces (`#070709`, `#08080b`), refined luminous hairline borders (`rgba(255, 255, 255, 0.08)`), and crisp typography.
+**Architecture & Implementation Details**
 
-**Root cause analyzed**
+1. **Authentication & Authorization Architecture (`src/lib/auth/`)**:
+   - `src/lib/auth/authorization.ts`: Server-side owner and admin resolution. Maps `asdy` alias and canonical email `asdy@dailymotion.discov.com` to the authoritative administrator identity. Provides `resolveAuthoritativeOwnerId(supabaseUser, adminSession)` and `isUserAdmin(supabaseUser, adminSession)`. Never trusts client-supplied `ownerId`, `userId`, `username`, or `isAdmin`.
+   - `src/lib/auth/auth-service.ts`: Server-side Supabase SSR session validation. Exports `getServerAuthSession()`, `requireAuth()`, and `requireAdminAuth()`.
+   - `src/lib/supabase/middleware.ts` & `src/proxy.ts`: Next.js 16 proxy interceptor. Whitelists public paths (`/login`, `/auth/callback`, `/api/auth/*`, static assets) and redirects unauthenticated traffic from `/` and all private workspaces directly to `/login`. Redirects authenticated users from `/login` to `/`. Restricts `/admin/*` and `/api/admin/*` to verified administrators.
 
-- In previous CSS tokens, `.dark` defined `--primary: oklch(0.922 0 0)` (approx. `#ebebeb` / off-white silver) and `--primary-foreground: oklch(0.205 0 0)`.
-- Because `text-primary-foreground` in Tailwind v4 and Lucide SVG icons inherited or collided with general link colors or base `--foreground` (white), child text and icons rendered in near-white (`rgb(254, 254, 254)`) on top of the `rgb(231, 231, 231)` button background, producing a disastrous contrast ratio of 1.15:1.
-- Furthermore, dark theme variables used washed-out charcoal gray (`oklch(0.145 0 0)` / `#18181b`, `#1e1e1e`, `#262626`) instead of a high-end luxury true black OLED aesthetic.
+2. **Dedicated `/login` Portal (`src/app/login/page.tsx`)**:
+   - Dailymotion Discovery luxury obsidian styling matching the 2026 OLED aesthetic.
+   - Dual identifier support (email or `asdy` alias) and password with show/hide toggle.
+   - Remember-session checkbox honoring Supabase SSR cookie persistence.
+   - Loading spinners, accessible labels, aria attributes, safe error alerts, and Supabase password recovery mode.
+   - Auth Route Handlers:
+     - `src/app/api/auth/login/route.ts`: Supabase SSR password sign-in + HMAC admin cookie generation for `asdy`.
+     - `src/app/api/auth/logout/route.ts`: Supabase signOut + cookie clearance + `Cache-Control: no-store`.
+     - `src/app/api/auth/session/route.ts`: Non-sensitive session inspection for client components.
+     - `src/app/api/auth/reset-password/route.ts`: Supabase password reset email trigger.
+     - `src/app/auth/callback/route.ts`: SSR auth exchange callback.
 
-**What was built & hardened**
+3. **Dedicated Saved Titles Workspace (`src/app/saved-titles/`)**:
+   - `src/app/saved-titles/page.tsx`: Server component serving the workspace with dynamic title and metadata.
+   - `src/components/saved-titles/saved-titles-workspace.tsx`: Primary workspace with search, filter (all, queries, links, IDs, handles, text), sorting, and dual visual layout:
+     - **Top Section**: `CLOUD SYNCED` entries stored in Cloudflare R2 with revision counter, generation ID, and last sync timestamp.
+     - **Middle Visual Separator**: `────────────────── LOCAL STORAGE · PENDING SYNC (N) ──────────────────`
+     - **Bottom Section**: `LOCAL STORAGE · PENDING SYNC` entries with edit/delete actions, search filtering, and the prominent **Upload to Cloud** button with live 4-phase progress animation.
+   - `src/components/saved-titles/saved-title-card.tsx`: Card component with status badge (`Cloud Synced` vs `Pending Sync`), origin badge (`Global Search`, `Link Explorer`, `Added by admin`), API version badge (`v1`, `v2`), clickable direct discovery inspection link, copy link, edit modal, delete confirmation, and Raw JSON Inspection drawer.
+   - `src/components/saved-titles/add-saved-title-modal.tsx`: Modal for manual additions (stamped server-side by `/api/saved-titles/create-manual` with verified admin badge).
+   - `src/components/saved-titles/edit-saved-title-modal.tsx`: Modal for updating display title and private research notes.
 
-1. `src/app/globals.css`:
-   - Updated `.dark` design tokens to 2026 Professional Luxury Deep Black:
-     - `--background: #000000;` (Pure true pitch black / OLED black)
-     - `--surface: #070709;`, `--surface-muted: #0d0d11;`, `--surface-container-low: #030304;`, `--surface-container-high: #131318;`
-     - `--card: #08080b;`, `--popover: #08080b;`
-     - `--border: rgba(255, 255, 255, 0.08);`, `--border-strong: rgba(255, 255, 255, 0.16);`
-     - `--foreground: #ffffff;`, `--muted-foreground: #94a3b8;`
-     - `--primary: #ffffff;`, `--primary-foreground: #000000;`
-     - `--sidebar: #020203;`, `--sidebar-foreground: #ffffff;`
-   - Added **WCAG 2.2 AAA Button Contrast Armor**:
-     - Solid primary buttons (`.dark .bg-primary:not([class*="/"])`, `button.bg-primary`, `a.bg-primary`) are enforced with crisp white background (`#ffffff`) and pure jet-black text/icons (`#000000 !important`), delivering a maximum 21:1 contrast ratio.
-     - Preserved opacity-modified badges (`bg-primary/10`, `bg-primary/5`).
-     - Dark mode form controls (`select`, `option`, `optgroup`, dialogs, menus, inputs) hardened with deep obsidian surfaces and crisp white text.
-2. `src/components/ui/button.tsx`:
-   - Re-architected `buttonVariants.primary`:
-     - Light mode: Rich black (`bg-neutral-900 text-white hover:bg-neutral-800`).
-     - Dark mode: Crisp pure white with jet-black text (`dark:bg-white dark:text-black dark:border-white/20 dark:hover:bg-neutral-100 dark:hover:text-black font-extrabold shadow-sm`).
-   - Hardened `secondary`, `outline`, `ghost`, `destructive`, `gold`, `info` variants for luxury dark mode readability.
-3. `src/app/page.tsx`:
-   - Updated Quick Actions Card:
-     - `Open Global Search` button: explicit high-contrast `bg-neutral-900 text-white hover:bg-neutral-800 dark:bg-white dark:text-black dark:hover:bg-neutral-100` with explicit `text-white dark:text-black` on both icon and text.
-     - `Open Link Explorer`: refined obsidian glass button with strong border.
-     - `API Comparison Matrix`: refined luxury outline button with hover highlight.
-4. `src/components/layout/app-shell.tsx`:
-   - Updated active sublink badges and dots in both desktop sidebar and mobile navigation drawer to high-contrast monochrome (`bg-neutral-900 text-white dark:bg-white dark:text-black`).
-5. `src/components/discovery/api-status-bar.tsx`:
-   - Hardened `Usage` and `Settings` buttons with high-contrast text and elevated surface border styling.
-6. `src/components/link-explorer/link-explorer-workspace.tsx` & `src/components/discovery/unified-search.tsx`:
-   - Hardened main submit/search action buttons to ensure high-contrast clarity across all themes.
+4. **Centralized Automatic Capture Service (`src/lib/saved-titles/capture-service.ts`)**:
+   - Centralized capture methods invoked immediately upon user submission:
+     - `captureSearchSubmission(query, apiVersion)`: Captures Global Search queries (value, origin "Global Search", API version `v1` | `v2`, status `pending_sync`). Preserves searches as historical references even if provider fails or returns 0 results.
+     - `captureLinkSubmission(input, apiVersion, analyzed)`: Captures Link Explorer inputs (value, canonical URL, detected resource kind, origin "Link Explorer", API version `v1` | `v2`, status `pending_sync`).
+     - `captureDiscoverySubmission(input, workspace, label, apiVersion)`: Generic capture for other workspaces.
+   - Wired directly into `src/components/discovery/unified-search.tsx` (`executeSearch`) and `src/components/link-explorer/link-explorer-workspace.tsx` (`executeResolution`).
 
-**Verification results**
+5. **Owner-Scoped Local-First Browser Persistence (`src/lib/saved-titles/local-storage.ts`)**:
+   - Registered `entities_saved_titles` store in `src/lib/local-first/indexeddb-store.ts` (version 3).
+   - Strict owner partitioning: user A cannot view or mutate user B's local entries.
+   - Survives browser reloads, unloads, and network drops.
+   - Separate retrieval for all records, pending sync records, and cloud synced records.
+   - Local manifest builder generating schema-valid JSON for upload.
+   - Dispatches `dm:saved-titles-changed` events for instantaneous reactive UI updates across open tabs.
 
-- `npm run typecheck` (`next typegen && tsc --noEmit`): Passed with 0 errors.
-- `vitest run` (`npm test`): 38 test files passed (38/38), 190 tests passed (190/190).
-- Tailwind CSS v4 compilation: Successfully processed 110,648 bytes of CSS without errors or diagnostics.
-- Contrast verification: Solid primary buttons in dark mode achieve 21:1 contrast ratio (pure black on pure white).
+6. **Safe 4-Phase Cloudflare R2 Cloud Synchronization (`src/lib/saved-titles/cloud-sync-service.ts`)**:
+   - Explicit "Upload to Cloud" button in UI triggers `/api/saved-titles/cloud-sync`.
+   - **Phase 1 (Prepare)**: Authenticates owner UUID, loads pending entries, fetches existing cloud manifest via `R2WorkerClient`, merges preserving historical entries (upserts updates, applies tombstones), and computes SHA-256 digest.
+   - **Phase 2 (Upload)**: Uploads immutable generation snapshot (`dailymotion/persistence/{ownerId}/saved-titles/generations/{generationId}.json`), canonical manifest (`dailymotion/persistence/{ownerId}/saved-titles/manifest.json`), and dataset version pointer (`dailymotion/persistence/{ownerId}/saved-titles/version-pointer.json`).
+   - **Phase 3 (Verify)**: Reads back canonical manifest from R2 Worker, calculates SHA-256 of read-back payload, and verifies exact match against Phase 1 digest.
+   - **Phase 4 (Commit)**: Updates Postgres `StorageDataset` record (slug `"saved-titles"`, bucket `dailymotion-discovery-private`) and returns signed sync receipt.
+   - **Safety Invariant**: If upload or verify encounters any failure, the process immediately halts with a clean error, returning `ok: false`, and local records are preserved in `pending_sync` state without data loss.
+
+**Verification Results**
+- `npm test` (`vitest run`): **42/42 test files passed, 214/214 tests passed** (including all unit/integration tests for authorization, session security, local persistence, R2 cloud sync, and capture service).
+- `npm run typecheck` (`next typegen && tsc --noEmit`): Clean 0 TypeScript errors.
+- `node scripts/db-validate-env.mjs`: Validated database connection string to remote Supabase Session Pooler.
+- `npx prisma validate`: Schema at `prisma/schema.prisma` is 100% valid.
+- Zero local production builds run (strictly adhering to memory/resource constraints).
 
 ## 2026-11-14 Professional Luxury Deep Black (True OLED 2026) & WCAG AAA Button Contrast Shield
 
