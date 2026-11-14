@@ -52,6 +52,11 @@ import { useDiscoveryWorkspace } from "@/stores/discovery-workspace-store";
 import { useMergedDataset } from "@/lib/local-first/use-merged-dataset";
 import { discoveryCompositeKey } from "@/lib/resources/dailymotion-resource-taxonomy";
 import { cn } from "@/lib/utils/cn";
+import { useSynchronizedApiVersion } from "@/lib/navigation/version-sync";
+import {
+  captureSearchSnapshot,
+  getLatestRestorableSearchSnapshot,
+} from "@/lib/search-history/search-snapshot-service";
 
 const EXAMPLE_CHIPS: Array<{ label: string; value: string; kind: DailymotionResourceKind }> = [
   { label: "Video: x8n8x8", value: "https://www.dailymotion.com/video/x8n8x8", kind: "video" },
@@ -72,7 +77,7 @@ export function LinkExplorerWorkspace() {
   const initialVersion = (searchParams.get("v") as ApiVersion) || "v1";
   const initialUrl = searchParams.get("url") || searchParams.get("id") || "";
 
-  const [version, setVersion] = useState<ApiVersion>(initialVersion);
+  const [version, setVersion] = useSynchronizedApiVersion(initialVersion);
   const [input, setInput] = useState(initialUrl || "https://www.dailymotion.com/lemonde");
   const [overrideKind, setOverrideKind] = useState<DailymotionResourceKind | "auto">("auto");
   const [analyzedPreview, setAnalyzedPreview] = useState<DailymotionAnalyzedLink | null>(null);
@@ -83,6 +88,7 @@ export function LinkExplorerWorkspace() {
   const [resolution, setResolution] = useState<LinkExplorerResolution | null>(null);
   const [rawDrawerOpen, setRawDrawerOpen] = useState(false);
   const [copiedUrl, setCopiedUrl] = useState(false);
+  const [restoredFromHistory, setRestoredFromHistory] = useState(false);
 
   // Sync real-time detection preview when input changes
   useEffect(() => {
@@ -93,21 +99,40 @@ export function LinkExplorerWorkspace() {
     }
   }, [input]);
 
-  // Execute initial resolution if URL param was provided
+  // Execute initial resolution if URL param was provided, or auto-restore latest unexpired snapshot
   useEffect(() => {
     if (initialUrl.trim()) {
       void executeResolution(initialUrl.trim(), initialVersion);
+    } else {
+      void (async () => {
+        try {
+          const restorable = await getLatestRestorableSearchSnapshot("link_explorer");
+          if (restorable && restorable.items.length > 0) {
+            setInput(restorable.snapshot.query || "");
+            setVersion(restorable.snapshot.apiVersion);
+            setResolution({
+              ok: true,
+              item: restorable.items[0] ?? null,
+              items: restorable.items,
+              hasMore: Boolean(restorable.snapshot.hasMore),
+              effectiveKind: (restorable.snapshot.resourceType?.toLowerCase() as DailymotionResourceKind) || "video",
+              version: restorable.snapshot.apiVersion,
+              analyzed: analyzeDailymotionUrlOrId(restorable.snapshot.query || ""),
+              status: 200,
+            });
+            setRestoredFromHistory(true);
+          }
+        } catch (err) {
+          console.warn("[link-explorer] Auto-restoration skipped:", err);
+        }
+      })();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleVersionChange = (nextVersion: ApiVersion) => {
     setVersion(nextVersion);
-    const params = new URLSearchParams(searchParams.toString());
-    params.set("v", nextVersion);
-    startTransition(() => {
-      router.replace(`?${params.toString()}`, { scroll: false });
-    });
+    setRestoredFromHistory(false);
     if (resolution?.analyzed) {
       void executeResolution(input, nextVersion);
     }
@@ -116,11 +141,29 @@ export function LinkExplorerWorkspace() {
   async function executeResolution(targetInput: string, targetVersion: ApiVersion) {
     if (!targetInput.trim()) return;
     setLoading(true);
+    setRestoredFromHistory(false);
     setCurrentPage(1);
     try {
       const selectedKind = overrideKind === "auto" ? undefined : overrideKind;
       const res = await resolveLinkExplorerInput(targetInput.trim(), targetVersion, selectedKind, 1);
       setResolution(res);
+
+      if (res.ok && res.items.length > 0) {
+        void captureSearchSnapshot({
+          workspace: "link_explorer",
+          query: targetInput.trim(),
+          route: "/link-explorer",
+          apiVersion: targetVersion,
+          resourceType: selectedKind ? selectedKind.toUpperCase() : (res.effectiveKind ? res.effectiveKind.toUpperCase() : "ALL"),
+          mode: targetVersion === "v1" ? "search" : "browse",
+          apiParams: { url: targetInput.trim() },
+          rawResponse: res,
+          items: res.items,
+          pageIndex: 1,
+          hasMore: res.hasMore,
+          totalResults: res.items.length,
+        });
+      }
 
       // Update URL query parameters seamlessly
       const params = new URLSearchParams(searchParams.toString());
@@ -231,6 +274,31 @@ export function LinkExplorerWorkspace() {
           </button>
         </div>
       </div>
+
+      {/* Restored From History Banner */}
+      {restoredFromHistory && (
+        <div className="flex items-center justify-between gap-3 rounded-xl border border-emerald-500/40 bg-emerald-500/10 p-3.5 text-emerald-600 dark:text-emerald-400">
+          <div className="flex items-center gap-2.5">
+            <Sparkles className="h-5 w-5 shrink-0" />
+            <div>
+              <p className="text-xs font-black uppercase tracking-wider">
+                Restored from local search history · Zero API Calls
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Previous Link Explorer resolution loaded directly from IndexedDB without querying Dailymotion.
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => void executeResolution(input, version)}
+            className="inline-flex min-h-8 items-center gap-1.5 rounded-lg bg-emerald-600 dark:bg-emerald-500 px-3 text-xs font-black text-white cursor-pointer hover:opacity-90 shadow-xs"
+          >
+            <RefreshCw className="h-3.5 w-3.5" />
+            Re-analyze Link
+          </button>
+        </div>
+      )}
 
       {/* Universal Search Form */}
       <div className="rounded-xl border border-border bg-card p-5 shadow-xs space-y-4">

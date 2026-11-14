@@ -8,6 +8,9 @@
 // Scope: all discovery workspaces. Future agents: extend fields here, never
 // fork per-page shapes.
 
+import type { DailymotionSourceMetadata } from "./provenance";
+
+export type { DailymotionSourceMetadata };
 export type ApiVersion = "v1" | "v2";
 
 export type DiscoveryResource =
@@ -42,6 +45,7 @@ export interface DiscoveryItem {
   // Resource-specific extras (videos_total, playlist size, live status...).
   extra: Record<string, string | number | boolean | null>;
   raw: unknown;
+  provenance?: DailymotionSourceMetadata;
 }
 
 export type DiscoveryFailureReason =

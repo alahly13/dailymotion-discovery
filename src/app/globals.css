@@ -264,3 +264,45 @@ img, video, iframe, canvas, svg { max-width: 100%; }
     @apply font-sans;
   }
 }
+
+
+/* ==========================================================================
+   WCAG 2.2 AA Contrast & Dark Mode Form Controls Hardening (2026)
+   Prevents OS-native silver/white option background clashes in Chromium/Windows.
+   Ensures >= 4.5:1 contrast for normal text and >= 3:1 for large text/icons.
+   ========================================================================== */
+
+select,
+option,
+optgroup {
+  color: var(--foreground);
+  background-color: var(--surface);
+}
+
+.dark select,
+.dark option,
+.dark optgroup {
+  color: #f8fafc !important;
+  background-color: #1e1e1e !important;
+}
+
+/* Form input, textarea, and placeholder contrast */
+.dark input::placeholder,
+.dark textarea::placeholder {
+  color: oklch(0.68 0 0);
+}
+
+/* Modals, popovers, and floating action menus in dark mode */
+.dark [role="dialog"],
+.dark [role="listbox"],
+.dark [role="menu"] {
+  background-color: #1a1a1a;
+  color: #f8fafc;
+  border-color: oklch(1 0 0 / 14%);
+}
+
+/* Code blocks and raw metadata inspector contrast */
+.dark pre,
+.dark code {
+  color: #e2e8f0;
+}

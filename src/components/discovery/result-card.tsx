@@ -38,6 +38,7 @@ import {
   classifyDiscoveryItem,
   RESOURCE_TYPE_META,
 } from "@/lib/resources/dailymotion-resource-taxonomy";
+import { AddToPlaylistModal } from "@/components/playlists/add-to-playlist-modal";
 import { RawJsonDrawer } from "./raw-json-drawer";
 
 const compactNumber = new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 });
@@ -177,24 +178,13 @@ export function ResultCard({
         </button>
       )}
 
-      {collections && collections.length > 0 && onAddToCollection && (
-        <label className="inline-flex min-h-8 items-center gap-1 rounded-md border border-[var(--border)] bg-[var(--surface-container-low)] px-2 text-xs font-bold">
-          <FolderPlus className="h-3.5 w-3.5 text-[var(--muted-foreground)]" />
-          <select
-            aria-label={`Add ${item.title} to personal collection`}
-            value={pickedCollection}
-            onChange={(e) => handleCollectionPick(e.target.value)}
-            className="bg-transparent text-xs font-bold outline-none cursor-pointer"
-          >
-            <option value="">+ Collection</option>
-            {collections.map((col) => (
-              <option key={col.id} value={col.id}>
-                {col.name}
-              </option>
-            ))}
-          </select>
-        </label>
-      )}
+      <AddToPlaylistModal
+        item={item}
+        onAdded={(name) => {
+          setAddedNotice(`Added to ${name}!`);
+          setTimeout(() => setAddedNotice(null), 1800);
+        }}
+      />
 
       <button
         type="button"

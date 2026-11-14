@@ -8,10 +8,12 @@ import {
   BookmarkCheck,
   Compass,
   ExternalLink,
+  FolderKanban,
   History,
   LayoutDashboard,
   Library,
   Link as LinkIcon,
+  ListMusic,
   Menu,
   PanelLeftClose,
   PanelLeftOpen,
@@ -24,6 +26,11 @@ import {
 import { cn } from "@/lib/utils/cn";
 import { ApiStatusBar } from "@/components/discovery/api-status-bar";
 import { ThemeToggle } from "./theme-toggle";
+import {
+  API_VERSION_EVENT,
+  getUrlApiVersion,
+  setUrlApiVersion,
+} from "@/lib/navigation/version-sync";
 
 // Consolidated Navigation Architecture (2026):
 // Replaces cluttered per-resource discovery silos with ONLY TWO primary discovery experiences:
@@ -84,8 +91,9 @@ const navSections: NavSection[] = [
     label: "Library",
     links: [
       { label: "Saved Items", href: "/saved-items", icon: BookmarkCheck },
+      { label: "Playlists", href: "/playlists", icon: ListMusic },
       { label: "Search History", href: "/search-history", icon: History },
-      { label: "Collections", href: "/collections", icon: Library },
+      { label: "Collections", href: "/collections", icon: FolderKanban },
     ],
   },
   {
@@ -130,23 +138,20 @@ export function AppShell({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  // Sync active API version from URL search string without triggering useSearchParams CSR bailout
+  // Sync active API version from URL search string and version events without triggering useSearchParams CSR bailout
   useEffect(() => {
     const updateVersion = () => {
-      try {
-        if (typeof window !== "undefined") {
-          const v = new URLSearchParams(window.location.search).get("v");
-          setActiveVersion(v === "v2" ? "v2" : "v1");
-        }
-      } catch {
-        // Fallback
-      }
+      setActiveVersion(getUrlApiVersion("v1"));
     };
 
     updateVersion();
 
+    window.addEventListener(API_VERSION_EVENT, updateVersion);
     window.addEventListener("popstate", updateVersion);
-    return () => window.removeEventListener("popstate", updateVersion);
+    return () => {
+      window.removeEventListener(API_VERSION_EVENT, updateVersion);
+      window.removeEventListener("popstate", updateVersion);
+    };
   }, [pathname]);
 
   const toggleSidebar = () => {
@@ -308,7 +313,10 @@ export function AppShell({ children }: { children: ReactNode }) {
                               <Link
                                 key={sub.href}
                                 href={sub.href}
-                                onClick={() => setActiveVersion(sub.version)}
+                                onClick={() => {
+                                  setActiveVersion(sub.version);
+                                  setUrlApiVersion(sub.version);
+                                }}
                                 className={cn(
                                   "flex items-center gap-2 rounded px-2 py-1 text-[11px] font-semibold transition",
                                   subActive
@@ -430,6 +438,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                                     href={sub.href}
                                     onClick={() => {
                                       setActiveVersion(sub.version);
+                                      setUrlApiVersion(sub.version);
                                       setMobileMenuOpen(false);
                                     }}
                                     className={cn(

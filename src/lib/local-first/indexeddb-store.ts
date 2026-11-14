@@ -1,5 +1,9 @@
 import type { DiscoveryItem } from "@/lib/discovery/types";
 import {
+  createDailymotionProvenance,
+  type DailymotionSourceMetadata,
+} from "@/lib/discovery/provenance";
+import {
   classifyDiscoveryItem,
   discoveryCompositeKey,
   type DailymotionResourceType,
@@ -68,6 +72,7 @@ export interface LocalSavedItemRecord {
   tags: string[];
   note?: string;
   snapshot: DiscoveryItem;
+  provenance?: DailymotionSourceMetadata;
   savedAt: string;
   updatedAt: string;
 }
@@ -90,6 +95,7 @@ export interface LocalCollectionItemRecord {
   position: number;
   note?: string;
   snapshot: DiscoveryItem;
+  provenance?: DailymotionSourceMetadata;
   addedAt: string;
 }
 
@@ -136,7 +142,9 @@ export interface LocalResearchNoteRecord {
 export interface LocalSearchSnapshotRecord {
   id: string; // e.g. `snap_${Date.now()}_${random}`
   query: string;
-  route: string; // e.g. `/search`, `/video-discovery`, `/channel-explorer`, `/ai-search`, etc.
+  route: string; // e.g. `/global-search`, `/link-explorer`
+  workspace?: "global_search" | "link_explorer" | string;
+  ownerId?: string;
   apiVersion: "v1" | "v2";
   resourceType: string; // "ALL", "video", "channel", "playlist", "user", "livestream"
   mode: string; // "search", "channel_videos", "ai_semantic", "tag", etc.
@@ -144,8 +152,14 @@ export interface LocalSearchSnapshotRecord {
   localFilters?: Record<string, unknown>;
   totalResults: number;
   pageCount: number;
+  currentPage?: number;
+  hasMore?: boolean;
+  nextCursor?: string | null;
   capturedAt: string; // ISO string
+  updatedAt?: string;
   expiresAt: number; // epoch ms when this snapshot expires
+  schemaVersion?: number;
+  provenance?: DailymotionSourceMetadata;
   previewThumbnails?: string[]; // up to 4 thumbnail URLs for card preview
   previewTitles?: string[]; // up to 3 titles for UI preview
 }
@@ -157,6 +171,8 @@ export interface LocalSearchSnapshotPageRecord {
   rawJson: unknown; // Full untouched Dailymotion API response payload (ZERO media binaries)
   normalizedItems: DiscoveryItem[];
   capturedAt: string;
+  apiVersion?: "v1" | "v2";
+  provenance?: DailymotionSourceMetadata;
 }
 
 export interface PendingOutboxOperation {
@@ -404,6 +420,11 @@ export function buildLocalSavedItemRecord(
     tags: options?.tags ?? item.tags ?? [],
     note: options?.note,
     snapshot: item,
+    provenance: item.provenance || createDailymotionProvenance({
+      apiVersion: item.apiVersion,
+      resourceType: resType,
+      resourceId: item.id,
+    }),
     savedAt: options?.savedAt ?? now,
     updatedAt: now,
   };
@@ -585,3 +606,113 @@ export async function cleanExpiredSearchSnapshots(
   }
   return expired.length;
 }
+
+/**
+ * Persists the latest active snapshot pointer for a workspace and authenticated owner.
+ */
+export async function setLatestSearchPointer(
+  workspace: string,
+  snapshotId: string,
+  options?: { apiVersion?: "v1" | "v2"; ownerId?: string },
+  db: LocalStoreAdapter = getLocalDatabase()
+): Promise<void> {
+  const owner = options?.ownerId || "default_owner";
+  const now = new Date().toISOString();
+
+  // General workspace pointer
+  await db.put<LocalSyncMetadataRecord>(LOCAL_STORES.LOCAL_SYNC_METADATA, {
+    key: `latest_search::${owner}::${workspace}`,
+    value: { snapshotId, updatedAt: now },
+    updatedAt: now,
+  });
+
+  // Version-specific workspace pointer if apiVersion provided
+  if (options?.apiVersion) {
+    await db.put<LocalSyncMetadataRecord>(LOCAL_STORES.LOCAL_SYNC_METADATA, {
+      key: `latest_search::${owner}::${workspace}::${options.apiVersion}`,
+      value: { snapshotId, updatedAt: now },
+      updatedAt: now,
+    });
+  }
+}
+
+/**
+ * Retrieves the latest active snapshot pointer for a workspace and authenticated owner.
+ */
+export async function getLatestSearchPointer(
+  workspace: string,
+  options?: { apiVersion?: "v1" | "v2"; ownerId?: string },
+  db: LocalStoreAdapter = getLocalDatabase()
+): Promise<string | null> {
+  const owner = options?.ownerId || "default_owner";
+  if (options?.apiVersion) {
+    const versionRecord = await db.get<LocalSyncMetadataRecord>(
+      LOCAL_STORES.LOCAL_SYNC_METADATA,
+      `latest_search::${owner}::${workspace}::${options.apiVersion}`
+    );
+    if (versionRecord?.value && typeof versionRecord.value === "object") {
+      const snapId = (versionRecord.value as { snapshotId?: string }).snapshotId;
+      if (snapId) return snapId;
+    }
+  }
+
+  const generalRecord = await db.get<LocalSyncMetadataRecord>(
+    LOCAL_STORES.LOCAL_SYNC_METADATA,
+    `latest_search::${owner}::${workspace}`
+  );
+  if (generalRecord?.value && typeof generalRecord.value === "object") {
+    const snapId = (generalRecord.value as { snapshotId?: string }).snapshotId;
+    if (snapId) return snapId;
+  }
+
+  return null;
+}
+
+/**
+ * Requests persistent storage from the browser Storage API (if supported)
+ * to prevent browser eviction of IndexedDB records.
+ */
+export async function requestBrowserPersistentStorage(): Promise<{
+  persisted: boolean;
+  quota?: { usage?: number; quota?: number };
+}> {
+  if (typeof window === "undefined" || !navigator?.storage) {
+    return { persisted: false };
+  }
+  try {
+    let persisted = false;
+    if (typeof navigator.storage.persisted === "function") {
+      persisted = await navigator.storage.persisted();
+    }
+    if (!persisted && typeof navigator.storage.persist === "function") {
+      persisted = await navigator.storage.persist();
+    }
+    let quota: { usage?: number; quota?: number } | undefined;
+    if (typeof navigator.storage.estimate === "function") {
+      const est = await navigator.storage.estimate();
+      quota = { usage: est.usage, quota: est.quota };
+    }
+    return { persisted, quota };
+  } catch {
+    return { persisted: false };
+  }
+}
+
+/**
+ * Returns record counts for all stores in the local discovery database.
+ */
+export async function getDiscoveryDatabaseStats(
+  db: LocalStoreAdapter = getLocalDatabase()
+): Promise<Record<string, number>> {
+  const stats: Record<string, number> = {};
+  for (const storeName of Object.values(LOCAL_STORES)) {
+    try {
+      const records = await db.getAll(storeName);
+      stats[storeName] = records.length;
+    } catch {
+      stats[storeName] = 0;
+    }
+  }
+  return stats;
+}
+

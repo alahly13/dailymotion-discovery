@@ -8,6 +8,7 @@
 
 import { zeroSafeNumber } from "@/lib/utils/zero-safe-number";
 import type { DiscoveryItem, DiscoveryItemKind } from "./types";
+import { createDailymotionProvenance } from "./provenance";
 
 export interface V1RawVideo {
   id?: string;
@@ -93,6 +94,11 @@ function base(kind: DiscoveryItemKind, id: string, raw: unknown): Omit<Discovery
     views: null,
     extra: {},
     raw,
+    provenance: createDailymotionProvenance({
+      apiVersion: "v1",
+      resourceType: kind,
+      resourceId: id,
+    }),
   };
 }
 

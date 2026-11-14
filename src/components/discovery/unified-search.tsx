@@ -60,7 +60,12 @@ import { classifyDiscoveryItem, discoveryCompositeKey } from "@/lib/resources/da
 import { useMergedDataset } from "@/lib/local-first/use-merged-dataset";
 import { ResultCard } from "./result-card";
 import { useDiscoveryWorkspace } from "@/stores/discovery-workspace-store";
-import { captureSearchSnapshot, replaySearchSnapshot } from "@/lib/search-history/search-snapshot-service";
+import {
+  captureSearchSnapshot,
+  replaySearchSnapshot,
+  getLatestRestorableSearchSnapshot,
+} from "@/lib/search-history/search-snapshot-service";
+import { useSynchronizedApiVersion } from "@/lib/navigation/version-sync";
 
 const GROUPS: { key: ParamGroup; label: string }[] = [
   { key: "basic", label: "Basic Filters" },
@@ -162,7 +167,7 @@ function ParamControl({ def, value, onChange }: { def: ParamDef; value: string; 
 export function UnifiedSearch() {
   const workspace = useDiscoveryWorkspace();
   const merged = useMergedDataset();
-  const [version, setVersion] = useState<ApiVersion>(workspace.lastSearchVersion ?? "v1");
+  const [version, setVersion] = useSynchronizedApiVersion(workspace.lastSearchVersion ?? "v1");
   const [resourceType, setResourceType] = useState<string>("general");
   const [query, setQuery] = useState("");
   const [profileId, setProfileId] = useState("");
@@ -182,6 +187,7 @@ export function UnifiedSearch() {
   const [loading, setLoading] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
   const [isReplayMode, setIsReplayMode] = useState(false);
+  const [restoredFromHistory, setRestoredFromHistory] = useState(false);
   const [activeTabKind, setActiveTabKind] = useState<string>("ALL");
   const inflightKey = useRef<string | null>(null);
 
@@ -209,14 +215,13 @@ export function UnifiedSearch() {
     });
   };
 
-  // Hydrate URL search parameters cleanly on mount, including offline replay (`replay=snapshotId`)
+  // Hydrate URL search parameters or auto-restore latest unexpired snapshot on mount
   useEffect(() => {
     const sp = new URLSearchParams(window.location.search);
-    if ([...sp.keys()].length === 0) return;
     let active = true;
 
     void (async () => {
-      // Check offline replay parameter first
+      // 1. Check offline replay parameter first
       const replaySnapId = sp.get("replay") || sp.get("snapshotId");
       if (replaySnapId) {
         try {
@@ -234,6 +239,45 @@ export function UnifiedSearch() {
           }
         } catch {
           // Replay failed; fall back to standard URL hydration
+        }
+      }
+
+      // 2. If no search parameters or query provided in URL, automatically restore the latest valid search snapshot
+      if (!sp.has("q") && !sp.has("profileId")) {
+        try {
+          const restorable = await getLatestRestorableSearchSnapshot("global_search");
+          if (restorable && active) {
+            setVersion(restorable.snapshot.apiVersion);
+            setQuery(restorable.snapshot.query || "");
+            setItems(restorable.items);
+            if (restorable.snapshot.resourceType && restorable.snapshot.resourceType !== "ALL") {
+              setResourceType(restorable.snapshot.resourceType.toLowerCase());
+            }
+            if (restorable.snapshot.apiParams) {
+              const strFilters: Record<string, string> = {};
+              for (const [k, v] of Object.entries(restorable.snapshot.apiParams)) {
+                if (v !== undefined && v !== null) strFilters[k] = String(v);
+              }
+              setFilters(strFilters);
+            }
+            if (restorable.snapshot.localFilters) {
+              setLocalFilters(restorable.snapshot.localFilters as unknown as LocalFilterState);
+            }
+            setMeta({
+              page: restorable.snapshot.currentPage ?? 1,
+              pageSize: 20,
+              total: restorable.snapshot.totalResults ?? restorable.items.length,
+              hasMore: Boolean(restorable.snapshot.hasMore),
+              capped: false,
+              endpoint: restorable.snapshot.route,
+            });
+            setHasSearched(true);
+            setRestoredFromHistory(true);
+            setNotice("Restored from local search history · Zero API Calls");
+            return;
+          }
+        } catch (err) {
+          console.warn("[unified-search] Auto-restoration from local storage skipped:", err);
         }
       }
 
@@ -295,13 +339,7 @@ export function UnifiedSearch() {
     setNotice(null);
     setHasSearched(false);
     setIsReplayMode(false);
-    try {
-      const sp = new URLSearchParams(window.location.search);
-      sp.set("v", next);
-      window.history.replaceState(null, "", `?${sp.toString()}`);
-    } catch {
-      // Non-fatal
-    }
+    setRestoredFromHistory(false);
   }
 
   // Count active API filters that deviate from default
@@ -319,6 +357,7 @@ export function UnifiedSearch() {
     setFailure(null);
     setNotice(null);
     setIsReplayMode(false);
+    setRestoredFromHistory(false);
     if (!append) workspace.recordSearchSubmitted(version);
     try {
       const params = new URLSearchParams();
@@ -409,10 +448,11 @@ export function UnifiedSearch() {
           resultCount: data.result.total ?? newItems.length,
         });
 
-        // 2. Automatically capture full raw JSON snapshot into IndexedDB for zero-API offline replay
+        // 2. Automatically capture full raw JSON snapshot into IndexedDB for zero-API offline replay & restoration
         void captureSearchSnapshot({
+          workspace: "global_search",
           query: query || profileId,
-          route: "/search",
+          route: "/global-search",
           apiVersion: version,
           resourceType: "ALL",
           mode: version === "v1" ? "search" : "browse",
@@ -421,6 +461,7 @@ export function UnifiedSearch() {
           rawResponse: data.result,
           items: newItems,
           pageIndex: page,
+          hasMore: data.result.hasMore,
           totalResults: data.result.total ?? newItems.length,
         });
 
@@ -614,6 +655,31 @@ export function UnifiedSearch() {
           >
             <Sparkles className="h-3.5 w-3.5" />
             Run Live Search Again
+          </button>
+        </div>
+      )}
+
+      {/* ── Restored From History Banner ──────────────────────────────────── */}
+      {restoredFromHistory && (
+        <div className="flex items-center justify-between gap-3 rounded-xl border border-emerald-500/40 bg-emerald-500/10 p-4 text-emerald-600 dark:text-emerald-400">
+          <div className="flex items-center gap-2.5">
+            <History className="h-5 w-5 shrink-0" />
+            <div>
+              <p className="text-xs font-black uppercase tracking-wider">
+                Restored from local search history · Zero API Calls
+              </p>
+              <p className="text-xs text-[var(--muted-foreground)]">
+                Loaded previous session snapshot directly from IndexedDB (0 provider or Gemini requests).
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => void runSearch(1, false)}
+            className="inline-flex min-h-9 items-center gap-1.5 rounded-lg bg-emerald-600 dark:bg-emerald-500 px-3 text-xs font-black text-white cursor-pointer hover:opacity-90 shadow-xs"
+          >
+            <Sparkles className="h-3.5 w-3.5" />
+            Refresh From API
           </button>
         </div>
       )}
@@ -909,11 +975,23 @@ export function UnifiedSearch() {
         />
       )}
 
-      {/* ── 12-Column Results Workspace ──────────────────────────────────── */}
+      {/* ── Sibling Results Workspace (Left = Local Filters, Right = Results) ── */}
       {hasSearched && !failure && (
-        <div className="grid grid-cols-12 gap-5 items-start">
-          {/* Left Side: Results Workspace (col-span-12 or col-span-8/9) */}
-          <div className={isLocalFiltersOpen ? "col-span-12 xl:col-span-8 2xl:col-span-9 space-y-4" : "col-span-12 space-y-4"}>
+        <div className="flex flex-col lg:flex-row items-start gap-5">
+          {/* Left Side: Dedicated Collapsible Local Filters Panel */}
+          {isLocalFiltersOpen && (
+            <aside className="w-full lg:w-80 2xl:w-88 shrink-0 lg:sticky lg:top-16 lg:max-h-[calc(100vh-5rem)] lg:overflow-y-auto">
+              <DiscoveryLocalFilterPanel
+                value={localFilters}
+                onChange={setLocalFilters}
+                totalLoaded={items.length}
+                filteredCount={visibleItems.length}
+              />
+            </aside>
+          )}
+
+          {/* Right Side: Main Search Workspace & Results Grid */}
+          <main className="flex-1 min-w-0 space-y-4 w-full">
             {/* Header Controls Bar */}
             <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[var(--border)] bg-[var(--card)] p-3.5 shadow-xs">
               {/* Resource Distribution Tabs */}
@@ -1089,7 +1167,7 @@ export function UnifiedSearch() {
               </div>
             )}
 
-            {/* Results Grid with Type-Aware Result Cards */}
+            {/* Results Grid with Desktop >= 3 cards per row */}
             {visibleItems.length === 0 ? (
               <div className="flex min-h-60 flex-col items-center justify-center rounded-2xl border border-dashed border-[var(--border)] p-8 text-center bg-[var(--card)]/50">
                 <Search className="h-10 w-10 text-[var(--muted-foreground)]/50 mb-3" />
@@ -1107,7 +1185,7 @@ export function UnifiedSearch() {
                 </button>
               </div>
             ) : (
-              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-2 2xl:grid-cols-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3 2xl:grid-cols-4 min-[1850px]:grid-cols-5 gap-4">
                 {visibleItems.map((item) => {
                   const cKey = discoveryCompositeKey(item.apiVersion, item.kind, item.id);
                   const isSavedLocal = merged.savedKeys.has(cKey) || workspace.isItemSaved(item.apiVersion, item.kind, item.id);
@@ -1171,21 +1249,7 @@ export function UnifiedSearch() {
                 </div>
               </div>
             )}
-          </div>
-
-          {/* Right Side: Dedicated Collapsible Local Filters Panel */}
-          {isLocalFiltersOpen && (
-            <div className="col-span-12 xl:col-span-4 2xl:col-span-3">
-              <div className="sticky top-16 space-y-3">
-                <DiscoveryLocalFilterPanel
-                  value={localFilters}
-                  onChange={setLocalFilters}
-                  totalLoaded={items.length}
-                  filteredCount={visibleItems.length}
-                />
-              </div>
-            </div>
-          )}
+          </main>
         </div>
       )}
 

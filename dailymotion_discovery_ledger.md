@@ -2249,3 +2249,84 @@ CONFIRM_DB_APPLY=true npm run db:apply
 - Keep secrets server-only (`SUPABASE_SECRET_KEY`, `GEMINI_API_KEY`, `PRIVATE_DAILYMOTION_API_KEY_*`, `DATABASE_URL`) and preserve `requireAdmin()` gating on `/api/cloud/*` and `/api/admin/*`.
 - Never turn this product into a video downloader, rehosting tool, or private-stream scraper.
 - Update this ledger and `README.md` / `docs/migrations/*` whenever schema, env contracts, or route architecture change.
+
+
+---
+
+## 2026-11-14: Persistence, Playlists, Settings Redesign, Auth Session Security & UX Architecture Integration
+
+### 1. Architectural Summary & Scope
+Continued development of the existing Dailymotion Discovery project, integrating all features into a single, cohesive, production-grade application without isolating UI from database or persistence:
+1. **Seven-Day Search Persistence & Automatic Restoration**:
+   - Primary persistence in IndexedDB (`search_snapshots` and `search_snapshot_pages` object stores).
+   - Saved as results arrive, not only on page unload. Full untouched original API payload persisted (ZERO media binaries).
+   - Automatic restoration on return to Global Search (`/global-search`) and Link Explorer (`/link-explorer`) with **ZERO Dailymotion API calls and ZERO Gemini calls**.
+   - Clear UI indicator: `Restored from local search history · Zero API Calls`.
+   - 7-day retention (`NEXT_PUBLIC_SEARCH_HISTORY_TTL_SECONDS=604800` default).
+   - Multi-tab safety with workspace-scoped pointers (`getLatestSearchPointer` / `setLatestSearchPointer`).
+   - Browser Storage API persistence integration via `requestBrowserPersistentStorage()` (`navigator.storage.persist()`).
+2. **Explicit API V1 and V2 Provenance Architecture**:
+   - Created canonical provenance module (`src/lib/discovery/provenance.ts`).
+   - Defined `DailymotionSourceMetadata` containing `provider: "dailymotion"`, `apiVersion: "v1" | "v2"`, `resourceType`, `resourceId`, `fetchedAt`, `endpoint`, and `schemaVersion`.
+   - Stamped provenance across normalizers (`v1-normalize.ts`, `v2-normalize.ts`), models (`DiscoveryItem.provenance`), IndexedDB snapshots, page records, saved items, playlists, and exports.
+3. **Application-Managed Playlists Workspace**:
+   - Created `/playlists` workspace (`src/app/playlists/page.tsx`) and navigation entry in `AppShell` Library section.
+   - User-created playlist CRUD: Create, rename, edit description, view item counts, delete with confirmation modal.
+   - Cleanly separated application playlists from Dailymotion platform playlists (persisted locally and synced via `entities_collections` and `entities_collection_items`).
+   - Integrated `AddToPlaylistModal` (`src/components/playlists/add-to-playlist-modal.tsx`) directly onto all `ResultCard` components with instant duplicate prevention and inline playlist creation.
+   - Playlist item management: Persisted reordering (move up, move down), single remove, bulk selection, bulk remove, bulk move to another playlist, in-playlist search, sort (position, title, date, views, duration), open URL, copy canonical link, and JSON/CSV export.
+4. **Structured Settings Page Redesign**:
+   - Reorganized `/settings` (`src/app/settings/page.tsx`) into 7 logically grouped tabbed sections:
+     - **Account & Session**: Administrator profile (`asdy@dailymotion.discov.com`), active 7-day session validity, real Sign Out action, `ChangePasswordForm` (Supabase Auth SSR).
+     - **Appearance**: Light / Dark / System theme switcher with live toggle.
+     - **Discovery & API**: V1 & V2 `ConnectionPanel` diagnostics, capability matrix, zero secret exposure.
+     - **Search Preferences**: Per-version defaults (`VersionDefaultsEditor` for V1 and V2: sort, page size, family filter, localization).
+     - **Storage & Synchronization**: IndexedDB statistics, persistent storage status, library counts, links to `/storage`.
+     - **Privacy & Data Retention**: 7-day TTL guarantee details, "Purge Expired Snapshots", "Clear All Search History" with confirmation safety.
+     - **System & Diagnostics**: Application build info, Supabase Session Pooler connection (:5432), migration links.
+5. **Real Sign Out & Administrator Session Security**:
+   - Implemented real Supabase Auth SSR sign out endpoint (`/api/admin/logout`) and updated `/api/admin/session` POST handler.
+   - Clears `dm_admin_session` cookie (`maxAge: 0`, `path: "/"`).
+   - Enforces `Cache-Control: no-store, no-cache, must-revalidate` to prevent back-navigation cached access.
+   - Server-side verification enforces 7-day session TTL (`ADMIN_SESSION_TTL_SECONDS=604800`) and fails closed on unauthenticated or expired requests.
+6. **Dark Mode WCAG 2.2 AA Contrast Hardening**:
+   - Added global CSS rules in `src/app/globals.css` explicitly styling native `<select>`, `<option>`, and `<optgroup>` with dark surface `#1e1e1e` and light text `#f8fafc`, resolving OS-native silver/white clashes on Windows Chromium/Edge.
+   - Form inputs, placeholder text, popovers, dialogs, badges, and code blocks verified against WCAG 2.2 AA (>= 4.5:1 normal text, >= 3:1 large text).
+7. **Global Search Results Layout Redesign**:
+   - Redesigned results grid to guarantee at least 3 cards per row on desktop even with sidebar expanded: `grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3 2xl:grid-cols-4 min-[1850px]:grid-cols-5 gap-4`.
+8. **Sibling Layout for Local Filters**:
+   - Implemented responsive sibling layout in `UnifiedSearch`: Left column = `DiscoveryLocalFilterPanel` (`aside` with `Local Only · Zero API Calls` badge), Right column = search workspace & results grid.
+   - When collapsed, `aside` is hidden and `main` expands to 100% full width.
+9. **Synchronized API Version State**:
+   - Built `useSynchronizedApiVersion` hook and `version-sync.ts` using URL query parameter `?v=v1|v2` as single source of truth.
+   - Dispatches `API_VERSION_EVENT` (`"dm:api-version-change"`), keeping sidebar sublinks, page tabs, and browser navigation in immediate lockstep without losing search query parameters.
+
+### 2. Files Changed & Created
+- `src/lib/discovery/provenance.ts` (created): Canonical provenance definitions and helpers.
+- `src/lib/discovery/types.ts` (modified): Stamped `provenance` metadata onto `DiscoveryItem`.
+- `src/lib/discovery/v1-normalize.ts` (modified): Attached V1 provenance envelope.
+- `src/lib/discovery/v2-normalize.ts` (modified): Attached V2 provenance envelope.
+- `src/lib/local-first/indexeddb-store.ts` (modified): Added workspace, ownerId, latest search pointers, `requestBrowserPersistentStorage`, `getDiscoveryDatabaseStats`.
+- `src/lib/search-history/search-snapshot-types.ts` (modified): Updated capture & restore options.
+- `src/lib/search-history/search-snapshot-service.ts` (modified): Added `getLatestRestorableSearchSnapshot`, `clearAllSearchSnapshots`, `purgeExpiredSearchSnapshots`.
+- `src/lib/navigation/version-sync.ts` (created): Synchronized API version state management.
+- `src/components/layout/app-shell.tsx` (modified): Synced version sublinks via `version-sync.ts`, added Playlists link.
+- `src/components/playlists/add-to-playlist-modal.tsx` (created): Reusable playlist modal with duplicate prevention.
+- `src/components/discovery/result-card.tsx` (modified): Embedded `+ Playlist` action.
+- `src/app/playlists/page.tsx` (created): Complete Application-Managed Playlists workspace.
+- `src/components/discovery/unified-search.tsx` (modified): Auto-restoration on mount, synchronized version, left-side sibling layout, desktop >= 3 cards per row.
+- `src/components/link-explorer/link-explorer-workspace.tsx` (modified): Auto-restoration on mount, synchronized version, link explorer snapshot persistence.
+- `src/app/api/admin/logout/route.ts` (created): Full Supabase SSR sign out & cookie clearance.
+- `src/app/api/admin/session/route.ts` (modified): Synced logout behavior with SSR invalidation.
+- `src/app/account/page.tsx` (modified): Connected real Sign Out action with `/admin/login` redirect.
+- `src/app/settings/page.tsx` (modified): 7-section structured redesign with all controls connected.
+- `src/app/globals.css` (modified): WCAG 2.2 AA Dark mode select/option contrast hardening.
+- `src/lib/search-history/__tests__/search-persistence.test.ts` (created): 7-day persistence, restoration, pointer tests.
+- `src/lib/navigation/__tests__/version-sync.test.ts` (created): Version synchronization tests.
+- `src/lib/admin/__tests__/logout.test.ts` (created): Sign out, cookie, and session security tests.
+- `src/app/playlists/__tests__/playlists.test.ts` (created): Playlist CRUD, duplicate prevention, reordering tests.
+
+### 3. Verification Results
+- **TypeScript**: `node ./node_modules/typescript/bin/tsc --noEmit` exited 0 (clean, zero errors across entire codebase).
+- **Vitest**: `npm test` passed 38/38 test files, **187/187 tests passing**.
+- **Prisma**: `npx prisma validate` validated successfully against `schema.prisma`.

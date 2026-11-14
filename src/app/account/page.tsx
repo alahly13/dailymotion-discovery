@@ -61,8 +61,13 @@ export default function AccountPage() {
   }, []);
 
   async function handleLogout() {
-    await fetch("/api/admin/session", { method: "POST" });
+    try {
+      await fetch("/api/admin/logout", { method: "POST" });
+    } catch {
+      // Best-effort network call
+    }
     setAdmin((prev) => (prev ? { ...prev, authenticated: false, username: null, expiresAt: null } : prev));
+    window.location.href = "/admin/login";
   }
 
   async function handleChangePassword(e: React.FormEvent) {

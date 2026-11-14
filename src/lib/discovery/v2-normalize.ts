@@ -7,6 +7,7 @@
 // Scope: v2 workspaces. Future agents: keep v2-only quirks here.
 
 import type { DiscoveryItem, DiscoveryItemKind } from "./types";
+import { createDailymotionProvenance } from "./provenance";
 
 export interface V2RawVideo {
   video_id?: string;
@@ -93,6 +94,11 @@ function base(kind: DiscoveryItemKind, id: string, raw: unknown): Omit<Discovery
     views: null,
     extra: {},
     raw,
+    provenance: createDailymotionProvenance({
+      apiVersion: "v2",
+      resourceType: kind,
+      resourceId: id,
+    }),
   };
 }
 
