@@ -27,6 +27,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
 import { ApiStatusBar } from "@/components/discovery/api-status-bar";
+import { CloudSyncHeaderButton } from "./cloud-sync-header-button";
 import { ThemeToggle } from "./theme-toggle";
 import {
   API_VERSION_EVENT,
@@ -348,19 +349,19 @@ export function AppShell({ children }: { children: ReactNode }) {
                                   setUrlApiVersion(sub.version);
                                 }}
                                 className={cn(
-                                  "flex items-center gap-2 rounded px-2 py-1 text-[11px] font-semibold transition",
+                                  "flex items-center gap-2 rounded-md px-2.5 py-1 text-[11px] font-semibold transition cursor-pointer select-none",
                                   subActive
-                                    ? "bg-neutral-900 text-white dark:bg-white dark:text-black shadow-2xs font-black"
-                                    : "text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--surface-container-high)]"
+                                    ? "bg-neutral-800 text-white dark:bg-neutral-800 dark:text-white dark:border dark:border-neutral-700 shadow-xs font-bold"
+                                    : "text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-neutral-800/40 dark:hover:bg-neutral-800/60 dark:hover:text-white"
                                 )}
                               >
                                 <span
                                   className={cn(
-                                    "h-1.5 w-1.5 rounded-full",
-                                    subActive ? "bg-white dark:bg-black" : "bg-[var(--muted-foreground)]"
+                                    "h-1.5 w-1.5 rounded-full shrink-0",
+                                    subActive ? "bg-sky-400" : "bg-[var(--muted-foreground)]/50"
                                   )}
                                 />
-                                <span>{sub.label}</span>
+                                <span className="truncate">{sub.label}</span>
                               </Link>
                             );
                           })}
@@ -493,19 +494,19 @@ export function AppShell({ children }: { children: ReactNode }) {
                                       setMobileMenuOpen(false);
                                     }}
                                     className={cn(
-                                      "flex items-center gap-2 rounded px-2 py-1 text-[11px] font-semibold transition",
+                                      "flex items-center gap-2 rounded-md px-2.5 py-1 text-[11px] font-semibold transition cursor-pointer select-none",
                                       subActive
-                                        ? "bg-primary text-primary-foreground shadow-2xs font-bold"
-                                        : "text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--surface-container-high)]"
+                                        ? "bg-neutral-800 text-white dark:bg-neutral-800 dark:text-white dark:border dark:border-neutral-700 shadow-xs font-bold"
+                                        : "text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-neutral-800/40 dark:hover:bg-neutral-800/60 dark:hover:text-white"
                                     )}
                                   >
                                     <span
                                       className={cn(
-                                        "h-1.5 w-1.5 rounded-full",
-                                        subActive ? "bg-white dark:bg-black" : "bg-[var(--muted-foreground)]"
+                                        "h-1.5 w-1.5 rounded-full shrink-0",
+                                        subActive ? "bg-sky-400" : "bg-[var(--muted-foreground)]/50"
                                       )}
                                     />
-                                    <span>{sub.label}</span>
+                                    <span className="truncate">{sub.label}</span>
                                   </Link>
                                 );
                               })}
@@ -583,57 +584,17 @@ export function AppShell({ children }: { children: ReactNode }) {
                 )}
               </button>
 
-              {/* Architecture Badges */}
+              {/* Minimalist Platform Indicator */}
               <div className="hidden sm:flex items-center gap-2 ml-2">
-                <span className="inline-flex items-center gap-1 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-extrabold text-emerald-400">
-                  Dual-API Terminal
-                </span>
-                <span className="hidden md:inline-flex items-center gap-1 rounded-full border border-sky-500/30 bg-sky-500/10 px-2 py-0.5 text-[10px] font-extrabold text-sky-400">
-                  Quota-Aware
-                </span>
-                <span className="hidden xl:inline-flex items-center gap-1 rounded-full border border-purple-500/30 bg-purple-500/10 px-2 py-0.5 text-[10px] font-extrabold text-purple-400">
-                  Manifest-First
+                <span className="text-[11px] font-bold text-[var(--muted-foreground)] tracking-tight">
+                  Dailymotion Discovery Terminal
                 </span>
               </div>
             </div>
 
-            {/* Right Controls */}
-            <div className="flex items-center gap-2 shrink-0">
-              <Link
-                href="/global-search"
-                className="hidden sm:inline-flex h-8 items-center gap-1.5 rounded-md border border-[var(--border)] bg-[var(--surface-container-low)] px-2.5 text-xs font-bold text-[var(--muted-foreground)] transition hover:border-[var(--primary)] hover:text-[var(--foreground)]"
-              >
-                <Search className="h-3.5 w-3.5" />
-                <span>Global Search</span>
-              </Link>
-              <Link
-                href="/link-explorer"
-                className="hidden lg:inline-flex h-8 items-center gap-1.5 rounded-md border border-[var(--border)] bg-[var(--surface-container-low)] px-2.5 text-xs font-bold text-[var(--muted-foreground)] transition hover:border-[var(--primary)] hover:text-[var(--foreground)]"
-              >
-                <LinkIcon className="h-3.5 w-3.5" />
-                <span>Link Explorer</span>
-              </Link>
-              <Link
-                href="/search-history"
-                className="hidden md:inline-flex h-8 items-center gap-1.5 rounded-md border border-[var(--border)] bg-[var(--surface-container-low)] px-2.5 text-xs font-bold text-[var(--muted-foreground)] transition hover:border-[var(--primary)] hover:text-[var(--foreground)]"
-              >
-                <History className="h-3.5 w-3.5" />
-                <span>History</span>
-              </Link>
-              <Link
-                href="/saved-items"
-                className="inline-flex h-8 items-center gap-1.5 rounded-md border border-[var(--border)] bg-[var(--surface-container-low)] px-2.5 text-xs font-bold text-[var(--muted-foreground)] transition hover:border-[var(--primary)] hover:text-[var(--foreground)]"
-              >
-                <BookmarkCheck className="h-3.5 w-3.5 text-[var(--primary)]" />
-                <span className="hidden sm:inline">Saved Items</span>
-              </Link>
-              <Link
-                href="/saved-titles"
-                className="hidden xl:inline-flex h-8 items-center gap-1.5 rounded-md border border-purple-500/30 bg-purple-500/10 px-2.5 text-xs font-bold text-purple-600 dark:text-purple-300 transition hover:bg-purple-500/20"
-              >
-                <BookmarkPlus className="h-3.5 w-3.5" />
-                <span>Saved Titles</span>
-              </Link>
+            {/* Right Controls: Unified Cloudflare R2 Sync + Theme Toggle */}
+            <div className="flex items-center gap-2.5 shrink-0">
+              <CloudSyncHeaderButton />
               <ThemeToggle />
             </div>
           </div>

@@ -24,6 +24,56 @@ Scope: Project source-of-truth ledger, updated after Search Architecture Consoli
 - [Future Roadmap](#future-roadmap)
 - [Agent Instructions](#agent-instructions)
 
+## 2026-11-14 Header Clutter Elimination, Unified R2 Cloud Sync Engine, Contrast Shield & Strict Link Explorer Isolation
+
+**User intent addressed**
+- Removed clutter from the top global header bar: eliminated redundant badges (`Dual-API Terminal`, `Quota-Aware`, `Manifest-First`) and duplicate navigation links (`Global Search`, `Link Explorer`, `History`, `Saved Items`, `Saved Titles`).
+- Introduced a prominent, luxury top-header action button (`<CloudSyncHeaderButton />`) that commits and synchronizes all owner-scoped modifications, Saved Titles, and workspace datasets to Cloudflare R2 bucket (`dailymotion-discovery-private`).
+- Fixed the sidebar and mobile drawer API version button defect where hover/active state rendered an unreadable white rectangle hiding white text.
+- Enforced 100% strict architectural separation between **Global Search (`/global-search`)** and **Link Explorer (`/link-explorer`)**:
+  - Removed default prefill (`lemonde`) and unprompted auto-restoration of old search history snapshots on mount.
+  - Eliminated related videos fetching on single video lookup.
+  - Completely severed Link Explorer from general search endpoints (`/api/discovery/v1/general`). Keyword queries are rejected with an explicit `keyword_search_redirect` guidance card offering a one-click transition to Global Search.
+  - Removed search override from the resource type dropdown.
+- Verified and deployed the latest Cloudflare Worker (`dailymotion-discovery-api`).
+
+**Architecture & Implementation Details**
+
+1. **Unified Cloudflare R2 Sync Engine (`src/lib/sync/unified-cloud-sync.ts`)**:
+   - Provides `executeUnifiedR2CloudSync()` orchestrating both Saved Titles (`/api/saved-titles/cloud-sync`) and workspace datasets via `SyncCoordinator.syncNow()` (`/api/sync/save-all`).
+   - Resolves authoritative owner UUID server-side via `getClientOwnerId()`.
+   - Updates local IndexedDB entries to `cloud_synced` status upon verified R2 receipt via `markCommittedSavedTitles(ownerId, committedIds, receipt)`.
+   - Dispatches `dm:saved-titles-changed` events for instantaneous reactive UI updates across open tabs.
+
+2. **Top Header Redesign (`src/components/layout/cloud-sync-header-button.tsx` & `src/components/layout/app-shell.tsx`)**:
+   - Cleaned top sticky header of redundant clutter.
+   - Added `<CloudSyncHeaderButton />` with live state feedback (`Idle: Sync to Cloudflare R2`, `Syncing: Syncing to R2...`, `Success: Cloud Synced ✓`, `Error: Retry R2 Sync`) and an ephemeral backdrop-blurred status toast.
+   - Hardened `src/app/api/sync/save-all/route.ts` to use `requireAuth()` and explicitly pass `{ ownerId: auth.ownerId }` into `executeSaveAll()`. All objects land under `dailymotion/persistence/${ownerId}/...` in the private R2 bucket (`dailymotion-discovery-private`).
+
+3. **Sidebar & Mobile Drawer Contrast Shield (`src/components/layout/app-shell.tsx`)**:
+   - Fixed API version sublinks (`V1 — Legacy API` / `V2 — Current API`).
+   - Replaced flawed `dark:bg-white dark:text-black` with high-contrast deep obsidian `dark:bg-neutral-800 dark:text-white dark:border dark:border-neutral-700` and subtle hover `dark:hover:bg-neutral-800/60 dark:hover:text-white`.
+   - Added luminous `sky-400` indicator dot for active track, delivering 100% legibility and zero white box collision.
+
+4. **Strict Isolation of Link Explorer (`src/lib/link-explorer/link-explorer-service.ts` & `src/components/link-explorer/link-explorer-workspace.tsx`)**:
+   - Default input initialized to `""`.
+   - Removed related videos fetch from single video lookup.
+   - Eliminated `/api/discovery/v1/general` call. Returns `reason: "keyword_search_redirect"` for keyword inputs.
+   - Dedicated UI redirect card rendered with a direct button: `Search "{query}" in Global Search →` linking to `/global-search?q=${encodeURIComponent(query)}&v=${version}`.
+   - Initial empty state displays a clean inspector guide card explaining direct URL/ID capabilities and linking to Global Search for keyword queries.
+   - Removed `search` option from the resource kind override dropdown.
+
+5. **Cloudflare Worker Deployment (`cloudflare/workers/dailymotion-discovery-api`)**:
+   - Deployed latest version to Cloudflare edge via `npx wrangler deploy --config cloudflare/workers/dailymotion-discovery-api/wrangler.jsonc`.
+   - Version ID: `5d4922d9-c48d-4830-bad2-6e3fcb465249`.
+   - Route/Trigger: `https://dailymotion-discovery-api.elmahdyabdulla209.workers.dev`.
+   - R2 Binding: `env.R2_BUCKET -> dailymotion-discovery-private`.
+
+**Verification Results**
+- `npm run typecheck` (`next typegen && tsc --noEmit`): Exit code 0, 0 TypeScript errors.
+- `npx prisma validate`: Schema at `prisma/schema.prisma` is valid.
+- Zero local production builds run (strictly adhering to memory/resource constraints).
+
 ## 2026-11-14 Secure Authentication, Owner-Scoped Application & Saved Titles Manifest System (End-to-End Cloudflare R2 Sync)
 
 **User intent addressed**
@@ -184,6 +234,56 @@ Scope: Project source-of-truth ledger, updated after Search Architecture Consoli
 - Password correctness (unreachable auth layer). Nothing was changed about it.
 
 - [Agent Instructions](#agent-instructions)
+
+## 2026-11-14 Header Clutter Elimination, Unified R2 Cloud Sync Engine, Contrast Shield & Strict Link Explorer Isolation
+
+**User intent addressed**
+- Removed clutter from the top global header bar: eliminated redundant badges (`Dual-API Terminal`, `Quota-Aware`, `Manifest-First`) and duplicate navigation links (`Global Search`, `Link Explorer`, `History`, `Saved Items`, `Saved Titles`).
+- Introduced a prominent, luxury top-header action button (`<CloudSyncHeaderButton />`) that commits and synchronizes all owner-scoped modifications, Saved Titles, and workspace datasets to Cloudflare R2 bucket (`dailymotion-discovery-private`).
+- Fixed the sidebar and mobile drawer API version button defect where hover/active state rendered an unreadable white rectangle hiding white text.
+- Enforced 100% strict architectural separation between **Global Search (`/global-search`)** and **Link Explorer (`/link-explorer`)**:
+  - Removed default prefill (`lemonde`) and unprompted auto-restoration of old search history snapshots on mount.
+  - Eliminated related videos fetching on single video lookup.
+  - Completely severed Link Explorer from general search endpoints (`/api/discovery/v1/general`). Keyword queries are rejected with an explicit `keyword_search_redirect` guidance card offering a one-click transition to Global Search.
+  - Removed search override from the resource type dropdown.
+- Verified and deployed the latest Cloudflare Worker (`dailymotion-discovery-api`).
+
+**Architecture & Implementation Details**
+
+1. **Unified Cloudflare R2 Sync Engine (`src/lib/sync/unified-cloud-sync.ts`)**:
+   - Provides `executeUnifiedR2CloudSync()` orchestrating both Saved Titles (`/api/saved-titles/cloud-sync`) and workspace datasets via `SyncCoordinator.syncNow()` (`/api/sync/save-all`).
+   - Resolves authoritative owner UUID server-side via `getClientOwnerId()`.
+   - Updates local IndexedDB entries to `cloud_synced` status upon verified R2 receipt via `markCommittedSavedTitles(ownerId, committedIds, receipt)`.
+   - Dispatches `dm:saved-titles-changed` events for instantaneous reactive UI updates across open tabs.
+
+2. **Top Header Redesign (`src/components/layout/cloud-sync-header-button.tsx` & `src/components/layout/app-shell.tsx`)**:
+   - Cleaned top sticky header of redundant clutter.
+   - Added `<CloudSyncHeaderButton />` with live state feedback (`Idle: Sync to Cloudflare R2`, `Syncing: Syncing to R2...`, `Success: Cloud Synced ✓`, `Error: Retry R2 Sync`) and an ephemeral backdrop-blurred status toast.
+   - Hardened `src/app/api/sync/save-all/route.ts` to use `requireAuth()` and explicitly pass `{ ownerId: auth.ownerId }` into `executeSaveAll()`. All objects land under `dailymotion/persistence/${ownerId}/...` in the private R2 bucket (`dailymotion-discovery-private`).
+
+3. **Sidebar & Mobile Drawer Contrast Shield (`src/components/layout/app-shell.tsx`)**:
+   - Fixed API version sublinks (`V1 — Legacy API` / `V2 — Current API`).
+   - Replaced flawed `dark:bg-white dark:text-black` with high-contrast deep obsidian `dark:bg-neutral-800 dark:text-white dark:border dark:border-neutral-700` and subtle hover `dark:hover:bg-neutral-800/60 dark:hover:text-white`.
+   - Added luminous `sky-400` indicator dot for active track, delivering 100% legibility and zero white box collision.
+
+4. **Strict Isolation of Link Explorer (`src/lib/link-explorer/link-explorer-service.ts` & `src/components/link-explorer/link-explorer-workspace.tsx`)**:
+   - Default input initialized to `""`.
+   - Removed related videos fetch from single video lookup.
+   - Eliminated `/api/discovery/v1/general` call. Returns `reason: "keyword_search_redirect"` for keyword inputs.
+   - Dedicated UI redirect card rendered with a direct button: `Search "{query}" in Global Search →` linking to `/global-search?q=${encodeURIComponent(query)}&v=${version}`.
+   - Initial empty state displays a clean inspector guide card explaining direct URL/ID capabilities and linking to Global Search for keyword queries.
+   - Removed `search` option from the resource kind override dropdown.
+
+5. **Cloudflare Worker Deployment (`cloudflare/workers/dailymotion-discovery-api`)**:
+   - Deployed latest version to Cloudflare edge via `npx wrangler deploy --config cloudflare/workers/dailymotion-discovery-api/wrangler.jsonc`.
+   - Version ID: `5d4922d9-c48d-4830-bad2-6e3fcb465249`.
+   - Route/Trigger: `https://dailymotion-discovery-api.elmahdyabdulla209.workers.dev`.
+   - R2 Binding: `env.R2_BUCKET -> dailymotion-discovery-private`.
+
+**Verification Results**
+- `npm run typecheck` (`next typegen && tsc --noEmit`): Exit code 0, 0 TypeScript errors.
+- `npx prisma validate`: Schema at `prisma/schema.prisma` is valid.
+- Zero local production builds run (strictly adhering to memory/resource constraints).
 
 ## 2026-10-14 Native Prisma ORM 8 migration (single-version data layer)
 

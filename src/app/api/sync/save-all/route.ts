@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
-import { requireAdmin } from "@/lib/admin/require-admin";
+import { requireAuth } from "@/lib/auth/auth-service";
 import { executeSaveAll } from "@/lib/persistence/r2-sync-service";
 import { PersistenceUnavailableError } from "@/lib/persistence/repositories/errors";
 
 export async function POST(request: Request) {
-  const gate = await requireAdmin();
-  if (!gate.ok) return gate.response;
+  const auth = await requireAuth();
+  if (!auth.ok) return auth.response;
 
   let body: unknown;
   try {
@@ -15,7 +15,8 @@ export async function POST(request: Request) {
   }
 
   try {
-    const receipt = await executeSaveAll(body);
+    // Authoritatively scope cloud storage commit to the verified server owner UUID
+    const receipt = await executeSaveAll(body, { ownerId: auth.ownerId });
     return NextResponse.json({ ok: true, receipt });
   } catch (error) {
     if (error instanceof PersistenceUnavailableError) {

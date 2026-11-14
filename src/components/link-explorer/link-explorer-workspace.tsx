@@ -80,7 +80,7 @@ export function LinkExplorerWorkspace() {
   const initialUrl = searchParams.get("url") || searchParams.get("id") || "";
 
   const [version, setVersion] = useSynchronizedApiVersion(initialVersion);
-  const [input, setInput] = useState(initialUrl || "https://www.dailymotion.com/lemonde");
+  const [input, setInput] = useState(initialUrl || "");
   const [overrideKind, setOverrideKind] = useState<DailymotionResourceKind | "auto">("auto");
   const [analyzedPreview, setAnalyzedPreview] = useState<DailymotionAnalyzedLink | null>(null);
 
@@ -101,33 +101,10 @@ export function LinkExplorerWorkspace() {
     }
   }, [input]);
 
-  // Execute initial resolution if URL param was provided, or auto-restore latest unexpired snapshot
+  // Execute resolution ONLY if URL or ID param was explicitly provided in the address
   useEffect(() => {
     if (initialUrl.trim()) {
       void executeResolution(initialUrl.trim(), initialVersion);
-    } else {
-      void (async () => {
-        try {
-          const restorable = await getLatestRestorableSearchSnapshot("link_explorer");
-          if (restorable && restorable.items.length > 0) {
-            setInput(restorable.snapshot.query || "");
-            setVersion(restorable.snapshot.apiVersion);
-            setResolution({
-              ok: true,
-              item: restorable.items[0] ?? null,
-              items: restorable.items,
-              hasMore: Boolean(restorable.snapshot.hasMore),
-              effectiveKind: (restorable.snapshot.resourceType?.toLowerCase() as DailymotionResourceKind) || "video",
-              version: restorable.snapshot.apiVersion,
-              analyzed: analyzeDailymotionUrlOrId(restorable.snapshot.query || ""),
-              status: 200,
-            });
-            setRestoredFromHistory(true);
-          }
-        } catch (err) {
-          console.warn("[link-explorer] Auto-restoration skipped:", err);
-        }
-      })();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -345,7 +322,6 @@ export function LinkExplorerWorkspace() {
                 <option value="playlist">Force Playlist</option>
                 <option value="livestream">Force Livestream</option>
                 <option value="user">Force User</option>
-                <option value="search">Force Search Query (v1)</option>
               </select>
             </div>
 
@@ -509,24 +485,85 @@ export function LinkExplorerWorkspace() {
         </div>
       )}
 
-      {/* Error State */}
+      {/* Error / Redirect State */}
       {resolution && !resolution.ok && (
-        <ApiErrorAlert
-          error={resolution.normalized || {
-            error: resolution.error,
-            reason: resolution.reason,
-            status: resolution.status,
-            apiVersion: resolution.version,
-            remedy: resolution.reason === "auth_missing" ? "Dailymotion API v2 requires client credentials. Configure PRIVATE_DAILYMOTION_API_KEY_V2 in Settings." : null,
-          }}
-          onRetry={() => void executeResolution(input, version)}
-          onSwitchVersion={(target) => {
-            setVersion(target);
-            const params = new URLSearchParams(searchParams.toString());
-            params.set("v", target);
-            router.replace(`/link-explorer?${params.toString()}`);
-          }}
-        />
+        resolution.reason === "keyword_search_redirect" ? (
+          <div className="rounded-xl border border-sky-500/30 bg-sky-950/20 p-6 space-y-4">
+            <div className="flex items-start gap-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-sky-500/20 text-sky-400">
+                <Search className="h-5 w-5" />
+              </div>
+              <div className="space-y-1">
+                <h3 className="text-sm font-bold text-foreground">
+                  Keyword Search Query Detected
+                </h3>
+                <p className="text-xs text-muted-foreground leading-relaxed">
+                  {resolution.error}
+                </p>
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-3 pt-1">
+              <Link
+                href={`/global-search?q=${encodeURIComponent(resolution.analyzed.identifier)}&v=${version}`}
+                className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-xs font-bold text-primary-foreground hover:opacity-90 transition-all cursor-pointer shadow-sm"
+              >
+                <Search className="h-3.5 w-3.5" />
+                Search &ldquo;{resolution.analyzed.identifier}&rdquo; in Global Search &rarr;
+              </Link>
+              <button
+                type="button"
+                onClick={() => {
+                  setInput("");
+                  setResolution(null);
+                }}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-surface transition-all cursor-pointer"
+              >
+                Clear
+              </button>
+            </div>
+          </div>
+        ) : (
+          <ApiErrorAlert
+            error={resolution.normalized || {
+              error: resolution.error,
+              reason: resolution.reason,
+              status: resolution.status,
+              apiVersion: resolution.version,
+              remedy: resolution.reason === "auth_missing" ? "Dailymotion API v2 requires client credentials. Configure PRIVATE_DAILYMOTION_API_KEY_V2 in Settings." : null,
+            }}
+            onRetry={() => void executeResolution(input, version)}
+            onSwitchVersion={(target) => {
+              setVersion(target);
+              const params = new URLSearchParams(searchParams.toString());
+              params.set("v", target);
+              router.replace(`/link-explorer?${params.toString()}`);
+            }}
+          />
+        )
+      )}
+
+      {/* Initial Empty / Guide State */}
+      {!resolution && !loading && (
+        <div className="rounded-xl border border-border/60 bg-card/40 p-8 text-center space-y-3">
+          <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10 text-primary">
+            <LinkIcon className="h-6 w-6" />
+          </div>
+          <h3 className="text-base font-bold text-foreground">
+            Direct Link & Resource Inspector
+          </h3>
+          <p className="text-xs text-muted-foreground max-w-md mx-auto leading-relaxed">
+            Paste any Dailymotion video link, short URL, channel handle, playlist URL, or video ID above to fetch its exact live metadata and browse its catalog.
+          </p>
+          <div className="flex flex-wrap items-center justify-center gap-2 pt-2 text-xs">
+            <span className="text-muted-foreground">Looking to search by keywords?</span>
+            <Link
+              href="/global-search"
+              className="font-bold text-primary hover:underline inline-flex items-center gap-1"
+            >
+              Go to Global Search <ArrowRight className="h-3.5 w-3.5" />
+            </Link>
+          </div>
+        </div>
       )}
 
       {/* Resolution Workspace Display */}

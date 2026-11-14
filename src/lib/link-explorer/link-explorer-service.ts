@@ -120,19 +120,7 @@ export async function resolveLinkExplorerInput(
       }
 
       mainItem = lookupData.item ?? lookupData.result?.items?.[0] ?? lookupData.items?.[0] ?? null;
-
-      // Attempt to fetch related videos for context
-      try {
-        const relatedRes = await fetch(
-          `/api/discovery/${version}/videos?mode=related&id=${encodeURIComponent(analyzed.identifier)}&pageSize=8`
-        );
-        const relatedData = (await relatedRes.json()) as DiscoveryApiResponse;
-        if (relatedData.ok) {
-          relatedItems = relatedData.items ?? relatedData.result?.items ?? [];
-        }
-      } catch {
-        // Non-fatal related items
-      }
+      items = mainItem ? [mainItem] : [];
     } else if (effectiveKind === "channel" || effectiveKind === "profile" || effectiveKind === "user") {
       // Lookup channel metadata
       const lookupRes = await fetch(
@@ -209,61 +197,19 @@ export async function resolveLinkExplorerInput(
       }
       mainItem = lookupData.item ?? lookupData.result?.items?.[0] ?? lookupData.items?.[0] ?? null;
     } else if (effectiveKind === "search") {
-      // V2 strict architectural isolation: V2 does not have global search.
-      // Never silently fall back to V1 when V2 is explicitly requested!
-      if (version === "v2") {
-        const normalized = normalizeDailymotionError({
-          customCode: "APP_UNSUPPORTED_RESOURCE",
-          customMessage: "Dailymotion API v2 does not support global keyword search across all videos. All v2 catalog searches are profile-scoped. Switch to API v1 for global keyword search, or supply a channel/profile URL.",
-          apiVersion: "v2",
-          endpoint: "LinkExplorer/search",
-          resourceType: "search",
-        });
-        return {
-          ok: false,
-          analyzed,
-          effectiveKind: "search",
-          version: "v2",
-          item: null,
-          items: [],
-          error: "Dailymotion API v2 does not support global keyword search across all videos. Switch to API v1 for global search, or provide a channel/profile URL.",
-          reason: "unsupported_operation",
-          normalized,
-        };
-      }
-
-      const searchRes = await fetch(
-        `/api/discovery/v1/general?q=${encodeURIComponent(analyzed.identifier)}&pageSize=24&page=${page}`
-      );
-      const searchData = (await searchRes.json()) as DiscoveryApiResponse;
-      rawResponse = searchData;
-
-      if (!searchData.ok) {
-        const normalized = normalizeDailymotionError({
-          status: searchData.status,
-          customMessage: searchData.error,
-          apiVersion: "v1",
-          endpoint: "GET /videos?search",
-          resourceType: "search",
-        });
-        logDailymotionError(normalized);
-        return {
-          ok: false,
-          analyzed,
-          effectiveKind,
-          version: "v1",
-          item: null,
-          items: [],
-          error: searchData.error || `Failed to search "${analyzed.identifier}" on API v1.`,
-          reason: searchData.reason,
-          status: searchData.status,
-          normalized,
-        };
-      }
-
-      items = searchData.items ?? searchData.result?.items ?? [];
-      hasMore = Boolean(searchData.hasMore ?? searchData.result?.hasMore);
-      total = searchData.total ?? searchData.result?.total ?? items.length;
+      // 100% Strict Architectural Separation: Link Explorer does NOT execute general catalog searches.
+      // Keyword searches belong strictly to Global Search (/global-search).
+      return {
+        ok: false,
+        analyzed,
+        effectiveKind: "search",
+        version,
+        item: null,
+        items: [],
+        error: `"${analyzed.identifier}" is a keyword search query. Link Explorer is dedicated exclusively to inspecting direct links, video IDs, channel handles, and playlists. Please use Global Search to search for keywords across the Dailymotion catalog.`,
+        reason: "keyword_search_redirect",
+        status: 400,
+      };
     }
 
     // Persist to search history snapshot asynchronously
