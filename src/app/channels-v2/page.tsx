@@ -1,16 +1,7 @@
-import { Suspense } from "react";
-import { DiscoveryExplorer } from "@/components/discovery/discovery-explorer";
+import { redirectToGlobalSearch } from "@/lib/navigation/discovery-redirect";
 
-export default function ChannelsV2Page() {
-  return (
-    <Suspense fallback={<p className="text-sm">Loading Channel Search v2…</p>}>
-      <DiscoveryExplorer
-        version="v2"
-        resource="channels"
-        pageTitle="Channel Search v2"
-        pageDescription="Profile lookup on API v2 (authenticated, profile.read). v2 has no global profile search — look up by profile_id or bootstrap ids via /me."
-        counterpartPath="/channels-v1"
-      />
-    </Suspense>
-  );
+export default async function ChannelsV2Page(props: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  await redirectToGlobalSearch(props.searchParams, { v: "v2", type: "channel" });
 }

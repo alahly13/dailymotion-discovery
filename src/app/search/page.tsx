@@ -1,10 +1,7 @@
-import { Suspense } from "react";
-import { UnifiedSearch } from "@/components/discovery/unified-search";
+import { redirectToGlobalSearch } from "@/lib/navigation/discovery-redirect";
 
-export default function SearchPage() {
-  return (
-    <Suspense fallback={<p className="text-sm">Loading search…</p>}>
-      <UnifiedSearch />
-    </Suspense>
-  );
+export default async function SearchPage(props: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  await redirectToGlobalSearch(props.searchParams);
 }

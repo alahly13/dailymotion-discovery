@@ -1,16 +1,7 @@
-import { Suspense } from "react";
-import { DiscoveryExplorer } from "@/components/discovery/discovery-explorer";
+import { redirectToGlobalSearch } from "@/lib/navigation/discovery-redirect";
 
-export default function VideosV2Page() {
-  return (
-    <Suspense fallback={<p className="text-sm">Loading Video Search v2…</p>}>
-      <DiscoveryExplorer
-        version="v2"
-        resource="videos"
-        pageTitle="Video Search v2"
-        pageDescription="Profile video browsing plus direct lookup by video_id on API v2 (authenticated, video.read). Field selection uses v2 sparse fields with dot notation."
-        counterpartPath="/videos-v1"
-      />
-    </Suspense>
-  );
+export default async function VideosV2Page(props: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  await redirectToGlobalSearch(props.searchParams, { v: "v2", type: "video" });
 }

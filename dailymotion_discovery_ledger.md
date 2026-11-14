@@ -1,8 +1,8 @@
 # Dailymotion Discovery Platform Ledger
 
-Updated: 2026-11-13
+Updated: 2026-11-14
 Repo path: `E:\discovery\dailymotion-discovery`
-Scope: Project source-of-truth ledger, updated after Cloudflare Dedicated Worker R2 binding reconciliation (`R2_BUCKET -> dailymotion-discovery-private`), Supabase Auth SSR 7-day session TTL enforcement, zero-local-build remote Vercel deployment architecture, full documentation suite authoring, and 100% Vitest / TypeScript verification.
+Scope: Project source-of-truth ledger, updated after Search Architecture Consolidation (Global Search + Link Explorer), universal Dailymotion URL/ID analyzer, retired route redirections, and 100% Vitest / TypeScript verification.
 
 ## Table of Contents
 
@@ -2129,6 +2129,71 @@ CONFIRM_DB_APPLY=true npm run db:apply
 - Environment preflight: `node scripts/validate-all-env.mjs` exited 0.
 - Database preflight: `npm run db:validate` exited 0.
 - Git security check: `git check-ignore .env cloudflare/.../.dev.vars cloudflare/.../.prod.vars` confirmed 100% ignored. Zero secrets exposed.
+
+## 2026-11-14 Search Architecture Consolidation & Unified Link Explorer (V1 / V2)
+
+### 1. Navigation Simplification & Discovery Architecture Consolidation
+- Streamlined `AppShell` (`src/components/layout/app-shell.tsx`) navigation into 4 clean, focused sections:
+  - **OVERVIEW**: Dashboard (`/`)
+  - **DISCOVERY**: Global Search (`/global-search`), Link Explorer (`/link-explorer`)
+  - **LIBRARY**: Saved Items (`/saved-items`), Search History (`/search-history`), Collections (`/collections`)
+  - **SYSTEM**: Settings (`/settings`), Admin (`/admin`), Storage & R2 (`/storage`), Capabilities (`/capabilities`)
+- Consolidated 13 legacy discovery routes into server-side query-preserving redirects (`src/lib/navigation/discovery-redirect.ts`):
+  - `/general-v1` -> `/global-search?v=v1`
+  - `/general-v2` -> `/global-search?v=v2`
+  - `/videos-v1` -> `/global-search?v=v1&type=video`
+  - `/videos-v2` -> `/global-search?v=v2&type=video`
+  - `/channels-v1` -> `/global-search?v=v1&type=channel`
+  - `/channels-v2` -> `/global-search?v=v2&type=channel`
+  - `/playlists-v1` -> `/global-search?v=v1&type=playlist`
+  - `/playlists-v2` -> `/global-search?v=v2&type=playlist`
+  - `/users-v1` -> `/global-search?v=v1&type=user`
+  - `/users-v2` -> `/global-search?v=v2&type=user`
+  - `/live-v1` -> `/global-search?v=v1&type=live`
+  - `/live-v2` -> `/global-search?v=v2&type=live`
+  - `/search` -> `/global-search` (preserving all parameters, query transforms, and offline replay)
+  - `/admin` -> `/admin/migrations`
+
+### 2. Universal Dailymotion URL & Identifier Analyzer
+- Enhanced `src/lib/platforms/dailymotion/dailymotion-url-analyzer.ts`:
+  - Implemented `analyzeDailymotionUrlOrId(input)` with strict SSRF domain allowlist (`dailymotion.com`, `*.dailymotion.com`, `dai.ly`).
+  - Automatic resource detection for:
+    - Videos (`dailymotion.com/video/<id>`, short links `dai.ly/<id>`, bare `x...` IDs)
+    - Playlists (`dailymotion.com/playlist/<id>`, `playlist:<id>`)
+    - Channels & Profiles (`dailymotion.com/channel/<id>`, `dailymotion.com/@<handle>`, `@handle`, `channel:<id>`)
+    - Users (`dailymotion.com/user/<id>`, `user:<id>`)
+    - Livestreams (`dailymotion.com/live/<id>`, `live:<id>`)
+    - Search queries (`dailymotion.com/search/<query>`)
+  - Extracted canonical URLs, V1 API paths, V2 API paths, display labels, and contextual warnings.
+  - Preserved backward compatibility for `analyzeDailymotionChannelInput`.
+  - Added unit test suite in `src/lib/platforms/dailymotion/__tests__/dailymotion-url-analyzer.test.ts` (10 tests, 100% pass).
+
+### 3. Unified Link Explorer Workspace (`/link-explorer`)
+- Implemented `src/app/link-explorer/page.tsx` and `src/components/link-explorer/link-explorer-workspace.tsx`:
+  - Version switcher: `[ V1 — Legacy API ]` and `[ V2 — Current API ]` synced to URL `?v=v1|v2`.
+  - Large universal input with inner clear `X` button, quick example chips (`Video: x8n8x8`, `Short: dai.ly/x8n8x8`, `Channel: @lemonde`, `Playlist: x88apm`, `Live: x6m7w8`).
+  - Automatic resource detection banner showing detected kind, canonical URL, API strategy, and warnings.
+  - Manual resource-type override dropdown (`Auto-Detect Type`, `Force Video`, `Force Channel / Profile`, `Force Playlist`, `Force Livestream`, `Force User`).
+  - Specialized resource display sections:
+    - **Video**: Metadata card, 16:9 thumbnail, duration, views, owner, description, related videos tab.
+    - **Channel / Profile**: Canonical header, stats, video catalog grid, deep crawler bridge ("Deep Fetch Crawler" -> `/channel-explorer?channel=<id>`).
+    - **Playlist**: Header, item count, video catalog rendered with `ResultCard`.
+    - **Livestream**: Pulsing live badge, viewer count, stream info.
+  - Automatic IndexedDB search snapshot capture via `captureSearchSnapshot` with ZERO media binary downloads.
+  - Raw JSON inspection drawer (`RawJsonDrawer`).
+
+### 4. Dailymotion API Capability Matrix Documentation
+- Authored `docs/API_CAPABILITY_MATRIX.md` providing an authoritative comparison between Legacy API (v1) and Modern REST API (v2):
+  - Base URLs, token endpoints, lifetimes, authentication requirements.
+  - Resource-by-resource capability comparison (Videos, Channels, Playlists, Livestreams).
+  - Link Explorer resolution paths and error recovery strategies.
+
+### 5. Verification Evidence
+- TypeScript compilation: `tsc --noEmit` exited 0 (clean, zero errors).
+- Vitest test suite: 31/31 test files passed, 146/146 tests passed (`npm test`).
+- Environment preflight: `node scripts/validate-all-env.mjs` exited 0.
+- Database preflight: `npm run db:validate` exited 0.
+- Git security check: `git check-ignore .env .dev.vars .prod.vars` confirmed 100% ignored. Zero secrets exposed.
 
 ## Known Limitations
 

@@ -16,12 +16,14 @@ import {
   History,
   LayoutDashboard,
   Library,
+  Link as LinkIcon,
   Menu,
   PanelLeftClose,
   PanelLeftOpen,
   Radio,
   Search,
   Settings,
+  Shield,
   Tv,
   UserRound,
   UsersRound,
@@ -31,74 +33,41 @@ import { cn } from "@/lib/utils/cn";
 import { ApiStatusBar } from "@/components/discovery/api-status-bar";
 import { ThemeToggle } from "./theme-toggle";
 
-// Navigation groups: Dashboard overview, paired v1/v2 discovery workspaces,
-// compare/capabilities, workspace tools (including search history and saved items),
-// and deep channel/content exploration libraries.
+// Consolidated Navigation Architecture (2026):
+// Replaces cluttered per-resource discovery silos with ONLY TWO primary discovery experiences:
+// 1. Global Search (/global-search): full-text cross-resource search with API v1/v2 switching.
+// 2. Link Explorer (/link-explorer): universal URL & resource identifier analyzer.
+// Library: Saved Items, Search History, and Collections.
+// System: Settings, Admin, and Storage diagnostics.
 const groups: { label: string; links: { label: string; href: string; icon: typeof Search }[] }[] = [
-  { label: "Overview", links: [{ label: "Dashboard", href: "/", icon: LayoutDashboard }] },
   {
-    label: "General Search",
+    label: "Overview",
     links: [
-      { label: "Unified Search", href: "/search", icon: Search },
-      { label: "General v1", href: "/general-v1", icon: Search },
-      { label: "General v2", href: "/general-v2", icon: Search },
+      { label: "Dashboard", href: "/", icon: LayoutDashboard },
     ],
   },
   {
-    label: "Videos",
+    label: "Discovery",
     links: [
-      { label: "Videos v1", href: "/videos-v1", icon: Tv },
-      { label: "Videos v2", href: "/videos-v2", icon: Tv },
+      { label: "Global Search", href: "/global-search", icon: Search },
+      { label: "Link Explorer", href: "/link-explorer", icon: LinkIcon },
     ],
   },
   {
-    label: "Channels & Explorers",
-    links: [
-      { label: "Channel Explorer", href: "/channel-explorer", icon: Compass },
-      { label: "Channels v1", href: "/channels-v1", icon: Compass },
-      { label: "Channels v2", href: "/channels-v2", icon: Compass },
-    ],
-  },
-  {
-    label: "Playlists",
-    links: [
-      { label: "Playlists v1", href: "/playlists-v1", icon: Library },
-      { label: "Playlists v2", href: "/playlists-v2", icon: Library },
-    ],
-  },
-  {
-    label: "Users & Profiles",
-    links: [
-      { label: "Users v1", href: "/users-v1", icon: UsersRound },
-      { label: "Users v2", href: "/users-v2", icon: UserRound },
-    ],
-  },
-  {
-    label: "Live Streams",
-    links: [
-      { label: "Live v1", href: "/live-v1", icon: Radio },
-      { label: "Live v2", href: "/live-v2", icon: Radio },
-    ],
-  },
-  {
-    label: "Intelligence & Comparison",
-    links: [
-      { label: "AI Search", href: "/ai-search", icon: Bot },
-      { label: "Compare v1/v2", href: "/compare", icon: FlaskConical },
-      { label: "Capabilities", href: "/capabilities", icon: FileText },
-    ],
-  },
-  {
-    label: "Workspace & Persistence",
+    label: "Library",
     links: [
       { label: "Saved Items", href: "/saved-items", icon: BookmarkCheck },
       { label: "Search History", href: "/search-history", icon: History },
       { label: "Collections", href: "/collections", icon: Library },
-      { label: "Saved Searches", href: "/saved-searches", icon: Search },
-      { label: "Storage & R2", href: "/storage", icon: Database },
-      { label: "History & Saved", href: "/workspace", icon: Archive },
+    ],
+  },
+  {
+    label: "System",
+    links: [
       { label: "Settings", href: "/settings", icon: Settings },
-      { label: "API Docs", href: "/docs", icon: FileText },
+      { label: "Admin", href: "/admin", icon: Shield },
+      { label: "Storage & R2", href: "/storage", icon: Database },
+      { label: "Capabilities", href: "/capabilities", icon: FileText },
     ],
   },
 ];
@@ -259,23 +228,26 @@ export function AppShell({ children }: { children: ReactNode }) {
           />
           <div className="relative flex w-4/5 max-w-xs flex-col border-r border-[var(--border)] bg-[var(--surface)] p-4 shadow-2xl z-10">
             <div className="mb-4 flex items-center justify-between border-b border-[var(--border)] pb-3">
-              <div className="flex items-center gap-2.5">
+              <Link href="/" className="flex items-center gap-2.5" onClick={() => setMobileMenuOpen(false)}>
                 <BrandMark size="sm" />
                 <div>
-                  <p className="text-xs font-bold">Dailymotion Discovery</p>
-                  <p className="text-[10px] text-[var(--muted-foreground)]">Mobile Terminal</p>
+                  <span className="block text-sm font-black text-[var(--foreground)]">Dailymotion</span>
+                  <span className="block text-[10px] font-bold uppercase text-[var(--muted-foreground)]">
+                    Discovery
+                  </span>
                 </div>
-              </div>
+              </Link>
               <button
                 type="button"
-                className="rounded-md p-1.5 text-[var(--muted-foreground)] hover:bg-[var(--surface-container-high)] hover:text-[var(--foreground)] cursor-pointer"
+                className="rounded-md p-1.5 text-[var(--muted-foreground)] hover:bg-[var(--surface-container-high)] hover:text-[var(--foreground)]"
                 onClick={() => setMobileMenuOpen(false)}
                 aria-label="Close menu"
               >
                 <X className="h-5 w-5" />
               </button>
             </div>
-            <div className="flex-1 overflow-y-auto space-y-4">
+
+            <div className="flex-1 space-y-4 overflow-y-auto">
               {groups.map((group) => (
                 <div key={group.label}>
                   <p className="px-2 pb-1 text-[10px] font-black uppercase tracking-[0.16em] text-[var(--muted-foreground)]">
@@ -375,11 +347,18 @@ export function AppShell({ children }: { children: ReactNode }) {
             {/* Right Controls: Quick Navigation & Theme */}
             <div className="flex items-center gap-2 shrink-0">
               <Link
-                href="/search"
+                href="/global-search"
                 className="hidden sm:inline-flex h-8 items-center gap-1.5 rounded-md border border-[var(--border)] bg-[var(--surface-container-low)] px-2.5 text-xs font-bold text-[var(--muted-foreground)] transition hover:border-[var(--primary)] hover:text-[var(--foreground)]"
               >
                 <Search className="h-3.5 w-3.5" />
                 <span>Search</span>
+              </Link>
+              <Link
+                href="/link-explorer"
+                className="hidden lg:inline-flex h-8 items-center gap-1.5 rounded-md border border-[var(--border)] bg-[var(--surface-container-low)] px-2.5 text-xs font-bold text-[var(--muted-foreground)] transition hover:border-[var(--primary)] hover:text-[var(--foreground)]"
+              >
+                <LinkIcon className="h-3.5 w-3.5" />
+                <span>Link Explorer</span>
               </Link>
               <Link
                 href="/search-history"
