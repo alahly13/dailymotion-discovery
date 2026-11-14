@@ -114,7 +114,7 @@ export function CloudSyncPanel() {
             type="button"
             disabled={merged.syncing || admin === false}
             onClick={() => void handleSaveAll()}
-            className="inline-flex min-h-10 items-center gap-1.5 rounded-md bg-[var(--primary)] px-4 text-xs font-black uppercase text-white hover:opacity-95 disabled:opacity-50"
+            className="inline-flex min-h-10 items-center gap-1.5 rounded-md bg-primary px-4 text-xs font-black uppercase text-primary-foreground hover:opacity-95 disabled:opacity-50 cursor-pointer"
           >
             <CloudUpload className="h-4 w-4" aria-hidden="true" />
             {merged.syncing ? "Verifying & Committing..." : `Save All to Cloud (${merged.pendingCount} pending)`}

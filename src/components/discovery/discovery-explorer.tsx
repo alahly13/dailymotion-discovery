@@ -537,7 +537,7 @@ export function DiscoveryExplorer({ version, resource, pageTitle, pageDescriptio
           )}
 
           <div className="flex flex-wrap gap-2 pt-1">
-            <button type="button" disabled={loading} onClick={() => void runSearch(1, false)} className="min-h-11 flex-1 rounded-md bg-[var(--primary)] px-4 text-sm font-black text-white disabled:opacity-60">
+            <button type="button" disabled={loading} onClick={() => void runSearch(1, false)} className="min-h-11 flex-1 rounded-md bg-primary px-4 text-sm font-black text-primary-foreground hover:opacity-90 disabled:opacity-60 cursor-pointer">
               {loading ? "Searching…" : "Search"}
             </button>
             <button type="button" onClick={saveCurrentSearch} className="min-h-11 rounded-md border border-[var(--border)] px-4 text-sm font-bold">
@@ -558,7 +558,7 @@ export function DiscoveryExplorer({ version, resource, pageTitle, pageDescriptio
               <p className="mt-1">{failure.error}</p>
               {failure.remedy && <p className="mt-1 font-semibold">{failure.remedy}</p>}
               <div className="mt-3 flex flex-wrap gap-2">
-                <button type="button" onClick={() => void runSearch(meta?.page ?? 1, false)} className="min-h-10 rounded-md bg-[var(--primary)] px-4 text-xs font-black uppercase text-white">
+                <button type="button" onClick={() => void runSearch(meta?.page ?? 1, false)} className="min-h-10 rounded-md bg-primary px-4 text-xs font-black uppercase text-primary-foreground hover:opacity-90 cursor-pointer">
                   Retry
                 </button>
                 <a href={counterpartHref} className="inline-flex min-h-10 items-center rounded-md border border-[var(--border)] px-4 text-xs font-black uppercase">
@@ -649,7 +649,7 @@ export function DiscoveryExplorer({ version, resource, pageTitle, pageDescriptio
               <button type="button" disabled={loading} onClick={() => void runSearch(meta.page + 1, false)} className="min-h-11 rounded-md border border-[var(--border)] px-4 text-sm font-bold disabled:opacity-60">
                 {loading ? "Loading…" : `Next page (${meta.page + 1})`}
               </button>
-              <button type="button" disabled={loading} onClick={() => void runSearch(meta.page + 1, true)} className="min-h-11 rounded-md bg-[var(--primary)] px-4 text-sm font-black text-white disabled:opacity-60">
+              <button type="button" disabled={loading} onClick={() => void runSearch(meta.page + 1, true)} className="min-h-11 rounded-md bg-primary px-4 text-sm font-black text-primary-foreground hover:opacity-90 disabled:opacity-60 cursor-pointer">
                 Load more (append)
               </button>
             </div>

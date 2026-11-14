@@ -2194,12 +2194,19 @@ CONFIRM_DB_APPLY=true npm run db:apply
   - Link Explorer resolution paths and error recovery strategies.
 
 ### 5. Verification Evidence
-- TypeScript compilation: `node ./node_modules/typescript/bin/tsc --noEmit` exited 0 (clean, zero errors).
+- TypeScript compilation: `node ./node_modules/typescript/bin/tsc --noEmit` exited 0 (clean, zero errors across entire codebase).
 - Vitest test suite: 32/32 test files passed, 150/150 tests passed (`npm test`).
 - Environment preflight: `node scripts/validate-all-env.mjs` exited 0 (clean).
 - Database preflight: `npm run db:validate` exited 0 (clean).
 - Git security check: `git check-ignore .env .dev.vars .prod.vars` confirmed 100% ignored. Zero secrets exposed.
-- Vercel Production Deployment: Successfully deployed to production (`dpl_F2uaiQMmA49nZCQcKsuA43wgYQA2`), status **`● Ready`** at `https://dailymotion-discovery.vercel.app` (duration 45s). Turbopack build cleanly emitted 225+ static/dynamic output items without CSR bailout.
+- Vercel Production Deployment: Successfully deployed to production (`dpl_Fq7kXpWn4yVvRhJy2npN5`), deployment URL `https://dailymotion-discovery-rhjy2npn5-alahly13s-projects.vercel.app`, alias `https://dailymotion-discovery.vercel.app`. Status **`● Ready`** (duration 37s). Turbopack build cleanly emitted 225+ static/dynamic output items without CSR bailout.
+- Live Browser UI & Flow Verification: Host-observed visual audit (`https://dailymotion-discovery.vercel.app`) confirmed 100% passing:
+  - Sidebar navigation renders nested `V1 — Legacy API` and `V2 — Current API` links under both Global Search and Link Explorer.
+  - Collapse and expand toggle operates smoothly (64px rail to 256px expanded) with persisted preferences in `localStorage`.
+  - `/global-search` loads with zero hydration errors, interactive `[ V1 — Legacy ]` and `[ V2 — Current ]` switcher, quick filter toolbar (`[Resource Type]`, `[Category]`, `[Sort]`, `[More Filters]`), and real query execution returning live video result cards.
+  - `/link-explorer` loads cleanly, provides instant universal URL/identifier analysis, example chips, manual resource override, and resolved catalog views.
+  - Retired routes (`/channels-v1?channel=lemonde`, etc.) cleanly redirect preserving query parameters.
+  - `/account` renders Administrator profile (`asdy@dailymotion.discov.com`), session security details, and quick system links.
 
 ## Known Limitations
 

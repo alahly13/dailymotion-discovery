@@ -44,7 +44,7 @@ export default function WorkspacePage() {
   );
 
   const tabClass = (active: boolean) =>
-    `min-h-10 rounded-md px-4 text-sm font-black ${active ? "bg-[var(--primary)] text-white" : "text-[var(--muted-foreground)] hover:text-[var(--foreground)]"}`;
+    `min-h-10 rounded-md px-4 text-sm font-black transition-colors ${active ? "bg-primary text-primary-foreground shadow-xs" : "text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--surface-container-low)]"}`;
 
   return (
     <div className="space-y-6">

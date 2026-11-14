@@ -106,7 +106,7 @@ export function ConnectionPanel({ version, title, status }: { version: ApiVersio
         onClick={() => void runTest()}
         disabled={testing}
         aria-busy={testing}
-        className="mt-3 min-h-11 w-full rounded-md bg-[var(--primary)] px-4 text-sm font-black text-white disabled:opacity-60"
+        className="mt-3 min-h-11 w-full rounded-md bg-primary px-4 text-sm font-black text-primary-foreground hover:opacity-95 disabled:opacity-60 cursor-pointer"
       >
         {testing ? "Authenticating & testing…" : `Authenticate & Test ${version.toUpperCase()}`}
       </button>

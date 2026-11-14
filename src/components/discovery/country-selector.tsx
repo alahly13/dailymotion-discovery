@@ -243,14 +243,14 @@ export function CountrySelector({
                     onClick={() => handleSelect(c.code)}
                     className={`flex cursor-pointer items-center justify-between rounded px-2.5 py-1.5 text-xs font-semibold transition-colors ${
                       isSelected
-                        ? "bg-[var(--primary)] text-white"
+                        ? "bg-primary text-primary-foreground font-black shadow-xs"
                         : "text-[var(--foreground)] hover:bg-[var(--surface-container-high)]"
                     }`}
                   >
                     <span>{c.name}</span>
                     <span
                       className={`font-mono text-[11px] font-black uppercase ${
-                        isSelected ? "text-white/90" : "text-[var(--muted-foreground)]"
+                        isSelected ? "text-primary-foreground/90" : "text-[var(--muted-foreground)]"
                       }`}
                     >
                       {c.code}

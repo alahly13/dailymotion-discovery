@@ -180,7 +180,7 @@ export default function StorageExplorerPage() {
             type="button"
             disabled={busy || merged.syncing || admin === false}
             onClick={() => void merged.saveAll()}
-            className="inline-flex min-h-10 items-center gap-1.5 rounded-md bg-[var(--primary)] px-4 text-xs font-black uppercase text-white disabled:opacity-50"
+            className="inline-flex min-h-10 items-center gap-1.5 rounded-md bg-primary px-4 text-xs font-black uppercase text-primary-foreground hover:opacity-90 disabled:opacity-50 cursor-pointer"
           >
             <Upload className="h-4 w-4" aria-hidden="true" />
             Save All Now ({merged.pendingCount} pending)
@@ -387,7 +387,7 @@ export default function StorageExplorerPage() {
               type="button"
               disabled={busy || admin === false || !migrationPreview?.workerConfigured}
               onClick={() => void runSupabaseMigration(false)}
-              className="min-h-9 rounded-md bg-[var(--primary)] px-3 text-xs font-black uppercase text-white disabled:opacity-50"
+              className="min-h-9 rounded-md bg-primary px-3 text-xs font-black uppercase text-primary-foreground hover:opacity-90 disabled:opacity-50 cursor-pointer"
             >
               Copy Verified Archive to R2
             </button>

@@ -413,10 +413,10 @@ export function DiscoveryLocalFilterPanel({ value, onChange, totalLoaded, filter
                   type="button"
                   aria-pressed={active}
                   onClick={() => toggleKind(entry.value)}
-                  className={`min-h-8 rounded-md border px-2.5 text-xs font-bold ${
+                  className={`min-h-8 rounded-md border px-2.5 text-xs font-bold transition-colors ${
                     active
-                      ? "border-[var(--primary)] bg-[var(--primary)] text-white"
-                      : "border-[var(--border)] bg-[var(--surface-container-low)] text-[var(--muted-foreground)]"
+                      ? "border-primary bg-primary text-primary-foreground font-black shadow-xs"
+                      : "border-[var(--border)] bg-[var(--surface-container-low)] text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
                   }`}
                 >
                   {entry.label}

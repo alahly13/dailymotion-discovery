@@ -231,7 +231,7 @@ export default function SavedPage() {
         <div className="flex flex-wrap gap-2">
           <Link
             href="/channels"
-            className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md bg-[var(--primary)] px-5 text-sm font-black text-white transition hover:bg-[var(--accent-strong)] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[var(--ring)]"
+            className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md bg-primary px-5 text-sm font-black text-primary-foreground transition hover:opacity-90 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[var(--ring)]"
           >
             Open Saved Channels
             <ArrowRight className="h-4 w-4" aria-hidden="true" />
@@ -299,7 +299,7 @@ export default function SavedPage() {
                 key={ver}
                 type="button"
                 onClick={() => setVersionFilter(ver)}
-                className={`min-h-9 rounded px-3 text-xs font-black uppercase ${versionFilter === ver ? "bg-[var(--primary)] text-white" : "text-[var(--muted-foreground)]"}`}
+                className={`min-h-9 rounded px-3 text-xs font-black uppercase ${versionFilter === ver ? "bg-primary text-primary-foreground shadow-xs" : "text-[var(--muted-foreground)] hover:text-[var(--foreground)]"}`}
               >
                 {ver}
               </button>
@@ -339,7 +339,7 @@ export default function SavedPage() {
                   onClick={() => setSelectedCollection(col.id)}
                   className={`flex w-full items-center justify-between rounded-md px-3 py-2 text-left text-xs font-bold ${
                     selectedCollection === col.id
-                      ? "bg-[var(--primary)] text-white"
+                      ? "bg-primary text-primary-foreground shadow-xs"
                       : "bg-[var(--surface-container-low)] text-[var(--foreground)] hover:bg-[var(--surface-container-high)]"
                   }`}
                 >
@@ -354,7 +354,7 @@ export default function SavedPage() {
                     onClick={() => setSelectedCollection(col.id)}
                     className={`flex flex-1 items-center justify-between rounded-md px-3 py-2 text-left text-xs font-bold ${
                       selectedCollection === col.id
-                        ? "bg-[var(--primary)] text-white"
+                        ? "bg-primary text-primary-foreground shadow-xs"
                         : "bg-[var(--surface-container-low)] text-[var(--foreground)] hover:bg-[var(--surface-container-high)]"
                     }`}
                   >

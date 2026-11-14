@@ -45,7 +45,7 @@ function TriState({ value, onChange, label }: { value: boolean | null; onChange:
             role="radio"
             aria-checked={value === v}
             onClick={() => onChange(v)}
-            className={`min-h-9 rounded px-2 text-xs font-black uppercase ${value === v ? "bg-[var(--primary)] text-white" : "text-[var(--muted-foreground)]"}`}
+            className={`min-h-9 rounded px-2 text-xs font-black uppercase ${value === v ? "bg-primary text-primary-foreground font-black shadow-xs" : "text-[var(--muted-foreground)] hover:text-[var(--foreground)]"}`}
           >
             {text}
           </button>
@@ -197,7 +197,7 @@ function ChangePasswordForm() {
       <button
         type="submit"
         disabled={loading}
-        className="min-h-10 rounded-md bg-[var(--primary)] px-4 text-xs font-black uppercase text-white hover:opacity-90 disabled:opacity-50"
+        className="min-h-10 rounded-md bg-primary px-4 text-xs font-black uppercase text-primary-foreground hover:opacity-90 disabled:opacity-50 cursor-pointer"
       >
         {loading ? "Updating..." : "Update Password"}
       </button>

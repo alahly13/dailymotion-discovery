@@ -110,7 +110,7 @@ export function ApiErrorAlert({ error, onRetry, onSwitchVersion, className = "" 
               <button
                 type="button"
                 onClick={() => onSwitchVersion("v1")}
-                className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-[var(--primary)] px-3 text-xs font-bold text-[var(--primary-foreground)] shadow-xs hover:opacity-95 transition cursor-pointer"
+                className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-primary px-3 text-xs font-bold text-primary-foreground shadow-xs hover:opacity-95 transition cursor-pointer"
               >
                 <Globe className="h-3.5 w-3.5" />
                 Switch to API v1 for Global Search

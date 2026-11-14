@@ -227,7 +227,7 @@ export default function SearchHistoryPage() {
             type="button"
             onClick={() => setVersionFilter("ALL")}
             className={`rounded px-2.5 py-1 ${
-              versionFilter === "ALL" ? "bg-[var(--primary)] text-white" : "text-[var(--muted-foreground)]"
+              versionFilter === "ALL" ? "bg-primary text-primary-foreground font-black shadow-xs" : "text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
             }`}
           >
             All ({snapshots.length})
@@ -236,7 +236,7 @@ export default function SearchHistoryPage() {
             type="button"
             onClick={() => setVersionFilter("v1")}
             className={`rounded px-2.5 py-1 ${
-              versionFilter === "v1" ? "bg-[var(--primary)] text-white" : "text-[var(--muted-foreground)]"
+              versionFilter === "v1" ? "bg-primary text-primary-foreground font-black shadow-xs" : "text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
             }`}
           >
             V1
@@ -245,7 +245,7 @@ export default function SearchHistoryPage() {
             type="button"
             onClick={() => setVersionFilter("v2")}
             className={`rounded px-2.5 py-1 ${
-              versionFilter === "v2" ? "bg-[var(--primary)] text-white" : "text-[var(--muted-foreground)]"
+              versionFilter === "v2" ? "bg-primary text-primary-foreground font-black shadow-xs" : "text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
             }`}
           >
             V2
@@ -267,7 +267,7 @@ export default function SearchHistoryPage() {
           </p>
           <Link
             href="/search"
-            className="mt-4 inline-flex min-h-9 items-center gap-1.5 rounded-lg bg-[var(--primary)] px-4 text-xs font-black text-white"
+            className="mt-4 inline-flex min-h-9 items-center gap-1.5 rounded-lg bg-primary px-4 text-xs font-black text-primary-foreground hover:opacity-90"
           >
             <Search className="h-3.5 w-3.5" />
             <span>Go to Search Workspace</span>
@@ -341,7 +341,7 @@ export default function SearchHistoryPage() {
                       <div className="mt-4 flex flex-wrap items-center gap-1.5 border-t border-[var(--border)] pt-3">
                         <Link
                           href={`/search?replay=${encodeURIComponent(snap.id)}`}
-                          className="inline-flex min-h-8 flex-1 items-center justify-center gap-1 rounded-md bg-[var(--primary)] px-2.5 text-xs font-bold text-white transition hover:opacity-90"
+                          className="inline-flex min-h-8 flex-1 items-center justify-center gap-1 rounded-md bg-primary px-2.5 text-xs font-bold text-primary-foreground transition hover:opacity-90"
                           title="Replay results completely offline with ZERO API calls"
                         >
                           <Play className="h-3 w-3" />
