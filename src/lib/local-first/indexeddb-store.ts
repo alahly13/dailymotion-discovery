@@ -429,31 +429,45 @@ export function buildLocalSavedItemRecord(
     syncStatus?: "local_only" | "pending_upload" | "uploading" | "cloud_verified" | "sync_failed";
   }
 ): LocalSavedItemRecord {
+  // Support both direct DiscoveryItem and wrapped { item: DiscoveryItem, savedAt: ... }
+  // to prevent undefined fields when migrating or saving items
+  const rawItem = (item as any)?.item ? (item as any).item : item;
   const now = new Date().toISOString();
-  const extra = (item.extra ?? {}) as Record<string, unknown>;
+  const extra = ((rawItem?.extra ?? {}) as Record<string, unknown>) || {};
   const likes = typeof extra.likes_total === "number" ? extra.likes_total : undefined;
-  const resType = classifyDiscoveryItem(item);
-  const stableId = buildStableDailymotionId(resType, item.id);
+  const resType = classifyDiscoveryItem(rawItem || item);
+  const cleanId = (rawItem?.id || (item as any)?.id || "item").toString().trim();
+  const cleanVersion = (rawItem?.apiVersion || (item as any)?.apiVersion || "v1") as "v1" | "v2";
+  const cleanKind = rawItem?.kind || (item as any)?.kind || "video";
+  const stableId = buildStableDailymotionId(resType, cleanId);
   const country = options?.country || (typeof extra.country === "string" ? extra.country : undefined);
   const category = options?.category || (typeof extra.channel === "string" ? extra.channel : undefined);
 
+  const rawSavedAt = options?.savedAt || (item as any)?.savedAt;
+  let safeSavedAt = now;
+  if (typeof rawSavedAt === "number" && !isNaN(rawSavedAt)) {
+    safeSavedAt = new Date(rawSavedAt).toISOString();
+  } else if (typeof rawSavedAt === "string" && rawSavedAt.trim() && !isNaN(new Date(rawSavedAt).getTime())) {
+    safeSavedAt = rawSavedAt;
+  }
+
   return {
-    compositeKey: discoveryCompositeKey(item.apiVersion, item.kind, item.id),
+    compositeKey: discoveryCompositeKey(cleanVersion, cleanKind, cleanId),
     stableId,
     provider: "dailymotion",
-    id: item.id,
-    apiVersion: item.apiVersion,
+    id: cleanId,
+    apiVersion: cleanVersion,
     resourceType: resType,
-    title: item.title || item.description || item.id,
-    description: item.description ?? undefined,
-    url: item.url || "",
-    thumbnail: item.thumbnail ?? undefined,
-    ownerName: item.ownerName ?? undefined,
-    ownerId: item.ownerId ?? undefined,
-    duration: item.duration ?? undefined,
-    viewsTotal: item.views ?? undefined,
+    title: rawItem?.title || rawItem?.description || cleanId,
+    description: rawItem?.description ?? undefined,
+    url: rawItem?.url || "",
+    thumbnail: rawItem?.thumbnail ?? undefined,
+    ownerName: rawItem?.ownerName ?? undefined,
+    ownerId: rawItem?.ownerId ?? undefined,
+    duration: typeof rawItem?.duration === "number" ? rawItem.duration : undefined,
+    viewsTotal: typeof rawItem?.views === "number" ? rawItem.views : undefined,
     likesTotal: likes,
-    createdTime: item.createdAt ?? undefined,
+    createdTime: rawItem?.createdAt ?? undefined,
     explicit: Boolean(extra.explicit ?? extra.is_explicit),
     isForKids: Boolean(extra.is_created_for_kids ?? extra.is_for_kids),
     isFavorite: options?.isFavorite ?? false,
@@ -462,18 +476,18 @@ export function buildLocalSavedItemRecord(
     sourcePage: options?.sourcePage,
     sourceQuery: options?.sourceQuery,
     sourceFilters: options?.sourceFilters,
+    savedAt: safeSavedAt,
+    updatedAt: now,
     syncStatus: options?.syncStatus || "local_only",
     collectionIds: options?.collectionIds || [],
-    tags: options?.tags ?? item.tags ?? [],
+    tags: options?.tags ?? rawItem?.tags ?? [],
     note: options?.note,
-    snapshot: item,
-    provenance: item.provenance || createDailymotionProvenance({
-      apiVersion: item.apiVersion,
+    snapshot: rawItem,
+    provenance: rawItem?.provenance || createDailymotionProvenance({
+      apiVersion: cleanVersion,
       resourceType: resType,
-      resourceId: item.id,
+      resourceId: cleanId,
     }),
-    savedAt: options?.savedAt ?? now,
-    updatedAt: now,
   };
 }
 
@@ -517,10 +531,19 @@ export async function migrateLegacyLocalStorageIfNeeded(db: LocalStoreAdapter = 
 
       const st = parsed?.state;
       if (st?.savedItems?.length) {
-        const recs = st.savedItems.map((entry) =>
-          buildLocalSavedItemRecord(entry, { tags: entry.tags ?? [], savedAt: entry.savedAt })
-        );
-        await db.putMany(LOCAL_STORES.SAVED_ITEMS, recs);
+        const recs = st.savedItems
+          .map((entry: any) => {
+            const raw = entry?.item ? entry.item : entry;
+            if (!raw || (!raw.id && !entry.id)) return null;
+            return buildLocalSavedItemRecord(entry, {
+              tags: entry.tags ?? raw.tags ?? [],
+              savedAt: typeof entry.savedAt === "number" ? new Date(entry.savedAt).toISOString() : entry.savedAt,
+            });
+          })
+          .filter(Boolean) as LocalSavedItemRecord[];
+        if (recs.length > 0) {
+          await db.putMany(LOCAL_STORES.SAVED_ITEMS, recs);
+        }
       }
 
       if (st?.presets?.length) {

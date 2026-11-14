@@ -37,8 +37,19 @@ type ViewMode = "grid" | "list";
 const compactNumber = new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 });
 const dateFormatter = new Intl.DateTimeFormat("en", { month: "short", day: "numeric", year: "numeric" });
 
+function safeFormatDate(isoOrMs?: string | number | null): string {
+  if (!isoOrMs) return "Recently";
+  try {
+    const d = new Date(isoOrMs);
+    if (isNaN(d.getTime())) return "Recently";
+    return dateFormatter.format(d);
+  } catch {
+    return "Recently";
+  }
+}
+
 function formatDuration(seconds?: number): string | null {
-  if (seconds === undefined || seconds === null) return null;
+  if (seconds === undefined || seconds === null || isNaN(seconds)) return null;
   const hrs = Math.floor(seconds / 3600);
   const mins = Math.floor((seconds % 3600) / 60);
   const secs = seconds % 60;
@@ -93,10 +104,12 @@ export default function SavedItemsPage() {
     [savedItems]
   );
 
-  // Filter & sort pipeline
+  // Filter & sort pipeline with defensive guards against corrupted or legacy records
   const filteredItems = useMemo(() => {
-    return savedItems
+    return (savedItems || [])
       .filter((item) => {
+        if (!item || (!item.id && !item.compositeKey)) return false;
+
         // Tab filter
         if (activeTab === "videos" && item.resourceType !== "VIDEO" && item.resourceType !== "LIVESTREAM") return false;
         if (activeTab === "channels" && item.resourceType !== "CHANNEL" && item.resourceType !== "USER" && item.resourceType !== "PROFILE") return false;
@@ -134,10 +147,16 @@ export default function SavedItemsPage() {
       })
       .sort((a, b) => {
         switch (sortBy) {
-          case "newest":
-            return new Date(b.savedAt).getTime() - new Date(a.savedAt).getTime();
-          case "oldest":
-            return new Date(a.savedAt).getTime() - new Date(b.savedAt).getTime();
+          case "newest": {
+            const timeB = b.savedAt ? new Date(b.savedAt).getTime() : 0;
+            const timeA = a.savedAt ? new Date(a.savedAt).getTime() : 0;
+            return (isNaN(timeB) ? 0 : timeB) - (isNaN(timeA) ? 0 : timeA);
+          }
+          case "oldest": {
+            const timeB = b.savedAt ? new Date(b.savedAt).getTime() : 0;
+            const timeA = a.savedAt ? new Date(a.savedAt).getTime() : 0;
+            return (isNaN(timeA) ? 0 : timeA) - (isNaN(timeB) ? 0 : timeB);
+          }
           case "title_asc":
             return (a.title || "").localeCompare(b.title || "");
           case "title_desc":
@@ -654,7 +673,7 @@ export default function SavedItemsPage() {
                     {item.viewsTotal !== undefined && item.viewsTotal !== null && (
                       <span>{compactNumber.format(item.viewsTotal)} views</span>
                     )}
-                    <span>Saved {dateFormatter.format(new Date(item.savedAt))}</span>
+                    <span>Saved {safeFormatDate(item.savedAt)}</span>
                   </div>
 
                   {/* Action Controls */}
@@ -756,7 +775,7 @@ export default function SavedItemsPage() {
                     </h4>
 
                     <p className="mt-0.5 text-xs text-[var(--muted-foreground)]">
-                      {[item.ownerName, item.viewsTotal ? `${compactNumber.format(item.viewsTotal)} views` : null, `Saved ${dateFormatter.format(new Date(item.savedAt))}`]
+                      {[item.ownerName, item.viewsTotal ? `${compactNumber.format(item.viewsTotal)} views` : null, `Saved ${safeFormatDate(item.savedAt)}`]
                         .filter(Boolean)
                         .join(" · ")}
                     </p>

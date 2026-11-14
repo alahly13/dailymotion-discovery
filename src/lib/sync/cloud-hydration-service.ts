@@ -120,7 +120,9 @@ export async function readLocalWorkspaceSnapshot(db: LocalStoreAdapter = getLoca
   ]);
 
   return {
-    savedItems: [...savedItems].sort((a, b) => (b.savedAt || "").localeCompare(a.savedAt || "")),
+    savedItems: [...savedItems]
+      .filter((item): item is LocalSavedItemRecord => Boolean(item && (item.id || item.compositeKey)))
+      .sort((a, b) => (b.savedAt || "").localeCompare(a.savedAt || "")),
     collections: [...collections].sort((a, b) => (b.updatedAt || "").localeCompare(a.updatedAt || "")),
     collectionItems: [...collectionItems].sort((a, b) => a.position - b.position),
     savedSearches: [...savedSearches].sort((a, b) => {

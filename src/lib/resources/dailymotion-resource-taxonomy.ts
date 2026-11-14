@@ -98,11 +98,18 @@ export function toDiscoveryKind(value: string | null | undefined): DiscoveryItem
 
 /**
  * Canonical Dailymotion web URL fallback when an API field omit url/video_url.
+ * Fully defensive against missing/undefined/null id or explicitUrl to prevent client crashes.
  */
-export function canonicalDailymotionUrl(kind: DiscoveryItemKind, id: string, explicitUrl?: string | null): string | null {
-  if (explicitUrl && explicitUrl.trim()) return explicitUrl.trim();
-  const cleanId = id.trim();
-  if (!cleanId) return null;
+export function canonicalDailymotionUrl(
+  kind: DiscoveryItemKind,
+  id?: string | null,
+  explicitUrl?: string | null
+): string | null {
+  if (explicitUrl && typeof explicitUrl === "string" && explicitUrl.trim()) {
+    return explicitUrl.trim();
+  }
+  const cleanId = (id ?? "").toString().trim();
+  if (!cleanId || cleanId === "undefined" || cleanId === "null") return null;
   switch (kind) {
     case "video":
     case "live":
@@ -123,5 +130,6 @@ export function canonicalDailymotionUrl(kind: DiscoveryItemKind, id: string, exp
  * tracked distinctly while sharing the same canonical provider ID.
  */
 export function discoveryCompositeKey(apiVersion: ApiVersion, kind: DiscoveryItemKind, id: string): string {
-  return `${apiVersion}:${kind}:${id}`;
+  const cleanId = (id ?? "").toString().trim() || "unknown";
+  return `${apiVersion || "v1"}:${kind || "video"}:${cleanId}`;
 }

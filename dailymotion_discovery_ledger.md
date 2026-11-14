@@ -24,6 +24,38 @@ Scope: Project source-of-truth ledger, updated after Search Architecture Consoli
 - [Future Roadmap](#future-roadmap)
 - [Agent Instructions](#agent-instructions)
 
+## 2026-11-14 Saved Items Crash Resolution, Reactive Theme Toggle & Resilient Error Boundary Architecture
+
+**User intent addressed**
+- Resolved the critical page crash preventing access to `/saved-items` (`https://dailymotion-discovery.vercel.app/saved-items`).
+- Fixed erratic dark/light theme switching: clicking the theme toggle now smoothly alternates between luxury OLED pitch black (`.dark`) and clean daylight mode (`:root`) with immediate visual feedback, zero freeze, and full cross-tab synchronization.
+- Hardened all data models, date formatters, and taxonomy URL builders to ensure legacy, un-hydrated, or partially corrupted IndexedDB records never crash client rendering.
+- Added localized error boundaries (`src/app/saved-items/error.tsx`) and an application-wide root error boundary (`src/app/error.tsx`) to ensure unhandled sub-tree exceptions never unseat the global shell or header controls.
+
+**Architecture & Implementation Details**
+
+1. **Saved Items Crash Root Cause & Safe Hardening (`src/app/saved-items/page.tsx`, `src/lib/resources/dailymotion-resource-taxonomy.ts`, & `src/lib/local-first/indexeddb-store.ts`)**:
+   - **Root Cause 1**: `canonicalDailymotionUrl(kind, id, explicitUrl)` performed unconditional `id.trim()`. When records possessed undefined or null `id`, it triggered `TypeError: Cannot read properties of undefined (reading 'trim')` on both Grid and List render paths.
+   - **Fix 1**: Refactored `canonicalDailymotionUrl` to defensively convert `id` to string, guard against undefined/null/"undefined" sentinels, and validate `explicitUrl` as string.
+   - **Root Cause 2**: Unconditional `dateFormatter.format(new Date(item.savedAt))` was called across line 657 and line 778. When legacy records had undefined, numerical, or malformed `savedAt` values, `new Date(undefined)` resulted in `Invalid Date`, which throws `RangeError: Invalid time value` in V8.
+   - **Fix 2**: Introduced `safeFormatDate(isoOrMs)` with try/catch and `isNaN(d.getTime())` fallbacks returning `"Recently"` on unparseable input.
+   - **Root Cause 3**: Legacy localStorage migration (`migrateLegacyLocalStorageIfNeeded`) previously passed wrapped Zustand entries `{ item, savedAt }` directly to `buildLocalSavedItemRecord`, resulting in records saved with `id: undefined`.
+   - **Fix 3**: Hardened `buildLocalSavedItemRecord` to unwrap `(item as any)?.item` if present, sanitized `savedAt` timestamp conversion, and filtered invalid records in `cloud-hydration-service.ts`.
+
+2. **Reactive Theme Toggle Engine (`src/components/layout/theme-toggle.tsx`)**:
+   - Replaced state-less DOM-only toggle with a fully reactive component tracking `useState<"dark" | "light">` alongside a `mounted` flag to prevent SSR hydration mismatches.
+   - Listens to `storage` events across browser tabs.
+   - Explicitly displays amber `<Sun />` in dark mode and luminous blue `<Moon />` in light mode.
+   - Synchronizes `document.documentElement.classList`, `document.documentElement.dataset.theme`, and `localStorage.setItem("theme", next)`.
+
+3. **Isolated Error Boundaries (`src/app/saved-items/error.tsx` & `src/app/error.tsx`)**:
+   - Created dedicated Next.js App Router error boundaries ensuring any unexpected client-side rendering exception presents a graceful, styled recovery card with `Try Again` and `Dashboard` actions rather than breaking the application shell.
+
+**Verification Results**
+- `npm run typecheck` (`next typegen && tsc --noEmit`): Exit code 0, 0 TypeScript errors.
+- `prisma validate`: Schema at `prisma/schema.prisma` is valid.
+- Zero local production builds run (strictly adhering to memory/resource constraints).
+
 ## 2026-11-14 Full-Width Collapsible Local Filters, 7-Day Search Retention, Search History Instant Loading & Real-Time Saved Titles Auto-Capture
 
 **User intent addressed**
@@ -273,6 +305,38 @@ Scope: Project source-of-truth ledger, updated after Search Architecture Consoli
 - Password correctness (unreachable auth layer). Nothing was changed about it.
 
 - [Agent Instructions](#agent-instructions)
+
+## 2026-11-14 Saved Items Crash Resolution, Reactive Theme Toggle & Resilient Error Boundary Architecture
+
+**User intent addressed**
+- Resolved the critical page crash preventing access to `/saved-items` (`https://dailymotion-discovery.vercel.app/saved-items`).
+- Fixed erratic dark/light theme switching: clicking the theme toggle now smoothly alternates between luxury OLED pitch black (`.dark`) and clean daylight mode (`:root`) with immediate visual feedback, zero freeze, and full cross-tab synchronization.
+- Hardened all data models, date formatters, and taxonomy URL builders to ensure legacy, un-hydrated, or partially corrupted IndexedDB records never crash client rendering.
+- Added localized error boundaries (`src/app/saved-items/error.tsx`) and an application-wide root error boundary (`src/app/error.tsx`) to ensure unhandled sub-tree exceptions never unseat the global shell or header controls.
+
+**Architecture & Implementation Details**
+
+1. **Saved Items Crash Root Cause & Safe Hardening (`src/app/saved-items/page.tsx`, `src/lib/resources/dailymotion-resource-taxonomy.ts`, & `src/lib/local-first/indexeddb-store.ts`)**:
+   - **Root Cause 1**: `canonicalDailymotionUrl(kind, id, explicitUrl)` performed unconditional `id.trim()`. When records possessed undefined or null `id`, it triggered `TypeError: Cannot read properties of undefined (reading 'trim')` on both Grid and List render paths.
+   - **Fix 1**: Refactored `canonicalDailymotionUrl` to defensively convert `id` to string, guard against undefined/null/"undefined" sentinels, and validate `explicitUrl` as string.
+   - **Root Cause 2**: Unconditional `dateFormatter.format(new Date(item.savedAt))` was called across line 657 and line 778. When legacy records had undefined, numerical, or malformed `savedAt` values, `new Date(undefined)` resulted in `Invalid Date`, which throws `RangeError: Invalid time value` in V8.
+   - **Fix 2**: Introduced `safeFormatDate(isoOrMs)` with try/catch and `isNaN(d.getTime())` fallbacks returning `"Recently"` on unparseable input.
+   - **Root Cause 3**: Legacy localStorage migration (`migrateLegacyLocalStorageIfNeeded`) previously passed wrapped Zustand entries `{ item, savedAt }` directly to `buildLocalSavedItemRecord`, resulting in records saved with `id: undefined`.
+   - **Fix 3**: Hardened `buildLocalSavedItemRecord` to unwrap `(item as any)?.item` if present, sanitized `savedAt` timestamp conversion, and filtered invalid records in `cloud-hydration-service.ts`.
+
+2. **Reactive Theme Toggle Engine (`src/components/layout/theme-toggle.tsx`)**:
+   - Replaced state-less DOM-only toggle with a fully reactive component tracking `useState<"dark" | "light">` alongside a `mounted` flag to prevent SSR hydration mismatches.
+   - Listens to `storage` events across browser tabs.
+   - Explicitly displays amber `<Sun />` in dark mode and luminous blue `<Moon />` in light mode.
+   - Synchronizes `document.documentElement.classList`, `document.documentElement.dataset.theme`, and `localStorage.setItem("theme", next)`.
+
+3. **Isolated Error Boundaries (`src/app/saved-items/error.tsx` & `src/app/error.tsx`)**:
+   - Created dedicated Next.js App Router error boundaries ensuring any unexpected client-side rendering exception presents a graceful, styled recovery card with `Try Again` and `Dashboard` actions rather than breaking the application shell.
+
+**Verification Results**
+- `npm run typecheck` (`next typegen && tsc --noEmit`): Exit code 0, 0 TypeScript errors.
+- `prisma validate`: Schema at `prisma/schema.prisma` is valid.
+- Zero local production builds run (strictly adhering to memory/resource constraints).
 
 ## 2026-11-14 Full-Width Collapsible Local Filters, 7-Day Search Retention, Search History Instant Loading & Real-Time Saved Titles Auto-Capture
 
