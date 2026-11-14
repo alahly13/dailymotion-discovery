@@ -2187,16 +2187,37 @@ CONFIRM_DB_APPLY=true npm run db:apply
   - Automatic IndexedDB search snapshot capture via `captureSearchSnapshot` with ZERO media binary downloads.
   - Raw JSON inspection drawer (`RawJsonDrawer`).
 
-### 4. Dailymotion API Capability Matrix Documentation
-- Authored `docs/API_CAPABILITY_MATRIX.md` providing an authoritative comparison between Legacy API (v1) and Modern REST API (v2):
-  - Base URLs, token endpoints, lifetimes, authentication requirements.
-  - Resource-by-resource capability comparison (Videos, Channels, Playlists, Livestreams).
+### 4. Dailymotion API Capability & Compatibility Documentation
+- Authored `docs/API_CAPABILITY_MATRIX.md` and `docs/API_COMPATIBILITY_MATRIX.md` providing an authoritative comparison between Legacy API (v1) and Modern REST API (v2):
+  - Base URLs, OAuth token endpoints, lifetimes, authentication requirements, and scope declarations.
+  - Resource-by-resource compatibility matrix (Videos, Channels/Profiles, Users, Playlists, Livestreams).
+  - Endpoint URLs, HTTP methods, scopes, supported query parameters, metadata fields, pagination models, and known limitations.
   - Link Explorer resolution paths and error recovery strategies.
 
-### 5. Verification Evidence
+### 5. Centralized Error Handling & Diagnostics Architecture
+- Implemented `src/lib/dailymotion/errors/` module:
+  - `types.ts`: 44 strongly-typed error codes (`DailymotionErrorCode`), 4 categories (`auth`, `http_provider`, `network`, `integration`), and unified `DailymotionNormalizedError` envelope.
+  - `redact.ts`: Recursive secret, token, JWT, and URL parameter redaction to prevent accidental credential leakage in logs or client envelopes.
+  - `retry.ts`: Bounded exponential backoff with full jitter, `Retry-After` header parsing, and retry eligibility rules.
+  - `normalizer.ts`: Normalizes provider error payloads (V1/V2 envelopes, HTTP status codes, network/fetch exceptions) into safe, user-friendly diagnostic objects with actionable remedies.
+  - `logger.ts`: Server-side structured logger with automatic redaction and correlation IDs.
+  - `<ApiErrorAlert>` component: Accessible WCAG 2.2 AA alert with category/code badges, user-friendly guidance, retry action, settings shortcuts, and collapsible technical diagnostics.
+
+### 6. Dashboard Redesign & Button Contrast System (WCAG 2.2 AA)
+- **Dashboard Redesign (`src/app/page.tsx`)**:
+  - Removed duplicate search input from the Dashboard page completely.
+  - Reorganized page into a clean, modern overview with: Hero & Architecture Status Bar, Real-time Activity Metrics (Saved items, collections, presets, snapshots, V1/V2 query counters), 6 Core Workspace cards, Quick Configuration/Storage cards, and Platform Compliance & Safety cards.
+- **Button Contrast Overhaul (WCAG 2.2 AA >= 4.5:1)**:
+  - Fixed low-contrast light-on-light bugs across the application caused by `text-white` on `bg-[var(--primary)]` (which evaluates to `oklch(0.922 0 0)` in dark mode).
+  - Migrated buttons, tabs, segmented controls, filter pills, and links across all workspaces to use `bg-primary text-primary-foreground`, yielding >= 13:1 contrast in dark mode and >= 14:1 contrast in light mode.
+  - Updated shared button primitive (`src/components/ui/button.tsx`) and verified all variants (`primary`, `secondary`, `outline`, `ghost`, `destructive`, `success`, `gold`, `info`).
+
+### 7. Verification Evidence
 - TypeScript compilation: `node ./node_modules/typescript/bin/tsc --noEmit` exited 0 (clean, zero errors across entire codebase).
-- Vitest test suite: 32/32 test files passed, 150/150 tests passed (`npm test`).
-- Environment preflight: `node scripts/validate-all-env.mjs` exited 0 (clean).
+- Vitest test suite: **34/34 test files passed, 166/166 tests passed (`npm test`)**, including:
+  - `src/lib/dailymotion/errors/__tests__/errors.test.ts` (11/11 tests passed).
+  - `src/lib/discovery/__tests__/api-separation.test.ts` (5/5 tests passed).
+- Environment preflight: `node scripts/validate-all-env.mjs` exited 0 (clean, zero secrets exposed).
 - Database preflight: `npm run db:validate` exited 0 (clean).
 - Git security check: `git check-ignore .env .dev.vars .prod.vars` confirmed 100% ignored. Zero secrets exposed.
 - Vercel Production Deployment: Successfully deployed to production (`dpl_Fq7kXpWn4yVvRhJy2npN5`), deployment URL `https://dailymotion-discovery-rhjy2npn5-alahly13s-projects.vercel.app`, alias `https://dailymotion-discovery.vercel.app`. Status **`● Ready`** (duration 37s). Turbopack build cleanly emitted 225+ static/dynamic output items without CSR bailout.
