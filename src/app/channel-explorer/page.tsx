@@ -111,7 +111,7 @@ export default function ChannelExplorerPage() {
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    const source = params.get("source");
+    const source = params.get("source") || params.get("channel") || params.get("c");
     const resumeJobId = params.get("resumeJobId");
     if (!source && !resumeJobId) return;
 

@@ -132,6 +132,7 @@ const NUMERIC_VARS = {
   TEMP_MANIFEST_TTL_HOURS: { min: 1, max: 720 },
   AI_MANIFEST_MAX_ITEMS: { min: 1, max: 100 },
   AI_MANIFEST_MAX_CHARS: { min: 500, max: 50000 },
+  NEXT_PUBLIC_SEARCH_HISTORY_TTL_SECONDS: { min: 60, max: 31536000 },
 };
 
 for (const [name, bounds] of Object.entries(NUMERIC_VARS)) {

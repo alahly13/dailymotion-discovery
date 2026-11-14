@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import {
   Archive,
   ArrowUpRight,
@@ -10,32 +10,36 @@ import {
   Bot,
   Compass,
   Database,
+  ExternalLink,
   FileText,
   FlaskConical,
+  History,
   LayoutDashboard,
   Library,
+  Menu,
+  PanelLeftClose,
+  PanelLeftOpen,
   Radio,
   Search,
   Settings,
   Tv,
   UserRound,
   UsersRound,
-  ExternalLink,
+  X,
 } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
 import { ApiStatusBar } from "@/components/discovery/api-status-bar";
 import { ThemeToggle } from "./theme-toggle";
 
-// Sidebar navigation groups. Dashboard first, then the paired v1/v2 discovery
-// workspaces (the two versions stay adjacent), then compare/capabilities,
-// workspace, and the pre-existing library pages (preserved, not removed).
-// Future agents: add new discovery pages inside their version pair; keep
-// Dashboard first and the external YouTube link last.
+// Navigation groups: Dashboard overview, paired v1/v2 discovery workspaces,
+// compare/capabilities, workspace tools (including search history and saved items),
+// and deep channel/content exploration libraries.
 const groups: { label: string; links: { label: string; href: string; icon: typeof Search }[] }[] = [
   { label: "Overview", links: [{ label: "Dashboard", href: "/", icon: LayoutDashboard }] },
   {
     label: "General Search",
     links: [
+      { label: "Unified Search", href: "/search", icon: Search },
       { label: "General v1", href: "/general-v1", icon: Search },
       { label: "General v2", href: "/general-v2", icon: Search },
     ],
@@ -48,8 +52,9 @@ const groups: { label: string; links: { label: string; href: string; icon: typeo
     ],
   },
   {
-    label: "Channels",
+    label: "Channels & Explorers",
     links: [
+      { label: "Channel Explorer", href: "/channel-explorer", icon: Compass },
       { label: "Channels v1", href: "/channels-v1", icon: Compass },
       { label: "Channels v2", href: "/channels-v2", icon: Compass },
     ],
@@ -62,52 +67,41 @@ const groups: { label: string; links: { label: string; href: string; icon: typeo
     ],
   },
   {
-    label: "Users",
+    label: "Users & Profiles",
     links: [
       { label: "Users v1", href: "/users-v1", icon: UsersRound },
       { label: "Users v2", href: "/users-v2", icon: UserRound },
     ],
   },
   {
-    label: "Live",
+    label: "Live Streams",
     links: [
       { label: "Live v1", href: "/live-v1", icon: Radio },
       { label: "Live v2", href: "/live-v2", icon: Radio },
     ],
   },
   {
-    label: "Compare",
+    label: "Intelligence & Comparison",
     links: [
+      { label: "AI Search", href: "/ai-search", icon: Bot },
       { label: "Compare v1/v2", href: "/compare", icon: FlaskConical },
       { label: "Capabilities", href: "/capabilities", icon: FileText },
     ],
   },
   {
-    label: "Workspace",
+    label: "Workspace & Persistence",
     links: [
       { label: "Saved Items", href: "/saved-items", icon: BookmarkCheck },
-      { label: "History & Saved", href: "/workspace", icon: Archive },
+      { label: "Search History", href: "/search-history", icon: History },
       { label: "Collections", href: "/collections", icon: Library },
       { label: "Saved Searches", href: "/saved-searches", icon: Search },
-      { label: "Search History", href: "/history", icon: Database },
       { label: "Storage & R2", href: "/storage", icon: Database },
+      { label: "History & Saved", href: "/workspace", icon: Archive },
       { label: "Settings", href: "/settings", icon: Settings },
       { label: "API Docs", href: "/docs", icon: FileText },
     ],
   },
-  {
-    label: "Library",
-    links: [
-      { label: "Channel Explorer", href: "/channel-explorer", icon: Compass },
-      { label: "Channels", href: "/channels", icon: Database },
-      { label: "Search", href: "/search", icon: Search },
-      { label: "AI Search", href: "/ai-search", icon: Bot },
-      { label: "Saved / Library", href: "/saved", icon: Archive },
-    ],
-  },
 ];
-
-const flatLinks = groups.flatMap((group) => group.links);
 
 function isActivePath(pathname: string, href: string) {
   if (href === "/") return pathname === "/";
@@ -116,45 +110,92 @@ function isActivePath(pathname: string, href: string) {
 
 function BrandMark({ size }: { size: "md" | "sm" }) {
   return (
-    // Dailymotion brand asset (public/dailymotion-icon.svg) as the app logo.
     // eslint-disable-next-line @next/next/no-img-element
     <img
       src="/dailymotion-icon.svg"
       alt="Dailymotion Discovery"
-      className={size === "md" ? "h-10 w-10 rounded-md" : "h-9 w-9 rounded-md"}
+      className={size === "md" ? "h-9 w-9 rounded-md" : "h-7 w-7 rounded-md"}
     />
   );
 }
 
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [mounted, setMounted] = useState(false);
+
+  // Restore sidebar collapse state from localStorage on client mount
+  useEffect(() => {
+    setMounted(true);
+    try {
+      const saved = window.localStorage.getItem("dm_sidebar_open");
+      if (saved !== null) {
+        setIsSidebarOpen(saved === "true");
+      }
+    } catch {
+      // Fallback to default open
+    }
+  }, []);
+
+  const toggleSidebar = () => {
+    setIsSidebarOpen((prev) => {
+      const next = !prev;
+      try {
+        window.localStorage.setItem("dm_sidebar_open", String(next));
+      } catch {
+        // Non-fatal
+      }
+      return next;
+    });
+  };
+
+  // Close mobile drawer on route navigation
+  useEffect(() => {
+    setMobileMenuOpen(false);
+  }, [pathname]);
+
+  const isOpen = mounted ? isSidebarOpen : true;
 
   return (
-    <div className="min-h-screen text-[var(--foreground)] lg:grid lg:grid-cols-[17rem_minmax(0,1fr)]">
-      {/* Desktop navigation owns the persistent research-terminal frame. Keep it
-          outside page content so route screens can stay focused on real data. */}
-      <aside className="hidden border-r border-[var(--border)] bg-[var(--surface-container-low)]/96 lg:sticky lg:top-0 lg:flex lg:h-screen lg:flex-col">
-        <div className="border-b border-[var(--border)] px-5 py-5">
-          <Link href="/" className="group flex items-center gap-3">
+    <div className="min-h-screen bg-[var(--background)] text-[var(--foreground)] overflow-x-hidden">
+      {/* Desktop Persistent Sidebar */}
+      <aside
+        className={cn(
+          "fixed inset-y-0 left-0 z-40 hidden w-64 border-r border-[var(--border)] bg-[var(--surface-container-low)]/98 p-4 lg:flex lg:flex-col transition-transform duration-300 ease-in-out",
+          isOpen ? "translate-x-0" : "-translate-x-full"
+        )}
+      >
+        <div className="mb-4 flex items-center justify-between gap-3 border-b border-[var(--border)] pb-3">
+          <Link href="/" className="group flex items-center gap-2.5 min-w-0">
             <BrandMark size="md" />
-            <span className="min-w-0">
-              <span className="block truncate text-base font-black tracking-tight text-[var(--foreground)]">
-                Dailymotion Discovery
+            <div className="min-w-0">
+              <span className="block truncate text-sm font-black tracking-tight text-[var(--foreground)]">
+                Dailymotion
               </span>
-              <span className="block truncate text-xs font-bold uppercase text-[var(--muted-foreground)]">
-                Dual-API Terminal
+              <span className="block truncate text-[10px] font-bold uppercase tracking-wider text-[var(--muted-foreground)]">
+                Discovery Terminal
               </span>
-            </span>
+            </div>
           </Link>
+          <button
+            type="button"
+            onClick={toggleSidebar}
+            className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-[var(--border)] bg-[var(--surface)] text-[var(--muted-foreground)] transition hover:bg-[var(--surface-container-high)] hover:text-[var(--foreground)] cursor-pointer"
+            title="Hide Navbar (Collapse sidebar)"
+            aria-label="Hide Navbar"
+          >
+            <PanelLeftClose className="h-4 w-4" />
+          </button>
         </div>
 
-        <nav className="flex-1 space-y-4 overflow-y-auto px-3 py-4" aria-label="Primary">
+        <nav className="flex-1 space-y-4 overflow-y-auto pr-1" aria-label="Primary Desktop Navigation">
           {groups.map((group) => (
             <div key={group.label}>
-              <p className="px-3 pb-1 text-[10px] font-black uppercase tracking-[0.18em] text-[var(--muted-foreground)]">
+              <p className="px-2 pb-1 text-[10px] font-black uppercase tracking-[0.16em] text-[var(--muted-foreground)]">
                 {group.label}
               </p>
-              <div className="space-y-1">
+              <div className="space-y-0.5">
                 {group.links.map(({ label, href, icon: Icon }) => {
                   const active = isActivePath(pathname, href);
                   return (
@@ -162,14 +203,20 @@ export function AppShell({ children }: { children: ReactNode }) {
                       key={href}
                       href={href}
                       className={cn(
-                        "group flex items-center gap-3 rounded-md border border-transparent px-3 py-2 text-sm font-bold transition focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[var(--ring)]",
+                        "group flex items-center gap-2.5 rounded-md border border-transparent px-2.5 py-1.5 text-xs font-bold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)]",
                         active
-                          ? "border-[color-mix(in_srgb,var(--primary)_34%,transparent)] bg-[color-mix(in_srgb,var(--primary)_13%,transparent)] text-[var(--foreground)]"
+                          ? "border-[color-mix(in_srgb,var(--primary)_34%,transparent)] bg-[color-mix(in_srgb,var(--primary)_14%,transparent)] text-[var(--foreground)]"
                           : "text-[var(--muted-foreground)] hover:bg-[var(--surface-container-high)] hover:text-[var(--foreground)]"
                       )}
                     >
-                      <Icon className={cn("h-4 w-4", active ? "text-[var(--primary)]" : "text-[var(--muted-foreground)] group-hover:text-[var(--primary)]")} aria-hidden="true" />
-                      <span>{label}</span>
+                      <Icon
+                        className={cn(
+                          "h-3.5 w-3.5 shrink-0",
+                          active ? "text-[var(--primary)]" : "text-[var(--muted-foreground)] group-hover:text-[var(--primary)]"
+                        )}
+                        aria-hidden="true"
+                      />
+                      <span className="truncate">{label}</span>
                     </Link>
                   );
                 })}
@@ -177,98 +224,184 @@ export function AppShell({ children }: { children: ReactNode }) {
             </div>
           ))}
 
-          {/* Companion reference project (external, safe new-tab link). */}
-          <div>
-            <p className="px-3 pb-1 text-[10px] font-black uppercase tracking-[0.18em] text-[var(--muted-foreground)]">
-              Reference
+          {/* Reference Companion Project */}
+          <div className="pt-2">
+            <p className="px-2 pb-1 text-[10px] font-black uppercase tracking-[0.16em] text-[var(--muted-foreground)]">
+              Reference Companion
             </p>
             <a
               href="https://youtube-discovery.vercel.app/"
               target="_blank"
               rel="noreferrer noopener"
-              className="group flex items-center gap-3 rounded-md border border-transparent px-3 py-2 text-sm font-bold text-[var(--muted-foreground)] transition hover:bg-[var(--surface-container-high)] hover:text-[var(--foreground)]"
+              className="group flex items-center gap-2.5 rounded-md border border-transparent px-2.5 py-1.5 text-xs font-bold text-[var(--muted-foreground)] transition hover:bg-[var(--surface-container-high)] hover:text-[var(--foreground)]"
             >
-              <ExternalLink className="h-4 w-4 text-[var(--muted-foreground)] group-hover:text-[var(--primary)]" aria-hidden="true" />
-              <span>YouTube Discovery</span>
-              <ArrowUpRight className="h-3.5 w-3.5" aria-hidden="true" />
+              <ExternalLink className="h-3.5 w-3.5 shrink-0 text-[var(--muted-foreground)] group-hover:text-[var(--primary)]" />
+              <span className="truncate">YouTube Discovery</span>
+              <ArrowUpRight className="ml-auto h-3 w-3 shrink-0 opacity-60" />
             </a>
           </div>
         </nav>
 
-        <div className="border-t border-[var(--border)] p-4">
-          <div className="panel-muted p-3 text-xs leading-5 text-[var(--muted-foreground)]">
-            <p className="font-black uppercase text-[var(--foreground)]">Metadata only</p>
-            <p className="mt-1">Public v1 discovery plus authenticated v2 workspaces. No downloading or rehosting.</p>
-          </div>
+        <div className="mt-auto border-t border-[var(--border)] pt-3 text-[11px] text-[var(--muted-foreground)]">
+          <p className="font-semibold text-[var(--foreground)]">Metadata Research Only</p>
+          <p className="text-[10px] leading-4 text-[var(--muted-foreground)]">
+            Dailymotion V1/V2 APIs. No binary downloads.
+          </p>
         </div>
       </aside>
 
-      <div className="min-w-0">
-        {/* Mobile/tablet top navigation collapses the sidebar into scrollable
-            chips and keeps the command actions reachable without horizontal overflow. */}
-        <header className="sticky top-0 z-40 border-b border-[var(--border)] bg-[var(--surface)]/88 backdrop-blur-xl">
-          <div className="mx-auto flex max-w-[1500px] flex-col gap-3 px-4 py-3 lg:px-7">
-            <div className="flex items-center justify-between gap-3">
-              <Link href="/" className="flex min-w-0 items-center gap-3 lg:hidden">
+      {/* Mobile Drawer Navigation */}
+      {mobileMenuOpen && (
+        <div className="fixed inset-0 z-50 flex lg:hidden">
+          <div
+            className="fixed inset-0 bg-black/60 backdrop-blur-xs transition-opacity"
+            onClick={() => setMobileMenuOpen(false)}
+          />
+          <div className="relative flex w-4/5 max-w-xs flex-col border-r border-[var(--border)] bg-[var(--surface)] p-4 shadow-2xl z-10">
+            <div className="mb-4 flex items-center justify-between border-b border-[var(--border)] pb-3">
+              <div className="flex items-center gap-2.5">
                 <BrandMark size="sm" />
-                <span className="min-w-0">
-                  <span className="block truncate text-sm font-black">Dailymotion Discovery</span>
-                  <span className="block truncate text-[11px] font-bold uppercase text-[var(--muted-foreground)]">Dual-API Terminal</span>
-                </span>
-              </Link>
-
-              <div className="hidden min-w-0 items-center gap-3 lg:flex">
-                <div className="terminal-rule h-6 w-16 rounded-full" aria-hidden="true" />
-                <p className="truncate text-sm font-bold text-[var(--muted-foreground)]">Legacy v1 + API v2 discovery workspaces</p>
+                <div>
+                  <p className="text-xs font-bold">Dailymotion Discovery</p>
+                  <p className="text-[10px] text-[var(--muted-foreground)]">Mobile Terminal</p>
+                </div>
               </div>
+              <button
+                type="button"
+                className="rounded-md p-1.5 text-[var(--muted-foreground)] hover:bg-[var(--surface-container-high)] hover:text-[var(--foreground)] cursor-pointer"
+                onClick={() => setMobileMenuOpen(false)}
+                aria-label="Close menu"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto space-y-4">
+              {groups.map((group) => (
+                <div key={group.label}>
+                  <p className="px-2 pb-1 text-[10px] font-black uppercase tracking-[0.16em] text-[var(--muted-foreground)]">
+                    {group.label}
+                  </p>
+                  <div className="space-y-0.5">
+                    {group.links.map(({ label, href, icon: Icon }) => {
+                      const active = isActivePath(pathname, href);
+                      return (
+                        <Link
+                          key={href}
+                          href={href}
+                          onClick={() => setMobileMenuOpen(false)}
+                          className={cn(
+                            "flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-xs font-bold transition",
+                            active
+                              ? "bg-[color-mix(in_srgb,var(--primary)_14%,transparent)] text-[var(--primary)]"
+                              : "text-[var(--muted-foreground)] hover:bg-[var(--surface-container-high)]"
+                          )}
+                        >
+                          <Icon className="h-3.5 w-3.5 shrink-0" />
+                          <span>{label}</span>
+                        </Link>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
 
-              <div className="flex shrink-0 items-center gap-2">
-                <Link
-                  href="/general-v1"
-                  className="hidden min-h-10 items-center gap-2 rounded-md border border-[var(--border)] bg-[var(--surface-container-low)] px-3 text-sm font-bold text-[var(--muted-foreground)] transition hover:border-[var(--primary)] hover:text-[var(--foreground)] sm:inline-flex"
-                >
-                  <Search className="h-4 w-4" aria-hidden="true" />
-                  Search Workspace
-                </Link>
-                <ThemeToggle />
+      {/* Main Content Area with Adaptive Left Padding */}
+      <div
+        className={cn(
+          "transition-[padding] duration-300 ease-in-out min-h-screen flex flex-col",
+          isOpen ? "lg:pl-64" : "lg:pl-0"
+        )}
+      >
+        {/* Sticky Global Top Header Bar */}
+        <header className="sticky top-0 z-30 border-b border-[var(--border)] bg-[var(--surface)]/90 px-4 py-2.5 backdrop-blur-md md:px-6">
+          <div className="mx-auto flex max-w-[1600px] items-center justify-between gap-3">
+            {/* Left Controls: Sidebar & Drawer Toggles */}
+            <div className="flex items-center gap-2.5">
+              {/* Mobile menu toggle */}
+              <button
+                type="button"
+                className="inline-flex lg:hidden h-8 items-center gap-1.5 rounded-md border border-[var(--border)] bg-[var(--surface-container-low)] px-2.5 text-xs font-bold text-[var(--foreground)] hover:bg-[var(--surface-container-high)] cursor-pointer"
+                onClick={() => setMobileMenuOpen((prev) => !prev)}
+                aria-label="Toggle navigation drawer"
+              >
+                {mobileMenuOpen ? <X className="h-4 w-4" /> : <Menu className="h-4 w-4" />}
+                <span>Menu</span>
+              </button>
+
+              {/* Desktop Show / Hide Navbar toggle */}
+              <button
+                type="button"
+                onClick={toggleSidebar}
+                className={cn(
+                  "hidden lg:inline-flex h-8 items-center gap-1.5 rounded-md border px-2.5 text-xs font-bold transition cursor-pointer",
+                  isOpen
+                    ? "border-[var(--border)] bg-[var(--surface-container-low)] text-[var(--muted-foreground)] hover:bg-[var(--surface-container-high)] hover:text-[var(--foreground)]"
+                    : "border-[var(--primary)]/60 bg-[color-mix(in_srgb,var(--primary)_15%,transparent)] text-[var(--primary)] hover:bg-[color-mix(in_srgb,var(--primary)_22%,transparent)]"
+                )}
+                aria-label={isOpen ? "Hide Navbar" : "Show Navbar"}
+                title={isOpen ? "Hide Navbar (Collapse sidebar)" : "Show Navbar (Expand sidebar)"}
+              >
+                {isOpen ? (
+                  <>
+                    <PanelLeftClose className="h-3.5 w-3.5" />
+                    <span>Hide Navbar</span>
+                  </>
+                ) : (
+                  <>
+                    <PanelLeftOpen className="h-3.5 w-3.5 text-[var(--primary)]" />
+                    <span className="font-bold">Show Navbar</span>
+                  </>
+                )}
+              </button>
+
+              {/* Architecture Badges */}
+              <div className="hidden sm:flex items-center gap-2 ml-2">
+                <span className="inline-flex items-center gap-1 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-extrabold text-emerald-400">
+                  Dual-API Terminal
+                </span>
+                <span className="hidden md:inline-flex items-center gap-1 rounded-full border border-sky-500/30 bg-sky-500/10 px-2 py-0.5 text-[10px] font-extrabold text-sky-400">
+                  Quota-Aware
+                </span>
+                <span className="hidden xl:inline-flex items-center gap-1 rounded-full border border-purple-500/30 bg-purple-500/10 px-2 py-0.5 text-[10px] font-extrabold text-purple-400">
+                  Manifest-First
+                </span>
               </div>
             </div>
 
-            <nav className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1 lg:hidden" aria-label="Primary">
-              {flatLinks.map(({ label, href, icon: Icon }) => {
-                const active = isActivePath(pathname, href);
-                return (
-                  <Link
-                    key={href}
-                    href={href}
-                    className={cn(
-                      "inline-flex min-h-9 shrink-0 items-center gap-2 rounded-md border px-3 text-xs font-black transition",
-                      active
-                        ? "border-[var(--primary)] bg-[color-mix(in_srgb,var(--primary)_12%,transparent)] text-[var(--foreground)]"
-                        : "border-[var(--border)] bg-[var(--surface-container-low)] text-[var(--muted-foreground)]"
-                    )}
-                  >
-                    <Icon className="h-3.5 w-3.5" aria-hidden="true" />
-                    {label}
-                  </Link>
-                );
-              })}
-              <a
-                href="https://youtube-discovery.vercel.app/"
-                target="_blank"
-                rel="noreferrer noopener"
-                className="inline-flex min-h-9 shrink-0 items-center gap-2 rounded-md border border-[var(--border)] bg-[var(--surface-container-low)] px-3 text-xs font-black text-[var(--muted-foreground)]"
+            {/* Right Controls: Quick Navigation & Theme */}
+            <div className="flex items-center gap-2 shrink-0">
+              <Link
+                href="/search"
+                className="hidden sm:inline-flex h-8 items-center gap-1.5 rounded-md border border-[var(--border)] bg-[var(--surface-container-low)] px-2.5 text-xs font-bold text-[var(--muted-foreground)] transition hover:border-[var(--primary)] hover:text-[var(--foreground)]"
               >
-                <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
-                YouTube Discovery
-              </a>
-            </nav>
+                <Search className="h-3.5 w-3.5" />
+                <span>Search</span>
+              </Link>
+              <Link
+                href="/search-history"
+                className="hidden md:inline-flex h-8 items-center gap-1.5 rounded-md border border-[var(--border)] bg-[var(--surface-container-low)] px-2.5 text-xs font-bold text-[var(--muted-foreground)] transition hover:border-[var(--primary)] hover:text-[var(--foreground)]"
+              >
+                <History className="h-3.5 w-3.5" />
+                <span>History</span>
+              </Link>
+              <Link
+                href="/saved-items"
+                className="inline-flex h-8 items-center gap-1.5 rounded-md border border-[var(--border)] bg-[var(--surface-container-low)] px-2.5 text-xs font-bold text-[var(--muted-foreground)] transition hover:border-[var(--primary)] hover:text-[var(--foreground)]"
+              >
+                <BookmarkCheck className="h-3.5 w-3.5 text-[var(--primary)]" />
+                <span className="hidden sm:inline">Saved Items</span>
+              </Link>
+              <ThemeToggle />
+            </div>
           </div>
         </header>
 
-        <main className="mx-auto min-w-0 max-w-[1500px] px-4 py-6 sm:py-8 lg:px-7">
-          {/* Global API status + usage bar on every page. Compact, non-blocking,
-              sanitized data only; failures never prevent navigation. */}
+        {/* Global Page Container */}
+        <main className="mx-auto min-w-0 max-w-[1600px] flex-1 w-full px-4 py-5 sm:py-6 lg:px-6">
           <ApiStatusBar />
           {children}
         </main>

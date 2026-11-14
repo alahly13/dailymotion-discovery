@@ -1,18 +1,37 @@
-// UnifiedSearch — version-selectable Search page (Task B §3).
+// UnifiedSearch — World-Class Search Workspace (2026)
 //
-// What this controls: the /search experience — full-width bar, V1/V2
-// selector, dynamic filter panel from the param-schema registry, results.
-// Why it exists: one prominent entry point where the version selector drives
-// which parameter schema renders; the selected version is preserved across
-// failures (never silent fallback) and remembered via the workspace store.
-// Precedence: explicit UI choices → per-version saved defaults → safe
-// registry defaults → omit unsupported. Cache keys separate every combination.
-// Scope: /search only. Dedicated v1/v2 pages keep their curated explorers.
-// Future agents: add params in param-schema.ts — this panel follows.
+// What this controls:
+// 1. Prominent wide search input with instant clear, quick-submit, and query transformations.
+// 2. Collapsible API Filters toolbar strictly governing outgoing network requests.
+// 3. 12-column grid workspace with independent collapsible Local Filters panel.
+// 4. Real-time resource counters (Videos, Channels, Playlists, Livestreams, Users).
+// 5. Automatic Search Snapshot persistence into IndexedDB (full raw JSON, ZERO media binaries).
+// 6. Offline historical replay mode with ZERO API requests and ZERO Gemini requests.
+//
+// Scope: /search workspace.
 
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  Bookmark,
+  BookmarkCheck,
+  Check,
+  ChevronDown,
+  ChevronUp,
+  Download,
+  Filter,
+  History,
+  Library,
+  Radio,
+  RotateCcw,
+  Search,
+  SlidersHorizontal,
+  Sparkles,
+  Tv,
+  UsersRound,
+  X,
+} from "lucide-react";
 import {
   V1_MANDATORY_FIELDS,
   V1_VIDEO_FIELD_OPTIONS,
@@ -33,10 +52,11 @@ import {
   type LocalFilterState,
 } from "@/lib/filters/discovery-result-filters";
 import { DiscoveryLocalFilterPanel } from "./discovery-local-filter-panel";
-import { discoveryCompositeKey } from "@/lib/resources/dailymotion-resource-taxonomy";
+import { classifyDiscoveryItem, discoveryCompositeKey } from "@/lib/resources/dailymotion-resource-taxonomy";
 import { useMergedDataset } from "@/lib/local-first/use-merged-dataset";
 import { ResultCard } from "./result-card";
 import { useDiscoveryWorkspace } from "@/stores/discovery-workspace-store";
+import { captureSearchSnapshot, replaySearchSnapshot } from "@/lib/search-history/search-snapshot-service";
 
 const GROUPS: { key: ParamGroup; label: string }[] = [
   { key: "basic", label: "Basic Filters" },
@@ -55,8 +75,10 @@ interface ResultsMeta {
   endpoint: string;
 }
 
-const inputClass = "min-h-11 w-full rounded-md border border-[var(--border)] bg-[var(--surface-container-low)] px-3 text-sm font-semibold text-[var(--foreground)] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[var(--ring)]";
-const labelClass = "mb-1 block text-[11px] font-black uppercase tracking-[0.12em] text-[var(--muted-foreground)]";
+const inputClass =
+  "min-h-10 w-full rounded-md border border-[var(--border)] bg-[var(--surface-container-low)] px-3 text-xs font-semibold text-[var(--foreground)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)]";
+const labelClass =
+  "mb-1 block text-[10px] font-black uppercase tracking-[0.12em] text-[var(--muted-foreground)]";
 
 function ParamControl({ def, value, onChange }: { def: ParamDef; value: string; onChange: (value: string) => void }) {
   const id = `usearch-${def.key}`;
@@ -99,7 +121,6 @@ function ParamControl({ def, value, onChange }: { def: ParamDef; value: string; 
     );
   }
   if (def.control === "boolean3") {
-    // Tri-state: "" (Auto/omit = API default ON = safe), "true", "false".
     return (
       <div>
         <span className={labelClass} id={`${id}-label`} title={def.description}>{def.label}</span>
@@ -115,7 +136,9 @@ function ParamControl({ def, value, onChange }: { def: ParamDef; value: string; 
               role="radio"
               aria-checked={value === o.v}
               onClick={() => onChange(o.v)}
-              className={`min-h-9 rounded px-2 text-xs font-black uppercase ${value === o.v ? "bg-[var(--primary)] text-white" : "text-[var(--muted-foreground)] hover:text-[var(--foreground)]"}`}
+              className={`min-h-8 rounded px-2 text-[11px] font-black uppercase transition cursor-pointer ${
+                value === o.v ? "bg-[var(--primary)] text-white" : "text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
+              }`}
             >
               {o.label}
             </button>
@@ -140,6 +163,8 @@ export function UnifiedSearch() {
   const [profileId, setProfileId] = useState("");
   const [filters, setFilters] = useState<Record<string, string>>({});
   const [localFilters, setLocalFilters] = useState<LocalFilterState>(DEFAULT_DISCOVERY_LOCAL_FILTERS);
+  const [isApiFiltersOpen, setIsApiFiltersOpen] = useState(false);
+  const [isLocalFiltersOpen, setIsLocalFiltersOpen] = useState(true);
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
   const [bulkCollectionId, setBulkCollectionId] = useState("");
   const [saveFlash, setSaveFlash] = useState<string | null>(null);
@@ -151,14 +176,62 @@ export function UnifiedSearch() {
   const [notice, setNotice] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
+  const [isReplayMode, setIsReplayMode] = useState(false);
+  const [activeTabKind, setActiveTabKind] = useState<string>("ALL");
   const inflightKey = useRef<string | null>(null);
 
-  // Hydrate URL search parameters cleanly on mount, including offline snapshot loading (`snapshotType=preset|history&snapshotId=...`).
+  // Restore local filter collapse state from localStorage
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem("dm_search_local_filters_open");
+      if (saved !== null) {
+        setIsLocalFiltersOpen(saved === "true");
+      }
+    } catch {
+      // Non-fatal
+    }
+  }, []);
+
+  const toggleLocalFilters = () => {
+    setIsLocalFiltersOpen((prev) => {
+      const next = !prev;
+      try {
+        window.localStorage.setItem("dm_search_local_filters_open", String(next));
+      } catch {
+        // Non-fatal
+      }
+      return next;
+    });
+  };
+
+  // Hydrate URL search parameters cleanly on mount, including offline replay (`replay=snapshotId`)
   useEffect(() => {
     const sp = new URLSearchParams(window.location.search);
     if ([...sp.keys()].length === 0) return;
     let active = true;
-    void Promise.resolve().then(() => {
+
+    void (async () => {
+      // Check offline replay parameter first
+      const replaySnapId = sp.get("replay") || sp.get("snapshotId");
+      if (replaySnapId) {
+        try {
+          const replayResult = await replaySearchSnapshot(replaySnapId);
+          if (replayResult && active) {
+            setVersion(replayResult.snapshot.apiVersion);
+            setQuery(replayResult.snapshot.query);
+            setItems(replayResult.items);
+            setHasSearched(true);
+            setIsReplayMode(true);
+            setNotice(
+              `Historical Snapshot Offline Replay (${replayResult.items.length} items loaded with ZERO API calls).`
+            );
+            return;
+          }
+        } catch {
+          // Replay failed; fall back to standard URL hydration
+        }
+      }
+
       if (!active) return;
       const vParam = sp.get("v");
       if (vParam === "v1" || vParam === "v2") setVersion(vParam);
@@ -166,54 +239,17 @@ export function UnifiedSearch() {
       if (sp.has("profileId")) setProfileId(sp.get("profileId") ?? "");
       const hydrated: Record<string, string> = {};
       for (const [k, val] of sp.entries()) {
-        if (!["v", "q", "profileId", "page", "mode", "fields", "snapshotType", "snapshotId"].includes(k) && val) {
+        if (!["v", "q", "profileId", "page", "mode", "fields", "snapshotType", "snapshotId", "replay"].includes(k) && val) {
           hydrated[k] = val;
         }
       }
       if (Object.keys(hydrated).length > 0) setFilters(hydrated);
-    });
+    })();
+
     return () => {
       active = false;
     };
   }, []);
-
-  // Load offline archived snapshot cleanly when navigated from /saved-searches or /history with `snapshotType` + `snapshotId`.
-  useEffect(() => {
-    if (!merged.ready) return;
-    const sp = new URLSearchParams(window.location.search);
-    const snapType = sp.get("snapshotType");
-    const snapId = sp.get("snapshotId");
-    if (!snapType || !snapId) return;
-
-    let active = true;
-    void Promise.resolve().then(() => {
-      if (!active) return;
-      if (snapType === "preset") {
-        const preset = merged.savedSearches.find((p) => p.id === snapId);
-        if (preset?.cachedSnapshot?.items?.length) {
-          setVersion(preset.apiVersion);
-          setQuery(preset.query);
-          setFilters(preset.apiParams ?? {});
-          setItems(preset.cachedSnapshot.items);
-          setHasSearched(true);
-          setNotice(`Loaded archived offline snapshot for preset "${preset.name}" (${preset.cachedSnapshot.items.length} items, zero API calls).`);
-        }
-      } else if (snapType === "history") {
-        const entry = merged.searchHistory.find((h) => h.id === snapId);
-        if (entry?.snapshotItems?.length) {
-          setVersion(entry.apiVersion);
-          setQuery(entry.query);
-          setFilters(entry.apiParams ?? {});
-          setItems(entry.snapshotItems);
-          setHasSearched(true);
-          setNotice(`Loaded archived offline search history snapshot (${entry.snapshotItems.length} items, zero API calls).`);
-        }
-      }
-    });
-    return () => {
-      active = false;
-    };
-  }, [merged.ready, merged.savedSearches, merged.searchHistory]);
 
   const schema = useMemo(() => schemaFor(version), [version]);
   const defaults = workspace.versionDefaults[version];
@@ -244,10 +280,15 @@ export function UnifiedSearch() {
     setFailure(null);
     setNotice(null);
     setHasSearched(false);
+    setIsReplayMode(false);
   }
 
+  // Count active API filters that deviate from default
+  const activeApiFiltersCount = useMemo(() => {
+    return Object.entries(filters).filter(([k, v]) => v && v.trim().length > 0 && k !== "pageSize").length;
+  }, [filters]);
+
   const runSearch = useCallback(async (page: number, append: boolean) => {
-    // Duplicate-submit guard (double clicks/effects): one history entry + counters per submit.
     const submitKey = `${version}:${query}:${profileId}:${JSON.stringify(filters)}:${fieldSelection?.join(",") ?? ""}:${page}:${append}`;
     if (!append) {
       if (inflightKey.current === submitKey) return;
@@ -256,15 +297,26 @@ export function UnifiedSearch() {
     setLoading(true);
     setFailure(null);
     setNotice(null);
+    setIsReplayMode(false);
     if (!append) workspace.recordSearchSubmitted(version);
     try {
       const params = new URLSearchParams();
       params.set("mode", version === "v1" ? "search" : "browse");
       if (version === "v1") {
-        if (query !== "") params.set("q", query); // exact preservation
+        if (query !== "") params.set("q", query);
       } else {
         if (!profileId.trim()) {
-          setFailure({ ok: false, error: "Enter a profile ID — v2 has no global search.", reason: "user_input_error", status: 400, apiVersion: "v2", resource: "general", endpoint: "GET /profiles/{profile_id}/videos", remedy: "Collect profile IDs via GET /v2/me once authenticated.", retryable: false });
+          setFailure({
+            ok: false,
+            error: "Enter a profile ID — v2 has no global search.",
+            reason: "user_input_error",
+            status: 400,
+            apiVersion: "v2",
+            resource: "general",
+            endpoint: "GET /profiles/{profile_id}/videos",
+            remedy: "Collect profile IDs via GET /v2/me once authenticated.",
+            retryable: false,
+          });
           setLoading(false);
           return;
         }
@@ -287,11 +339,7 @@ export function UnifiedSearch() {
         const value = getValue(def);
         if (value !== "") params.set(def.key, value);
       }
-      // family_filter tri-state: "" = omit (safe). Preserve real "false".
-      if (version === "v1") {
-        const ff = getValue(schema.find((d) => d.key === "familyFilter")!);
-        void ff; // already set above generically; kept explicit for clarity
-      }
+
       const resolvedFields = resolveFields(version, fieldSelection);
       if (resolvedFields) params.set("fields", resolvedFields.join(","));
       params.set("page", String(page));
@@ -300,6 +348,7 @@ export function UnifiedSearch() {
       const data = (await response.json()) as
         | { ok: true; result: { items: DiscoveryItem[]; page: number; pageSize: number; total: number | null; hasMore: boolean; capped: boolean; endpoint: string } }
         | DiscoveryFailure;
+
       if (!data.ok) {
         setFailure(data);
         if (!append) { setItems([]); setMeta(null); }
@@ -308,50 +357,120 @@ export function UnifiedSearch() {
         else workspace.recordApiCalls(version, 1);
         return;
       }
+
       if (sortNotice) setNotice(sortNotice);
-      setItems((prev) => (append ? mergeDiscoveryItems(prev, data.result.items) : data.result.items));
-      setMeta({ page: data.result.page, pageSize: data.result.pageSize, total: data.result.total, hasMore: data.result.hasMore, capped: data.result.capped, endpoint: data.result.endpoint });
+      const newItems = data.result.items;
+      setItems((prev) => (append ? mergeDiscoveryItems(prev, newItems) : newItems));
+      setMeta({
+        page: data.result.page,
+        pageSize: data.result.pageSize,
+        total: data.result.total,
+        hasMore: data.result.hasMore,
+        capped: data.result.capped,
+        endpoint: data.result.endpoint,
+      });
       setHasSearched(true);
+
       const shareParams = new URLSearchParams(params);
       shareParams.set("v", version);
       window.history.replaceState(null, "", `?${shareParams.toString()}`);
+
       if (!append) {
         const effective = Object.fromEntries(params.entries());
+        // 1. Record in Zustand history store
         workspace.addHistory({
-          version, resource: "general",
+          version,
+          resource: "general",
           label: `Search (${version.toUpperCase()}): ${query || profileId || "filters"}`,
           params: { ...effective, cacheKey: buildSearchCacheKey(version, "general", version === "v1" ? "search" : "browse", effective) },
-          resultCount: data.result.total ?? data.result.items.length,
+          resultCount: data.result.total ?? newItems.length,
         });
-        void merged.coordinator.recordSearchHistory({
+
+        // 2. Automatically capture full raw JSON snapshot into IndexedDB for zero-API offline replay
+        void captureSearchSnapshot({
+          query: query || profileId,
+          route: "/search",
           apiVersion: version,
-          resource: "general",
+          resourceType: "ALL",
           mode: version === "v1" ? "search" : "browse",
-          query: query || profileId || "",
           apiParams: effective,
           localFilters: localFilters as unknown as Record<string, unknown>,
-          resultCount: data.result.total ?? data.result.items.length,
-          snapshotItems: data.result.items.slice(0, 100),
+          rawResponse: data.result,
+          items: newItems,
+          pageIndex: page,
+          totalResults: data.result.total ?? newItems.length,
         });
+
         workspace.recordSearchOutcome(version, true, 1);
       } else {
         workspace.recordApiCalls(version, 1);
       }
     } catch {
-      setFailure({ ok: false, error: "Request failed (network).", reason: "network_error", status: 503, apiVersion: version, resource: "general", endpoint: "", remedy: null, retryable: true });
+      setFailure({
+        ok: false,
+        error: "Request failed (network).",
+        reason: "network_error",
+        status: 503,
+        apiVersion: version,
+        resource: "general",
+        endpoint: "",
+        remedy: null,
+        retryable: true,
+      });
       if (!append) workspace.recordSearchOutcome(version, false, 1);
       else workspace.recordApiCalls(version, 1);
     } finally {
       setLoading(false);
       if (!append) inflightKey.current = null;
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fieldSelection, filters, profileId, query, schema, version]);
+  }, [fieldSelection, filters, localFilters, profileId, query, schema, version, workspace]);
 
-  const visibleItems = useMemo(
-    () => applyDiscoveryResultPipeline(items, localFilters),
-    [items, localFilters]
-  );
+  // Apply local filters in memory (Zero API calls)
+  const visibleItems = useMemo(() => {
+    const filtered = applyDiscoveryResultPipeline(items, localFilters);
+    if (activeTabKind === "ALL") return filtered;
+    return filtered.filter((item) => {
+      const taxonomy = classifyDiscoveryItem(item);
+      if (activeTabKind === "VIDEO") return taxonomy === "VIDEO";
+      if (activeTabKind === "CHANNEL") return taxonomy === "CHANNEL" || taxonomy === "PROFILE" || taxonomy === "USER";
+      if (activeTabKind === "PLAYLIST") return taxonomy === "PLAYLIST";
+      if (activeTabKind === "LIVE") return taxonomy === "LIVESTREAM";
+      return true;
+    });
+  }, [items, localFilters, activeTabKind]);
+
+  // Resource type distribution counts
+  const countsByKind = useMemo(() => {
+    let videos = 0;
+    let channels = 0;
+    let playlists = 0;
+    let live = 0;
+    let users = 0;
+
+    for (const item of items) {
+      const tax = classifyDiscoveryItem(item);
+      if (tax === "VIDEO") videos++;
+      else if (tax === "CHANNEL" || tax === "PROFILE") channels++;
+      else if (tax === "PLAYLIST") playlists++;
+      else if (tax === "LIVESTREAM") live++;
+      else if (tax === "USER") users++;
+    }
+
+    return { total: items.length, videos, channels, playlists, live, users };
+  }, [items]);
+
+  // Smart Query Transforms
+  const handleTrimSpaces = () => {
+    setQuery((q) => q.trim().replace(/\s+/g, " "));
+  };
+
+  const handleShuffleWords = () => {
+    setQuery((q) => {
+      const words = q.trim().split(/\s+/);
+      if (words.length <= 1) return q;
+      return words.reverse().join(" ");
+    });
+  };
 
   function saveCurrentSearch() {
     const label = `Search (${version.toUpperCase()}): ${query.trim() || profileId.trim() || "filters"}`;
@@ -375,8 +494,8 @@ export function UnifiedSearch() {
         ? { capturedAt: new Date().toISOString(), totalFetched: items.length, items: items.slice(0, 150) }
         : undefined,
     });
-    setSaveFlash("Saved preset (query + filters + offline snapshot)");
-    setTimeout(() => setSaveFlash(null), 2600);
+    setSaveFlash("Saved preset to IndexedDB");
+    setTimeout(() => setSaveFlash(null), 2500);
   }
 
   function toggleSelectKey(key: string) {
@@ -395,7 +514,7 @@ export function UnifiedSearch() {
     for (const item of chosen) {
       if (!workspace.isItemSaved(item.apiVersion, item.kind, item.id)) workspace.saveItem(item);
     }
-    setSaveFlash(`Saved ${chosen.length} selected items locally`);
+    setSaveFlash(`Saved ${chosen.length} selected items to Saved Items`);
     setTimeout(() => setSaveFlash(null), 2200);
   }
 
@@ -429,7 +548,7 @@ export function UnifiedSearch() {
                 i.language ?? "",
                 i.createdAt ?? "",
                 i.url ?? "",
-              ].join(","),
+              ].join(",")
             ),
           ].join("\n");
     const blob = new Blob([content], { type: format === "json" ? "application/json" : "text/csv;charset=utf-8" });
@@ -441,10 +560,8 @@ export function UnifiedSearch() {
     URL.revokeObjectURL(url);
   }
 
-  const familyValue = getValue(schema.find((d) => d.key === "familyFilter") ?? { key: "familyFilter", default: null } as ParamDef);
-
   function toggleField(value: string) {
-    if (mandatoryFields.includes(value)) return; // mandatory locked
+    if (mandatoryFields.includes(value)) return;
     setFieldSelection((prev) => {
       const base = prev ?? [];
       return base.includes(value) ? base.filter((f) => f !== value) : [...base, value];
@@ -452,275 +569,560 @@ export function UnifiedSearch() {
   }
 
   return (
-    <div className="space-y-5">
-      <div>
-        <p className="text-xs font-black uppercase tracking-[0.2em] text-[var(--primary)]">Unified search</p>
-        <h1 className="mt-2 text-3xl font-black sm:text-4xl">Search Dailymotion</h1>
-      </div>
-
-      {/* Version selector — declares which integration receives the request. */}
-      <div className="flex flex-wrap items-center gap-3" role="group" aria-label="API version">
-        <div className="grid flex-1 grid-cols-2 gap-1 rounded-lg border border-[var(--border)] bg-[var(--card)] p-1 sm:max-w-md" role="radiogroup" aria-label="API version">
-          {(["v1", "v2"] as ApiVersion[]).map((v) => (
-            <button
-              key={v}
-              type="button"
-              role="radio"
-              aria-checked={version === v}
-              onClick={() => switchVersion(v)}
-              className={`min-h-11 rounded-md px-4 text-sm font-black transition focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[var(--ring)] ${version === v ? "bg-[var(--primary)] text-white" : "text-[var(--muted-foreground)] hover:text-[var(--foreground)]"}`}
-            >
-              {v === "v1" ? "V1 Legacy / Partner" : "V2"}
-            </button>
-          ))}
-        </div>
-        <p className="text-xs font-bold text-[var(--muted-foreground)]" aria-live="polite">
-          Next search → <strong className="text-[var(--foreground)]">{version === "v1" ? "Legacy API v1" : "API v2"}</strong>
-          {version === "v2" ? " (authenticated, profile-scoped)" : " (public global search)"}
-        </p>
-      </div>
-
-      {/* Full-width prominent search bar. */}
-      <form onSubmit={(e) => { e.preventDefault(); void runSearch(1, false); }} className="flex flex-col gap-2 sm:flex-row">
-        <label htmlFor="unified-q" className="sr-only">Search query</label>
-        <input
-          id="unified-q"
-          className="min-h-13 w-full flex-1 rounded-lg border border-[var(--border)] bg-[var(--card)] px-4 py-3 text-base font-semibold"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder={version === "v1" ? "Search public Dailymotion videos… (exact, Unicode-safe)" : "Query is informational for v2 — profile ID below selects the catalog"}
-          autoComplete="off"
-        />
-        {version === "v2" && (
-          <>
-            <label htmlFor="unified-profile" className="sr-only">Profile ID</label>
-            <input
-              id="unified-profile"
-              className="min-h-13 w-full rounded-lg border border-[var(--border)] bg-[var(--card)] px-4 py-3 text-base font-semibold sm:max-w-56"
-              value={profileId}
-              onChange={(e) => setProfileId(e.target.value)}
-              placeholder="Profile ID (e.g. xiy)"
-              autoComplete="off"
-            />
-          </>
-        )}
-        <button type="submit" disabled={loading} className="min-h-13 rounded-lg bg-[var(--primary)] px-8 text-base font-black text-white disabled:opacity-60">
-          {loading ? "Searching…" : "Search"}
-        </button>
-        <button type="button" onClick={saveCurrentSearch} className="min-h-13 rounded-lg border border-[var(--border)] bg-[var(--card)] px-4 text-xs font-black uppercase hover:border-[var(--primary)]">
-          Save Search
-        </button>
-      </form>
-      {saveFlash && <p className="text-xs font-bold text-emerald-600" role="status">{saveFlash}</p>}
-
-      {/* Dynamic filter panel from the version schema. */}
-      <section aria-label="Search filters" className="space-y-4 rounded-lg border border-[var(--border)] bg-[var(--card)] p-4 sm:p-5">
-        {GROUPS.filter((g) => g.key !== "advanced").map((group) => {
-          const inGroup = schema.filter((d) => d.group === group.key);
-          if (inGroup.length === 0) return null;
-          return (
-            <fieldset key={group.key}>
-              <legend className="px-1 text-[11px] font-black uppercase tracking-[0.14em] text-[var(--muted-foreground)]">{group.label}</legend>
-              <div className="mt-2 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                {inGroup.map((def) => (
-                  <ParamControl key={def.key} def={def} value={getValue(def)} onChange={(v) => setFilter(def.key, v)} />
-                ))}
-              </div>
-            </fieldset>
-          );
-        })}
-
-        {version === "v2" && (
-          <p className="rounded-md border border-[var(--border)] bg-[var(--surface-container-low)] p-3 text-xs leading-5 text-[var(--muted-foreground)]">
-            v2 has no <code>localization</code> or <code>family_filter</code> parameters. Use <code>is_explicit</code> above instead of family filtering (different semantics), and language/country result fields instead of localization.
-          </p>
-        )}
-        {version === "v1" && familyValue === "false" && (
-          <p className="rounded-md border border-amber-500/50 bg-amber-500/10 p-3 text-xs leading-5" role="alert">
-            <strong>Warning:</strong> family filter is OFF — results may include explicit content. The API default is ON; this opt-out is sent only because you selected Off.
-          </p>
-        )}
-
-        <details open={advancedOpen} onToggle={(e) => setAdvancedOpen((e.target as HTMLDetailsElement).open)} className="rounded-md border border-[var(--border)]">
-          <summary className="cursor-pointer px-4 py-3 text-xs font-black uppercase tracking-[0.14em]">Advanced filters</summary>
-          <div className="grid gap-3 border-t border-[var(--border)] p-4 sm:grid-cols-2 lg:grid-cols-4">
-            {schema.filter((d) => d.group === "advanced").map((def) => (
-              <ParamControl key={def.key} def={def} value={getValue(def)} onChange={(v) => setFilter(def.key, v)} />
-            ))}
-            <div className="sm:col-span-2">
-              <span className={labelClass}>Response fields (id + title always kept)</span>
-              <div className="grid max-h-56 grid-cols-1 gap-1 overflow-y-auto rounded-md border border-[var(--border)] p-2 sm:grid-cols-2">
-                {fieldOptions.map((o) => {
-                  const locked = mandatoryFields.includes(o.value);
-                  const checked = locked || (fieldSelection ?? []).includes(o.value);
-                  return (
-                    <label key={o.value} className={`flex items-center gap-2 rounded px-2 py-1.5 text-xs font-semibold ${locked ? "opacity-70" : "cursor-pointer hover:bg-[var(--surface-container-high)]"}`}>
-                      <input type="checkbox" className="h-4 w-4 accent-[var(--primary)]" checked={checked} disabled={locked} onChange={() => toggleField(o.value)} />
-                      {o.label}
-                    </label>
-                  );
-                })}
-              </div>
-              {fieldSelection && fieldSelection.length > 0 && (
-                <button type="button" onClick={() => setFieldSelection(null)} className="mt-2 min-h-9 rounded-md border border-[var(--border)] px-3 text-xs font-black uppercase">
-                  Reset to default fields
-                </button>
-              )}
+    <div className="space-y-6">
+      {/* ── Offline Replay Banner (if replaying historical search) ────────── */}
+      {isReplayMode && (
+        <div className="flex items-center justify-between gap-3 rounded-xl border border-sky-500/40 bg-sky-500/10 p-4 text-sky-400">
+          <div className="flex items-center gap-2.5">
+            <History className="h-5 w-5 shrink-0" />
+            <div>
+              <p className="text-xs font-black uppercase tracking-wider">
+                Historical Snapshot Offline Replay
+              </p>
+              <p className="text-xs text-[var(--muted-foreground)]">
+                Loaded directly from IndexedDB without querying Dailymotion or Gemini (0 API calls used).
+              </p>
             </div>
           </div>
-        </details>
-      </section>
-
-      {notice && <p className="rounded-md border border-[var(--border)] bg-[var(--surface-container-low)] p-3 text-xs font-bold" role="status">{notice}</p>}
-      {failure && (
-        <div className="rounded-md border border-red-500/50 bg-red-500/10 p-4 text-sm leading-6" role="alert">
-          <p className="font-black">Search failed on {version.toUpperCase()} ({failure.reason}) — version preserved, no fallback applied.</p>
-          <p className="mt-1">{failure.error}</p>
-          {failure.remedy && <p className="mt-1 font-semibold">{failure.remedy}</p>}
-          <button type="button" onClick={() => void runSearch(meta?.page ?? 1, false)} className="mt-3 min-h-10 rounded-md bg-[var(--primary)] px-4 text-xs font-black uppercase text-white">
-            Retry {version.toUpperCase()}
+          <button
+            type="button"
+            onClick={() => void runSearch(1, false)}
+            className="inline-flex min-h-9 items-center gap-1.5 rounded-lg bg-[var(--primary)] px-3 text-xs font-black text-white cursor-pointer hover:opacity-90"
+          >
+            <Sparkles className="h-3.5 w-3.5" />
+            Run Live Search Again
           </button>
         </div>
       )}
 
+      {/* ── Wide Search Input & API Options ──────────────────────────────── */}
+      <section className="space-y-3 rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4 sm:p-5 shadow-xs">
+        {/* Version Selector Buttons */}
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-1.5 rounded-lg border border-[var(--border)] bg-[var(--surface-container-low)] p-1">
+            <button
+              type="button"
+              onClick={() => switchVersion("v1")}
+              className={`rounded-md px-3 py-1.5 text-xs font-black transition cursor-pointer ${
+                version === "v1" ? "bg-[var(--primary)] text-white shadow-xs" : "text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
+              }`}
+            >
+              V1 Legacy / Global Search
+            </button>
+            <button
+              type="button"
+              onClick={() => switchVersion("v2")}
+              className={`rounded-md px-3 py-1.5 text-xs font-black transition cursor-pointer ${
+                version === "v2" ? "bg-[var(--primary)] text-white shadow-xs" : "text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
+              }`}
+            >
+              V2 REST Catalog
+            </button>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setIsApiFiltersOpen((p) => !p)}
+              className={`inline-flex min-h-9 items-center gap-1.5 rounded-lg border px-3 text-xs font-bold transition cursor-pointer ${
+                isApiFiltersOpen || activeApiFiltersCount > 0
+                  ? "border-[var(--primary)] bg-[color-mix(in_srgb,var(--primary)_10%,transparent)] text-[var(--primary)]"
+                  : "border-[var(--border)] bg-[var(--surface-container-low)] text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
+              }`}
+            >
+              <SlidersHorizontal className="h-3.5 w-3.5" />
+              <span>API Parameters</span>
+              {activeApiFiltersCount > 0 && (
+                <span className="rounded-full bg-[var(--primary)] px-1.5 py-0.2 text-[10px] font-black text-white">
+                  {activeApiFiltersCount}
+                </span>
+              )}
+              {isApiFiltersOpen ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+            </button>
+
+            <button
+              type="button"
+              onClick={saveCurrentSearch}
+              className="inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-[var(--border)] bg-[var(--surface-container-low)] px-3 text-xs font-bold text-[var(--muted-foreground)] hover:border-[var(--primary)] hover:text-[var(--foreground)] cursor-pointer"
+              title="Save current search preset into IndexedDB"
+            >
+              <Bookmark className="h-3.5 w-3.5" />
+              <span className="hidden sm:inline">Save Preset</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Full-Width Prominent Input Form */}
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            void runSearch(1, false);
+          }}
+          className="relative flex items-center"
+        >
+          <Search className="pointer-events-none absolute left-4 h-5 w-5 text-[var(--muted-foreground)]" />
+          <input
+            id="unified-search-bar"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder={
+              version === "v1"
+                ? "Search public Dailymotion videos, channels, playlists... (Unicode & exact terms supported)"
+                : "Enter query terms (for V2, catalog is scoped by profile ID)"
+            }
+            className="h-12 w-full rounded-xl border border-[var(--border)] bg-[var(--surface-container-low)] pl-12 pr-28 text-sm font-semibold transition focus:border-[var(--primary)] focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
+            autoComplete="off"
+          />
+
+          <div className="absolute right-2 flex items-center gap-1.5">
+            {query.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setQuery("")}
+                className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-[var(--muted-foreground)] hover:bg-[var(--surface-container-high)] hover:text-[var(--foreground)] cursor-pointer"
+                aria-label="Clear query"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            )}
+            <button
+              type="submit"
+              disabled={loading}
+              className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-[var(--primary)] px-4 text-xs font-black text-white transition hover:opacity-95 disabled:opacity-50 cursor-pointer"
+            >
+              <Search className="h-3.5 w-3.5" />
+              <span>{loading ? "Searching…" : "Search"}</span>
+            </button>
+          </div>
+        </form>
+
+        {/* Profile ID Input for V2 */}
+        {version === "v2" && (
+          <div className="flex items-center gap-3 pt-1">
+            <span className="text-xs font-bold text-[var(--muted-foreground)] shrink-0">Profile ID:</span>
+            <input
+              value={profileId}
+              onChange={(e) => setProfileId(e.target.value)}
+              placeholder="e.g. xiy, user handle, or channel ID"
+              className="h-9 w-full max-w-sm rounded-lg border border-[var(--border)] bg-[var(--surface-container-low)] px-3 text-xs font-semibold"
+            />
+          </div>
+        )}
+
+        {/* Smart Query Transform Quick Buttons */}
+        <div className="flex flex-wrap items-center gap-2 pt-1 text-xs">
+          <span className="text-[10px] font-black uppercase tracking-wider text-[var(--muted-foreground)]">
+            Query Tools:
+          </span>
+          <button
+            type="button"
+            onClick={handleTrimSpaces}
+            className="rounded-md border border-[var(--border)] bg-[var(--surface-container-low)] px-2 py-0.5 text-[11px] font-semibold text-[var(--muted-foreground)] hover:text-[var(--foreground)] cursor-pointer"
+          >
+            Trim Spaces
+          </button>
+          <button
+            type="button"
+            onClick={handleShuffleWords}
+            className="rounded-md border border-[var(--border)] bg-[var(--surface-container-low)] px-2 py-0.5 text-[11px] font-semibold text-[var(--muted-foreground)] hover:text-[var(--foreground)] cursor-pointer"
+          >
+            Shuffle Words
+          </button>
+          {query.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setQuery("")}
+              className="rounded-md border border-dashed border-[var(--border)] px-2 py-0.5 text-[11px] font-semibold text-[var(--muted-foreground)] hover:text-red-500 cursor-pointer"
+            >
+              Clear Text
+            </button>
+          )}
+          {saveFlash && (
+            <span className="ml-auto text-xs font-bold text-emerald-500" role="status">
+              ✓ {saveFlash}
+            </span>
+          )}
+        </div>
+
+        {/* Collapsible API Parameters Panel (strictly outbound network parameters) */}
+        {isApiFiltersOpen && (
+          <div className="space-y-4 rounded-xl border border-[var(--border)] bg-[var(--surface-container-low)]/50 p-4 mt-3">
+            {GROUPS.filter((g) => g.key !== "advanced").map((group) => {
+              const inGroup = schema.filter((d) => d.group === group.key);
+              if (inGroup.length === 0) return null;
+              return (
+                <fieldset key={group.key}>
+                  <legend className="px-1 text-[10px] font-black uppercase tracking-[0.14em] text-[var(--muted-foreground)]">
+                    {group.label}
+                  </legend>
+                  <div className="mt-2 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                    {inGroup.map((def) => (
+                      <ParamControl key={def.key} def={def} value={getValue(def)} onChange={(v) => setFilter(def.key, v)} />
+                    ))}
+                  </div>
+                </fieldset>
+              );
+            })}
+
+            {/* Advanced Response Fields Toggle */}
+            <details
+              open={advancedOpen}
+              onToggle={(e) => setAdvancedOpen((e.target as HTMLDetailsElement).open)}
+              className="rounded-lg border border-[var(--border)] bg-[var(--card)]"
+            >
+              <summary className="cursor-pointer px-3.5 py-2.5 text-xs font-black uppercase tracking-[0.14em]">
+                Advanced Outbound Fields & Parameters
+              </summary>
+              <div className="grid gap-3 border-t border-[var(--border)] p-3.5 sm:grid-cols-2 lg:grid-cols-4">
+                {schema.filter((d) => d.group === "advanced").map((def) => (
+                  <ParamControl key={def.key} def={def} value={getValue(def)} onChange={(v) => setFilter(def.key, v)} />
+                ))}
+                <div className="sm:col-span-2">
+                  <span className={labelClass}>Response Fields (id + title always kept)</span>
+                  <div className="grid max-h-48 grid-cols-1 gap-1 overflow-y-auto rounded-md border border-[var(--border)] p-2 sm:grid-cols-2">
+                    {fieldOptions.map((o) => {
+                      const locked = mandatoryFields.includes(o.value);
+                      const checked = locked || (fieldSelection ?? []).includes(o.value);
+                      return (
+                        <label
+                          key={o.value}
+                          className={`flex items-center gap-2 rounded px-2 py-1 text-xs font-semibold ${
+                            locked ? "opacity-70" : "cursor-pointer hover:bg-[var(--surface-container-high)]"
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            className="h-3.5 w-3.5 accent-[var(--primary)]"
+                            checked={checked}
+                            disabled={locked}
+                            onChange={() => toggleField(o.value)}
+                          />
+                          <span>{o.label}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            </details>
+          </div>
+        )}
+      </section>
+
+      {/* Notices & Failure Callouts */}
+      {notice && (
+        <p className="rounded-lg border border-[var(--border)] bg-[var(--surface-container-low)] p-3 text-xs font-bold" role="status">
+          {notice}
+        </p>
+      )}
+
+      {failure && (
+        <div className="rounded-xl border border-red-500/50 bg-red-500/10 p-4 text-sm leading-6" role="alert">
+          <p className="font-black text-red-500">
+            Search failed on {version.toUpperCase()} ({failure.reason})
+          </p>
+          <p className="mt-1 text-xs">{failure.error}</p>
+          {failure.remedy && <p className="mt-1 text-xs font-semibold">{failure.remedy}</p>}
+          <button
+            type="button"
+            onClick={() => void runSearch(meta?.page ?? 1, false)}
+            className="mt-3 min-h-9 rounded-lg bg-[var(--primary)] px-4 text-xs font-black uppercase text-white cursor-pointer"
+          >
+            Retry Request
+          </button>
+        </div>
+      )}
+
+      {/* ── 12-Column Results Workspace ──────────────────────────────────── */}
       {hasSearched && !failure && (
-        <div className="space-y-3">
-          <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[var(--border)] bg-[var(--card)] p-3">
-            <p className="text-xs font-bold text-[var(--muted-foreground)]" aria-live="polite">
-              Showing <strong className="text-[var(--foreground)]">{visibleItems.length}</strong> of{" "}
-              <strong className="text-[var(--foreground)]">{items.length}</strong> loaded
-              {meta?.total !== null && meta?.total !== undefined ? <> ({meta.total} reported)</> : ""}
-              {meta?.hasMore ? " · more pages available" : " · end of results"}
-              {meta?.capped ? " · window cap — narrow with date filters" : ""}
-            </p>
-            {items.length > 0 && (
-              <div className="flex flex-wrap items-center gap-2">
+        <div className="grid grid-cols-12 gap-5 items-start">
+          {/* Left Side: Results Workspace (col-span-12 or col-span-8/9) */}
+          <div className={isLocalFiltersOpen ? "col-span-12 xl:col-span-8 2xl:col-span-9 space-y-4" : "col-span-12 space-y-4"}>
+            {/* Header Controls Bar */}
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[var(--border)] bg-[var(--card)] p-3.5 shadow-xs">
+              {/* Resource Distribution Tabs */}
+              <div className="flex flex-wrap items-center gap-1.5" role="tablist">
+                <button
+                  type="button"
+                  onClick={() => setActiveTabKind("ALL")}
+                  className={`inline-flex items-center gap-1 rounded-lg px-2.5 py-1 text-xs font-bold transition cursor-pointer ${
+                    activeTabKind === "ALL"
+                      ? "bg-[var(--primary)] text-white shadow-xs"
+                      : "bg-[var(--surface-container-low)] text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
+                  }`}
+                >
+                  <span>All</span>
+                  <span className="text-[10px] opacity-80">({countsByKind.total})</span>
+                </button>
+                {countsByKind.videos > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setActiveTabKind("VIDEO")}
+                    className={`inline-flex items-center gap-1 rounded-lg px-2.5 py-1 text-xs font-bold transition cursor-pointer ${
+                      activeTabKind === "VIDEO"
+                        ? "bg-[var(--primary)] text-white shadow-xs"
+                        : "bg-[var(--surface-container-low)] text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
+                    }`}
+                  >
+                    <Tv className="h-3 w-3" />
+                    <span>Videos</span>
+                    <span className="text-[10px] opacity-80">({countsByKind.videos})</span>
+                  </button>
+                )}
+                {countsByKind.channels > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setActiveTabKind("CHANNEL")}
+                    className={`inline-flex items-center gap-1 rounded-lg px-2.5 py-1 text-xs font-bold transition cursor-pointer ${
+                      activeTabKind === "CHANNEL"
+                        ? "bg-[var(--primary)] text-white shadow-xs"
+                        : "bg-[var(--surface-container-low)] text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
+                    }`}
+                  >
+                    <UsersRound className="h-3 w-3" />
+                    <span>Channels</span>
+                    <span className="text-[10px] opacity-80">({countsByKind.channels})</span>
+                  </button>
+                )}
+                {countsByKind.playlists > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setActiveTabKind("PLAYLIST")}
+                    className={`inline-flex items-center gap-1 rounded-lg px-2.5 py-1 text-xs font-bold transition cursor-pointer ${
+                      activeTabKind === "PLAYLIST"
+                        ? "bg-[var(--primary)] text-white shadow-xs"
+                        : "bg-[var(--surface-container-low)] text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
+                    }`}
+                  >
+                    <Library className="h-3 w-3" />
+                    <span>Playlists</span>
+                    <span className="text-[10px] opacity-80">({countsByKind.playlists})</span>
+                  </button>
+                )}
+                {countsByKind.live > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setActiveTabKind("LIVE")}
+                    className={`inline-flex items-center gap-1 rounded-lg px-2.5 py-1 text-xs font-bold transition cursor-pointer ${
+                      activeTabKind === "LIVE"
+                        ? "bg-red-600 text-white shadow-xs"
+                        : "bg-[var(--surface-container-low)] text-red-500 hover:text-red-600"
+                    }`}
+                  >
+                    <Radio className="h-3 w-3" />
+                    <span>Live</span>
+                    <span className="text-[10px] opacity-80">({countsByKind.live})</span>
+                  </button>
+                )}
+              </div>
+
+              {/* Action Buttons: Toggle Local Filters & Export */}
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={toggleLocalFilters}
+                  className={`inline-flex min-h-8 items-center gap-1.5 rounded-lg border px-2.5 text-xs font-bold transition cursor-pointer ${
+                    isLocalFiltersOpen
+                      ? "border-[var(--primary)] bg-[color-mix(in_srgb,var(--primary)_12%,transparent)] text-[var(--primary)]"
+                      : "border-[var(--border)] bg-[var(--surface-container-low)] text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
+                  }`}
+                  title={isLocalFiltersOpen ? "Hide Local Filters panel" : "Show Local Filters panel"}
+                >
+                  <Filter className="h-3.5 w-3.5" />
+                  <span>{isLocalFiltersOpen ? "Hide Filters" : "Show Filters"}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => exportResults("json")}
+                  className="inline-flex min-h-8 items-center gap-1 rounded-lg border border-[var(--border)] bg-[var(--surface-container-low)] px-2.5 text-xs font-bold text-[var(--muted-foreground)] hover:text-[var(--foreground)] cursor-pointer"
+                  title="Export results to JSON"
+                >
+                  <Download className="h-3.5 w-3.5" />
+                  <span>JSON</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => exportResults("csv")}
+                  className="inline-flex min-h-8 items-center gap-1 rounded-lg border border-[var(--border)] bg-[var(--surface-container-low)] px-2.5 text-xs font-bold text-[var(--muted-foreground)] hover:text-[var(--foreground)] cursor-pointer"
+                  title="Export results to CSV"
+                >
+                  <Download className="h-3.5 w-3.5" />
+                  <span>CSV</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Bulk Selection Bar */}
+            {visibleItems.length > 0 && (
+              <div className="flex flex-wrap items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--card)] px-3.5 py-2 text-xs font-bold">
                 <button
                   type="button"
                   onClick={() => {
-                    if (selectedKeys.size === visibleItems.length) {
-                      setSelectedKeys(new Set());
-                    } else {
-                      setSelectedKeys(new Set(visibleItems.map((i) => discoveryCompositeKey(i.apiVersion, i.kind, i.id))));
-                    }
+                    if (selectedKeys.size === visibleItems.length) setSelectedKeys(new Set());
+                    else setSelectedKeys(new Set(visibleItems.map((i) => discoveryCompositeKey(i.apiVersion, i.kind, i.id))));
                   }}
-                  className="min-h-9 rounded-md border border-[var(--border)] px-3 text-xs font-bold hover:border-[var(--primary)]"
+                  className="rounded-md border border-[var(--border)] bg-[var(--surface-container-low)] px-2.5 py-1 text-xs font-bold hover:border-[var(--primary)] cursor-pointer"
                 >
-                  {selectedKeys.size === visibleItems.length && visibleItems.length > 0 ? "Deselect All" : "Select All Visible"}
+                  {selectedKeys.size === visibleItems.length ? "Deselect All" : "Select All Visible"}
                 </button>
-                <button type="button" onClick={() => exportResults("json")} className="min-h-9 rounded-md border border-[var(--border)] px-3 text-xs font-black uppercase hover:border-[var(--primary)]">
-                  Export JSON
+
+                {selectedKeys.size > 0 && (
+                  <>
+                    <span className="text-[var(--primary)] font-black">{selectedKeys.size} selected</span>
+                    <button
+                      type="button"
+                      onClick={() => void saveSelectedItems()}
+                      className="rounded-md bg-[var(--primary)] px-3 py-1 font-black uppercase text-white cursor-pointer"
+                    >
+                      Save Selected
+                    </button>
+                    {merged.collections.length > 0 && (
+                      <div className="flex items-center gap-1.5">
+                        <select
+                          aria-label="Target collection"
+                          value={bulkCollectionId}
+                          onChange={(e) => setBulkCollectionId(e.target.value)}
+                          className="rounded-md border border-[var(--border)] bg-[var(--surface-container-low)] px-2 py-1 text-xs font-bold"
+                        >
+                          <option value="">Choose collection...</option>
+                          {merged.collections.map((c) => (
+                            <option key={c.id} value={c.id}>{c.name}</option>
+                          ))}
+                        </select>
+                        <button
+                          type="button"
+                          disabled={!bulkCollectionId}
+                          onClick={() => void addSelectedToCollection()}
+                          className="rounded-md border border-[var(--border)] bg-[var(--surface-container-low)] px-2.5 py-1 font-bold disabled:opacity-50 cursor-pointer"
+                        >
+                          + Collection
+                        </button>
+                      </div>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => setSelectedKeys(new Set())}
+                      className="ml-auto text-xs text-[var(--muted-foreground)] hover:underline cursor-pointer"
+                    >
+                      Clear
+                    </button>
+                  </>
+                )}
+              </div>
+            )}
+
+            {/* Results Grid with Type-Aware Result Cards */}
+            {visibleItems.length === 0 ? (
+              <div className="flex min-h-60 flex-col items-center justify-center rounded-2xl border border-dashed border-[var(--border)] p-8 text-center bg-[var(--card)]/50">
+                <Search className="h-10 w-10 text-[var(--muted-foreground)]/50 mb-3" />
+                <p className="font-bold text-base">No items match your local filters</p>
+                <p className="mt-1 text-xs text-[var(--muted-foreground)] max-w-sm">
+                  {items.length} items were fetched, but none match the current filter criteria.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setLocalFilters(DEFAULT_DISCOVERY_LOCAL_FILTERS)}
+                  className="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-[var(--border)] bg-[var(--surface-container-low)] px-3 py-1.5 text-xs font-bold cursor-pointer"
+                >
+                  <RotateCcw className="h-3.5 w-3.5" />
+                  Reset Local Filters
                 </button>
-                <button type="button" onClick={() => exportResults("csv")} className="min-h-9 rounded-md border border-[var(--border)] px-3 text-xs font-black uppercase hover:border-[var(--primary)]">
-                  Export CSV
-                </button>
+              </div>
+            ) : (
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-2 2xl:grid-cols-3">
+                {visibleItems.map((item) => {
+                  const cKey = discoveryCompositeKey(item.apiVersion, item.kind, item.id);
+                  const isSavedLocal = merged.savedKeys.has(cKey) || workspace.isItemSaved(item.apiVersion, item.kind, item.id);
+                  return (
+                    <ResultCard
+                      key={cKey}
+                      item={item}
+                      saved={isSavedLocal}
+                      favorite={merged.favoriteKeys.has(cKey)}
+                      collections={merged.collections.map((c) => ({ id: c.id, name: c.name }))}
+                      selectable
+                      selected={selectedKeys.has(cKey)}
+                      onToggleSelect={() => toggleSelectKey(cKey)}
+                      onToggleFavorite={() => {
+                        if (!isSavedLocal) {
+                          void merged.coordinator.toggleSaveItem(item).then(() =>
+                            merged.coordinator.setSavedItemFavorite(cKey, true)
+                          );
+                        } else {
+                          void merged.coordinator.setSavedItemFavorite(cKey, !merged.favoriteKeys.has(cKey));
+                        }
+                      }}
+                      onAddToCollection={(colId) => void merged.coordinator.addItemToCollection(colId, item)}
+                      onToggleSave={() => {
+                        void merged.coordinator.toggleSaveItem(item);
+                        if (workspace.isItemSaved(item.apiVersion, item.kind, item.id)) {
+                          workspace.removeItem(item.apiVersion, item.kind, item.id);
+                        } else {
+                          workspace.saveItem(item);
+                        }
+                      }}
+                    />
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Pagination Controls */}
+            {meta?.hasMore && (
+              <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
+                <span className="text-xs text-[var(--muted-foreground)]">
+                  Page {meta.page} {meta.total ? `of approx. ${Math.ceil(meta.total / meta.pageSize)}` : ""}
+                </span>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    disabled={loading}
+                    onClick={() => void runSearch(meta.page + 1, false)}
+                    className="min-h-9 rounded-lg border border-[var(--border)] bg-[var(--surface-container-low)] px-3 text-xs font-bold hover:border-[var(--primary)] disabled:opacity-50 cursor-pointer"
+                  >
+                    Next Page ({meta.page + 1})
+                  </button>
+                  <button
+                    type="button"
+                    disabled={loading}
+                    onClick={() => void runSearch(meta.page + 1, true)}
+                    className="min-h-9 rounded-lg bg-[var(--primary)] px-4 text-xs font-black text-white hover:opacity-95 disabled:opacity-50 cursor-pointer"
+                  >
+                    Load More (Append)
+                  </button>
+                </div>
               </div>
             )}
           </div>
 
-          {items.length > 0 && (
-            <DiscoveryLocalFilterPanel
-              value={localFilters}
-              onChange={setLocalFilters}
-              totalLoaded={items.length}
-              filteredCount={visibleItems.length}
-            />
-          )}
-
-          {selectedKeys.size > 0 && (
-            <div className="flex flex-wrap items-center gap-2 rounded-lg border border-[var(--primary)]/40 bg-[var(--primary)]/10 p-3 text-xs font-bold">
-              <span>{selectedKeys.size} selected</span>
-              <button
-                type="button"
-                onClick={() => void saveSelectedItems()}
-                className="min-h-9 rounded-md bg-[var(--primary)] px-3 font-black uppercase text-white"
-              >
-                Save Selected
-              </button>
-              {merged.collections.length > 0 && (
-                <div className="flex items-center gap-1.5">
-                  <select
-                    aria-label="Choose target collection"
-                    value={bulkCollectionId}
-                    onChange={(e) => setBulkCollectionId(e.target.value)}
-                    className="min-h-9 rounded-md border border-[var(--border)] bg-[var(--card)] px-2 text-xs font-semibold"
-                  >
-                    <option value="">Choose collection...</option>
-                    {merged.collections.map((c) => (
-                      <option key={c.id} value={c.id}>{c.name}</option>
-                    ))}
-                  </select>
-                  <button
-                    type="button"
-                    disabled={!bulkCollectionId}
-                    onClick={() => void addSelectedToCollection()}
-                    className="min-h-9 rounded-md border border-[var(--border)] bg-[var(--card)] px-3 font-black uppercase disabled:opacity-50"
-                  >
-                    + Add to Collection
-                  </button>
-                </div>
-              )}
-              <button
-                type="button"
-                onClick={() => setSelectedKeys(new Set())}
-                className="ml-auto text-xs font-bold text-[var(--muted-foreground)] hover:underline"
-              >
-                Clear Selection
-              </button>
+          {/* Right Side: Dedicated Collapsible Local Filters Panel */}
+          {isLocalFiltersOpen && (
+            <div className="col-span-12 xl:col-span-4 2xl:col-span-3">
+              <div className="sticky top-16 space-y-3">
+                <DiscoveryLocalFilterPanel
+                  value={localFilters}
+                  onChange={setLocalFilters}
+                  totalLoaded={items.length}
+                  filteredCount={visibleItems.length}
+                />
+              </div>
             </div>
           )}
         </div>
       )}
 
+      {/* Empty State before any search is run */}
       {!hasSearched && (
-        <div className="flex min-h-48 flex-col items-center justify-center rounded-lg border border-dashed border-[var(--border)] p-8 text-center">
-          <p className="font-black">No search has been run</p>
-          <p className="mt-2 max-w-md text-sm text-[var(--muted-foreground)]">Type a query, tune the {version.toUpperCase()} filters, and press Search.</p>
-        </div>
-      )}
-
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {visibleItems.map((item) => {
-          const cKey = discoveryCompositeKey(item.apiVersion, item.kind, item.id);
-          const isSavedLocal = merged.savedKeys.has(cKey) || workspace.isItemSaved(item.apiVersion, item.kind, item.id);
-          return (
-            <ResultCard
-              key={cKey}
-              item={item}
-              saved={isSavedLocal}
-              favorite={merged.favoriteKeys.has(cKey)}
-              collections={merged.collections.map((c) => ({ id: c.id, name: c.name }))}
-              selectable
-              selected={selectedKeys.has(cKey)}
-              onToggleSelect={() => toggleSelectKey(cKey)}
-              onToggleFavorite={() => {
-                if (!isSavedLocal) {
-                  void merged.coordinator.toggleSaveItem(item).then(() =>
-                    merged.coordinator.setSavedItemFavorite(cKey, true)
-                  );
-                } else {
-                  void merged.coordinator.setSavedItemFavorite(cKey, !merged.favoriteKeys.has(cKey));
-                }
-              }}
-              onAddToCollection={(colId) => void merged.coordinator.addItemToCollection(colId, item)}
-              onToggleSave={() => {
-                void merged.coordinator.toggleSaveItem(item);
-                if (workspace.isItemSaved(item.apiVersion, item.kind, item.id)) workspace.removeItem(item.apiVersion, item.kind, item.id);
-                else workspace.saveItem(item);
-              }}
-            />
-          );
-        })}
-      </div>
-
-      {meta?.hasMore && (
-        <div className="flex flex-wrap gap-2">
-          <button type="button" disabled={loading} onClick={() => void runSearch(meta.page + 1, false)} className="min-h-11 rounded-md border border-[var(--border)] px-4 text-sm font-bold disabled:opacity-60">
-            Next page ({meta.page + 1})
-          </button>
-          <button type="button" disabled={loading} onClick={() => void runSearch(meta.page + 1, true)} className="min-h-11 rounded-md bg-[var(--primary)] px-4 text-sm font-black text-white disabled:opacity-60">
-            Load more (append)
-          </button>
+        <div className="flex min-h-64 flex-col items-center justify-center rounded-2xl border border-dashed border-[var(--border)] p-8 text-center bg-[var(--card)]/40">
+          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-[var(--surface-container-high)] text-[var(--primary)] mb-3">
+            <Search className="h-6 w-6" />
+          </div>
+          <h2 className="text-lg font-black">Search Dailymotion Metadata Terminal</h2>
+          <p className="mt-1.5 max-w-md text-xs leading-5 text-[var(--muted-foreground)]">
+            Type any keywords or select your API parameters above. Full API responses are automatically snapshotted in IndexedDB for offline replay.
+          </p>
         </div>
       )}
     </div>

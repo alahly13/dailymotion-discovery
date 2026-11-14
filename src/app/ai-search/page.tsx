@@ -9,6 +9,7 @@ import { ResultCard } from "@/components/discovery/result-card";
 import { useDiscoveryWorkspace } from "@/stores/discovery-workspace-store";
 import { useMergedDataset } from "@/lib/local-first/use-merged-dataset";
 import { discoveryCompositeKey } from "@/lib/resources/dailymotion-resource-taxonomy";
+import { captureSearchSnapshot } from "@/lib/search-history/search-snapshot-service";
 import type { AiParsedQueryPlan } from "@/lib/ai/ai-schemas";
 import type { DiscoveryFailure, DiscoveryItem } from "@/lib/discovery/types";
 
@@ -109,6 +110,22 @@ export default function AiSearchPage() {
           ...(targetPlan.sort ? { sort: targetPlan.sort } : {}),
         },
         resultCount: data.result.total ?? data.result.items.length,
+      });
+      void captureSearchSnapshot({
+        query: targetPlan.searchQuery,
+        route: "/ai-search",
+        apiVersion: "v1",
+        resourceType: "video",
+        mode: "ai_semantic",
+        apiParams: {
+          q: targetPlan.searchQuery,
+          ...(targetPlan.channel ? { channel: targetPlan.channel } : {}),
+          ...(targetPlan.language ? { languages: targetPlan.language } : {}),
+          ...(targetPlan.sort ? { sort: targetPlan.sort } : {}),
+        },
+        rawResponse: data.result,
+        items: data.result.items,
+        totalResults: data.result.total ?? data.result.items.length,
       });
     } catch {
       setSearchError("Network error while querying Dailymotion API v1.");

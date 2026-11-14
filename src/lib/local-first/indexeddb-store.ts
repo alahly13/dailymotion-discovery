@@ -15,7 +15,7 @@ import {
  */
 
 export const LOCAL_IDB_NAME = "dailymotion_discovery_local_v1";
-export const LOCAL_IDB_VERSION = 1;
+export const LOCAL_IDB_VERSION = 2;
 
 export const LOCAL_STORES = {
   SAVED_ITEMS: "entities_saved_items",
@@ -27,6 +27,8 @@ export const LOCAL_STORES = {
   PENDING_OPERATIONS: "pending_operations",
   LOCAL_SYNC_METADATA: "local_sync_metadata",
   SYNC_JOURNAL: "sync_journal",
+  SEARCH_SNAPSHOTS: "search_snapshots",
+  SEARCH_SNAPSHOT_PAGES: "search_snapshot_pages",
 } as const;
 
 export type LocalStoreName = (typeof LOCAL_STORES)[keyof typeof LOCAL_STORES];
@@ -131,6 +133,32 @@ export interface LocalResearchNoteRecord {
   updatedAt: string;
 }
 
+export interface LocalSearchSnapshotRecord {
+  id: string; // e.g. `snap_${Date.now()}_${random}`
+  query: string;
+  route: string; // e.g. `/search`, `/video-discovery`, `/channel-explorer`, `/ai-search`, etc.
+  apiVersion: "v1" | "v2";
+  resourceType: string; // "ALL", "video", "channel", "playlist", "user", "livestream"
+  mode: string; // "search", "channel_videos", "ai_semantic", "tag", etc.
+  apiParams: Record<string, unknown>;
+  localFilters?: Record<string, unknown>;
+  totalResults: number;
+  pageCount: number;
+  capturedAt: string; // ISO string
+  expiresAt: number; // epoch ms when this snapshot expires
+  previewThumbnails?: string[]; // up to 4 thumbnail URLs for card preview
+  previewTitles?: string[]; // up to 3 titles for UI preview
+}
+
+export interface LocalSearchSnapshotPageRecord {
+  id: string; // `${snapshotId}::page::${pageIndex}`
+  snapshotId: string;
+  pageIndex: number;
+  rawJson: unknown; // Full untouched Dailymotion API response payload (ZERO media binaries)
+  normalizedItems: DiscoveryItem[];
+  capturedAt: string;
+}
+
 export interface PendingOutboxOperation {
   operationId: string;
   idempotencyKey: string;
@@ -187,6 +215,8 @@ const KEY_PATHS: Record<LocalStoreName, string> = {
   [LOCAL_STORES.PENDING_OPERATIONS]: "operationId",
   [LOCAL_STORES.LOCAL_SYNC_METADATA]: "key",
   [LOCAL_STORES.SYNC_JOURNAL]: "journalId",
+  [LOCAL_STORES.SEARCH_SNAPSHOTS]: "id",
+  [LOCAL_STORES.SEARCH_SNAPSHOT_PAGES]: "id",
 };
 
 /**
@@ -238,7 +268,14 @@ function openNativeIndexedDB(): Promise<IDBDatabase> {
       const db = req.result;
       for (const storeName of Object.values(LOCAL_STORES)) {
         if (!db.objectStoreNames.contains(storeName)) {
-          db.createObjectStore(storeName, { keyPath: KEY_PATHS[storeName] });
+          const os = db.createObjectStore(storeName, { keyPath: KEY_PATHS[storeName] });
+          if (storeName === LOCAL_STORES.SEARCH_SNAPSHOTS) {
+            os.createIndex("by_expiresAt", "expiresAt", { unique: false });
+            os.createIndex("by_capturedAt", "capturedAt", { unique: false });
+            os.createIndex("by_route", "route", { unique: false });
+          } else if (storeName === LOCAL_STORES.SEARCH_SNAPSHOT_PAGES) {
+            os.createIndex("by_snapshotId", "snapshotId", { unique: false });
+          }
         }
       }
     };
@@ -462,4 +499,89 @@ export async function migrateLegacyLocalStorageIfNeeded(db: LocalStoreAdapter = 
     updatedAt: new Date().toISOString(),
   });
   return true;
+}
+
+/**
+ * Persists a complete search snapshot and its raw API response pages to IndexedDB.
+ * INVARIANT: Never stores video/audio/thumbnail binary blobs; stores metadata & URLs only.
+ */
+export async function saveSearchSnapshot(
+  snapshot: LocalSearchSnapshotRecord,
+  pages: LocalSearchSnapshotPageRecord[],
+  db: LocalStoreAdapter = getLocalDatabase()
+): Promise<void> {
+  await db.put(LOCAL_STORES.SEARCH_SNAPSHOTS, snapshot);
+  if (pages.length > 0) {
+    await db.putMany(LOCAL_STORES.SEARCH_SNAPSHOT_PAGES, pages);
+  }
+}
+
+/**
+ * Retrieves a search snapshot by ID.
+ */
+export async function getSearchSnapshot(
+  id: string,
+  db: LocalStoreAdapter = getLocalDatabase()
+): Promise<LocalSearchSnapshotRecord | undefined> {
+  return db.get<LocalSearchSnapshotRecord>(LOCAL_STORES.SEARCH_SNAPSHOTS, id);
+}
+
+/**
+ * Retrieves all pages for a given search snapshot, ordered by pageIndex ascending.
+ */
+export async function getSearchSnapshotPages(
+  snapshotId: string,
+  db: LocalStoreAdapter = getLocalDatabase()
+): Promise<LocalSearchSnapshotPageRecord[]> {
+  const allPages = await db.getAll<LocalSearchSnapshotPageRecord>(LOCAL_STORES.SEARCH_SNAPSHOT_PAGES);
+  return allPages
+    .filter((p) => p.snapshotId === snapshotId)
+    .sort((a, b) => a.pageIndex - b.pageIndex);
+}
+
+/**
+ * Lists all search snapshots, optionally filtering out expired ones.
+ * Results are sorted by capturedAt descending (most recent first).
+ */
+export async function listSearchSnapshots(
+  options?: { includeExpired?: boolean },
+  db: LocalStoreAdapter = getLocalDatabase()
+): Promise<LocalSearchSnapshotRecord[]> {
+  const now = Date.now();
+  const all = await db.getAll<LocalSearchSnapshotRecord>(LOCAL_STORES.SEARCH_SNAPSHOTS);
+  const filtered = options?.includeExpired
+    ? all
+    : all.filter((s) => typeof s.expiresAt !== "number" || s.expiresAt > now);
+  return filtered.sort((a, b) => new Date(b.capturedAt).getTime() - new Date(a.capturedAt).getTime());
+}
+
+/**
+ * Deletes a single search snapshot and its associated raw JSON pages.
+ */
+export async function deleteSearchSnapshot(
+  snapshotId: string,
+  db: LocalStoreAdapter = getLocalDatabase()
+): Promise<void> {
+  await db.delete(LOCAL_STORES.SEARCH_SNAPSHOTS, snapshotId);
+  const pages = await getSearchSnapshotPages(snapshotId, db);
+  for (const page of pages) {
+    await db.delete(LOCAL_STORES.SEARCH_SNAPSHOT_PAGES, page.id);
+  }
+}
+
+/**
+ * Opportunistically purges expired search snapshots and their raw JSON pages.
+ * SAFETY INVARIANT: Strictly touches ONLY SEARCH_SNAPSHOTS and SEARCH_SNAPSHOT_PAGES;
+ * NEVER modifies or deletes Saved Items, Collections, or Sync Journal records.
+ */
+export async function cleanExpiredSearchSnapshots(
+  db: LocalStoreAdapter = getLocalDatabase()
+): Promise<number> {
+  const now = Date.now();
+  const all = await db.getAll<LocalSearchSnapshotRecord>(LOCAL_STORES.SEARCH_SNAPSHOTS);
+  const expired = all.filter((s) => typeof s.expiresAt === "number" && s.expiresAt <= now);
+  for (const s of expired) {
+    await deleteSearchSnapshot(s.id, db);
+  }
+  return expired.length;
 }

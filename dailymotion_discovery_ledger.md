@@ -2075,6 +2075,61 @@ CONFIRM_DB_APPLY=true npm run db:apply
   - `npm test`: 29 test files passed, 132/132 tests passed.
   - `npm run typecheck`: Exit 0 (zero errors).
 
+## 2026-11-14 Professional Search UI/UX Redesign, Type-Aware Result Cards, Search History Snapshots & Zero-API Local Replay
+
+### 1. Advanced Search UI/UX Redesign (`/search` & `UnifiedSearch`)
+- Transformed the search experience inspired by `F:\discovery\youtube-discovery`:
+  - Wide, full-width search input with inner clear `X` button and magnifying glass submit button.
+  - Smart query transform quick-buttons: "Trim Spaces", "Shuffle Words", and "Clear Text".
+  - Collapsible API Filters toolbar directly below the input with active filter counter badges, separating outbound network constraints (version, resource kind, sort, localization, family filter) from client-side filtering.
+  - 12-column grid workspace (`workspace-grid-12`):
+    - Left side (`col-span-12 xl:col-span-8 2xl:col-span-9` or full width if filters collapsed):
+      - Real-time counters by resource kind: All, Videos, Channels, Playlists, Livestreams, Users.
+      - Bulk actions: Select All Visible, Save Selected, Add to Collection, Export JSON, Export CSV.
+      - Adaptive grid of type-specific result cards.
+      - Pagination controls ("Next Page", "Load More / Append").
+    - Right side (`col-span-12 xl:col-span-4 2xl:col-span-3`):
+      - Dedicated collapsible Local Filters panel with independent toggle button ("Hide Filters" / "Show Filters"), persisted in `localStorage`.
+      - In-memory search inside retrieved results, target fields selector, duration slider, local sorting, and clear filters.
+
+### 2. World-Class Type-Aware Result Cards (`ResultCard`)
+- Refactored `ResultCard` (`src/components/discovery/result-card.tsx`) into type-routed specialized views:
+  - **Video Card**: 16:9 thumbnail, duration overlay, version badge, HD/Kids/Explicit badges, title link, owner name, zero-safe views counter (`0 views` displayed honestly), relative date, expandable description, Save/Unsave (updates IndexedDB), Favorite star, Collection picker, Copy ID/URL, Raw JSON drawer.
+  - **Channel / User / Profile Card**: Gradient banner header, circular overlapping avatar with fallback icon, channel name, ID handle, subscriber/follower badges, video count, "Explore Channel" action button linking directly to `/channel-explorer?channel=<id>`, Save Channel action, Copy ID, Raw JSON.
+  - **Playlist Card**: Aspect-video thumbnail with stacked right-side playlist count overlay (`N videos`), playlist title, owner, "Explore Playlist" and Save actions.
+  - **Livestream Card**: Pulsing red `LIVE` badge, viewer count overlay, stream title, broadcaster, and actions.
+
+### 3. Collapsible Navigation Sidebar & Global Top Header (`AppShell`)
+- Upgraded `src/components/layout/app-shell.tsx`:
+  - Persistent desktop sidebar collapse with smooth CSS transitions (`transition-[padding]` on content, `transition-transform` on sidebar).
+  - State persisted in `localStorage` (`dm_sidebar_open`).
+  - Desktop toggle button with `PanelLeftClose` ("Hide Navbar") and `PanelLeftOpen` ("Show Navbar").
+  - Mobile drawer navigation with backdrop, brand logo, full links, and auto-close on route change.
+  - Top header architecture badges: "Dual-API Terminal" (Emerald), "Quota-Aware" (Sky), "Manifest-First" (Purple).
+  - Quick header links to Search Workspace, Search History, Saved Items, and Theme Toggle.
+
+### 4. Search History, Full Raw API JSON Snapshots & Zero-API Replay
+- Configurable retention TTL via `NEXT_PUBLIC_SEARCH_HISTORY_TTL_SECONDS="604800"` (7 days default), validated with Zod, added to `.env.example`, `docs/ENVIRONMENT_VARIABLES.md`, and deployed to Vercel (Production, Preview, Development).
+- Extended IndexedDB schema (version bumped to `2`) with new stores:
+  - `search_snapshots`: key `id` (`snap_<timestamp>_<uuid>`), indexes on `expiresAt`, `capturedAt`, `route`, `query`.
+  - `search_snapshot_pages`: key `id` (`<snapshotId>::page::<pageIndex>`), storing complete untouched raw API response payloads and normalized items.
+  - **CRITICAL INVARIANT**: ZERO media/video/thumbnail binary downloads; only metadata and string URLs are persisted.
+- Created `src/lib/search-history/search-snapshot-service.ts`:
+  - Automatic capture invoked on successful searches across Unified Search (`/search`), Discovery Explorer (`/general-*`, `/videos-*`, `/channels-*`, `/playlists-*`, `/users-*`, `/live-*`), and AI Search (`/ai-search`).
+  - Deterministic offline replay (`replaySearchSnapshot`): loads raw JSON from IndexedDB, reconstructs search state, and renders results with **ZERO Dailymotion API calls and ZERO Gemini calls**.
+  - Safe background pruning (`cleanExpiredSearchSnapshots`): purges only expired search history without ever deleting Saved Items, Collections, or Sync Journal.
+- Dedicated Search History page (`src/app/search-history/page.tsx` and alias `src/app/history/page.tsx`):
+  - Chronological date grouping (Today, Yesterday, Earlier This Week, Earlier This Month, Older).
+  - Snapshot cards with query, route, API version, total items, preview thumbnails gallery, expiration countdown timer.
+  - Actions: "Replay Results" (loads offline in `/search?replay=<id>`), "Inspect Raw JSON" (opens drawer with full response), "Copy Query", "Delete Snapshot", and "Purge Expired".
+
+### 5. Verification Evidence
+- TypeScript compilation: `next typegen && tsc --noEmit` exited 0 (clean).
+- Vitest test suite: 30/30 test files passed, 136/136 tests passed (`npm test`).
+- Environment preflight: `node scripts/validate-all-env.mjs` exited 0.
+- Database preflight: `npm run db:validate` exited 0.
+- Git security check: `git check-ignore .env cloudflare/.../.dev.vars cloudflare/.../.prod.vars` confirmed 100% ignored. Zero secrets exposed.
+
 ## Known Limitations
 
 - Live AI endpoints (`/api/ai/*`, `/ai-search`) fail closed with HTTP `503 missing_config` until a real `GEMINI_API_KEY` replaces the placeholder in `.env` or Vercel Environment Variables.

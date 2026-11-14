@@ -30,6 +30,7 @@ import { discoveryCompositeKey } from "@/lib/resources/dailymotion-resource-taxo
 import { useMergedDataset } from "@/lib/local-first/use-merged-dataset";
 import { ResultCard } from "./result-card";
 import { useDiscoveryWorkspace } from "@/stores/discovery-workspace-store";
+import { captureSearchSnapshot } from "@/lib/search-history/search-snapshot-service";
 
 const V1_CATEGORIES = ["news", "sport", "music", "tech", "fun", "people", "animals", "auto", "creation", "kids", "lifestyle", "school", "travel", "tv", "videogames", "webcam"];
 const V1_LIVE_OPTIONS = [
@@ -218,6 +219,19 @@ export function DiscoveryExplorer({ version, resource, pageTitle, pageDescriptio
           apiParams: paramObj,
           resultCount: result.total ?? result.items.length,
           snapshotItems: result.items.slice(0, 100),
+        });
+        void captureSearchSnapshot({
+          query: fields.q || fields.id || fields.owner || fields.profileId || "",
+          route: `/${resource}-${version}`,
+          apiVersion: version,
+          resourceType: resource,
+          mode,
+          apiParams: paramObj,
+          localFilters: localFilters as unknown as Record<string, unknown>,
+          rawResponse: result,
+          items: result.items,
+          pageIndex: page,
+          totalResults: result.total ?? result.items.length,
         });
         workspace.recordSearchOutcome(version, true, 1);
       } else {
