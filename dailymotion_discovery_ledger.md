@@ -24,6 +24,59 @@ Scope: Project source-of-truth ledger, updated after Search Architecture Consoli
 - [Future Roadmap](#future-roadmap)
 - [Agent Instructions](#agent-instructions)
 
+## 2026-11-14 Professional Luxury Deep Black (True OLED 2026) & WCAG AAA Button Contrast Shield
+
+**User intent addressed**
+
+- Fixed critical button contrast defect where buttons (e.g., `Open Global Search` in Hero Quick Actions) rendered white text on an off-white/light-silver button background in dark mode, causing text and icons to become completely unreadable.
+- Eliminated washed-out, dull charcoal gray tones across the application in dark mode.
+- Transformed the entire dark theme into the **2026 Professional Luxury Deep Black (True OLED Obsidian Palette)**: infinite contrast, pure pitch black background (`#000000`), deep obsidian cards/surfaces (`#070709`, `#08080b`), refined luminous hairline borders (`rgba(255, 255, 255, 0.08)`), and crisp typography.
+
+**Root cause analyzed**
+
+- In previous CSS tokens, `.dark` defined `--primary: oklch(0.922 0 0)` (approx. `#ebebeb` / off-white silver) and `--primary-foreground: oklch(0.205 0 0)`.
+- Because `text-primary-foreground` in Tailwind v4 and Lucide SVG icons inherited or collided with general link colors or base `--foreground` (white), child text and icons rendered in near-white (`rgb(254, 254, 254)`) on top of the `rgb(231, 231, 231)` button background, producing a disastrous contrast ratio of 1.15:1.
+- Furthermore, dark theme variables used washed-out charcoal gray (`oklch(0.145 0 0)` / `#18181b`, `#1e1e1e`, `#262626`) instead of a high-end luxury true black OLED aesthetic.
+
+**What was built & hardened**
+
+1. `src/app/globals.css`:
+   - Updated `.dark` design tokens to 2026 Professional Luxury Deep Black:
+     - `--background: #000000;` (Pure true pitch black / OLED black)
+     - `--surface: #070709;`, `--surface-muted: #0d0d11;`, `--surface-container-low: #030304;`, `--surface-container-high: #131318;`
+     - `--card: #08080b;`, `--popover: #08080b;`
+     - `--border: rgba(255, 255, 255, 0.08);`, `--border-strong: rgba(255, 255, 255, 0.16);`
+     - `--foreground: #ffffff;`, `--muted-foreground: #94a3b8;`
+     - `--primary: #ffffff;`, `--primary-foreground: #000000;`
+     - `--sidebar: #020203;`, `--sidebar-foreground: #ffffff;`
+   - Added **WCAG 2.2 AAA Button Contrast Armor**:
+     - Solid primary buttons (`.dark .bg-primary:not([class*="/"])`, `button.bg-primary`, `a.bg-primary`) are enforced with crisp white background (`#ffffff`) and pure jet-black text/icons (`#000000 !important`), delivering a maximum 21:1 contrast ratio.
+     - Preserved opacity-modified badges (`bg-primary/10`, `bg-primary/5`).
+     - Dark mode form controls (`select`, `option`, `optgroup`, dialogs, menus, inputs) hardened with deep obsidian surfaces and crisp white text.
+2. `src/components/ui/button.tsx`:
+   - Re-architected `buttonVariants.primary`:
+     - Light mode: Rich black (`bg-neutral-900 text-white hover:bg-neutral-800`).
+     - Dark mode: Crisp pure white with jet-black text (`dark:bg-white dark:text-black dark:border-white/20 dark:hover:bg-neutral-100 dark:hover:text-black font-extrabold shadow-sm`).
+   - Hardened `secondary`, `outline`, `ghost`, `destructive`, `gold`, `info` variants for luxury dark mode readability.
+3. `src/app/page.tsx`:
+   - Updated Quick Actions Card:
+     - `Open Global Search` button: explicit high-contrast `bg-neutral-900 text-white hover:bg-neutral-800 dark:bg-white dark:text-black dark:hover:bg-neutral-100` with explicit `text-white dark:text-black` on both icon and text.
+     - `Open Link Explorer`: refined obsidian glass button with strong border.
+     - `API Comparison Matrix`: refined luxury outline button with hover highlight.
+4. `src/components/layout/app-shell.tsx`:
+   - Updated active sublink badges and dots in both desktop sidebar and mobile navigation drawer to high-contrast monochrome (`bg-neutral-900 text-white dark:bg-white dark:text-black`).
+5. `src/components/discovery/api-status-bar.tsx`:
+   - Hardened `Usage` and `Settings` buttons with high-contrast text and elevated surface border styling.
+6. `src/components/link-explorer/link-explorer-workspace.tsx` & `src/components/discovery/unified-search.tsx`:
+   - Hardened main submit/search action buttons to ensure high-contrast clarity across all themes.
+
+**Verification results**
+
+- `npm run typecheck` (`next typegen && tsc --noEmit`): Passed with 0 errors.
+- `vitest run` (`npm test`): 38 test files passed (38/38), 190 tests passed (190/190).
+- Tailwind CSS v4 compilation: Successfully processed 110,648 bytes of CSS without errors or diagnostics.
+- Contrast verification: Solid primary buttons in dark mode achieve 21:1 contrast ratio (pure black on pure white).
+
 ## 2026-10-12 Direct IPv6 connectivity diagnosis (P1001 root cause)
 
 **Cause established (not assumed)**
@@ -2330,3 +2383,35 @@ Continued development of the existing Dailymotion Discovery project, integrating
 - **TypeScript**: `node ./node_modules/typescript/bin/tsc --noEmit` exited 0 (clean, zero errors across entire codebase).
 - **Vitest**: `npm test` passed 38/38 test files, **187/187 tests passing**.
 - **Prisma**: `npx prisma validate` validated successfully against `schema.prisma`.
+
+---
+
+## 2026-11-14: Link Explorer Version Toggle Decoupling & Strict Dual-API Track Separation
+
+### 1. Root Cause & Architectural Correction
+1. **Version Toggle Decoupling (`handleVersionChange`)**:
+   - **Root Cause**: In `LinkExplorerWorkspace` (`src/components/link-explorer/link-explorer-workspace.tsx`), `handleVersionChange` contained `if (resolution?.analyzed) { void executeResolution(input, nextVersion); }`. Clicking `[ V1 — Legacy ]` or `[ V2 — Current ]` automatically invoked `executeResolution(input, nextVersion)`, firing an unprompted live network search.
+   - **Fix**: Removed the auto-trigger from `handleVersionChange`. Switching between `V1` and `V2` strictly updates the internal version state (`setVersion(nextVersion)`), updates the URL query parameter (`?v=nextVersion`), and resets `restoredFromHistory` with **ZERO automated network queries**. The user alone initiates analysis by clicking "Analyze & Explore" or "Re-analyze Link".
+2. **Multi-Word & Arabic Search Query Classification (`analyzeDailymotionUrlOrId`)**:
+   - **Root Cause**: In `src/lib/platforms/dailymotion/dailymotion-url-analyzer.ts`, non-URL and non-`x...` inputs fell back to `kind: "channel"`. When users entered multi-word Arabic or Unicode phrases (e.g. `رقص افراح شعبيه مصرى`), the engine constructed invalid channel routes (`/user/رقص افراح شعبيه مصرى/videos` and `/v2/profiles/رقص افراح شعبيه مصرى/videos`), causing provider failures.
+   - **Fix**: Enhanced `analyzeDailymotionUrlOrId` to detect multi-word queries (`/\s+/.test(cleanId)`) or non-slug characters as `kind: "search"` (`apiPathV1: /videos?search=...`, `apiPathV2: null`, `displayLabel: Search Query: "..."`).
+   - Added `<option value="search">Force Search Query (v1)</option>` to the manual type override selector.
+3. **Strict Dual-API Isolation Guarantee**:
+   - **V1 Track**: Queries `/api/discovery/v1/general?q=${encodeURIComponent(query)}&pageSize=24&page=${page}`, returning video search results.
+   - **V2 Track**: Dailymotion API v2 does not offer global video keyword search. If a user analyzes a search query under V2, the system cleanly and honestly explains: *"Dailymotion API v2 does not support global keyword search across all videos. Switch to API v1 for global search, or provide a channel/profile URL."* It never silently falls back to V1 or corrupts the V2 boundary.
+4. **Link Explorer 2026 Architecture Integration**:
+   - Strategy banner displays which track is currently active with an `Active Track` badge.
+   - If active version differs from previously rendered resolution results, an inline notice explains: *"Active API version switched to V2. The results below were fetched from API V1."* with an optional `Re-analyze on V2` shortcut.
+   - Integrated `AddToPlaylistModal` directly onto the Main Item Highlight card, allowing users to save analyzed items to playlists.
+
+### 2. Files Modified & Added
+- `src/components/link-explorer/link-explorer-workspace.tsx`: Decoupled version switcher from auto-execution, added Force Search override, added active strategy track badges, added `AddToPlaylistModal` to main item card.
+- `src/lib/platforms/dailymotion/dailymotion-url-analyzer.ts`: Classifies multi-word text, Arabic/Unicode phrases as `kind: "search"`.
+- `src/lib/link-explorer/link-explorer-service.ts`: Attached `page` parameter to `/api/discovery/v1/general` pagination.
+- `src/lib/platforms/dailymotion/__tests__/dailymotion-url-analyzer.test.ts`: Added unit tests for multi-word Arabic, English phrases, and Unicode queries.
+- `src/lib/discovery/__tests__/api-separation.test.ts`: Added tests for Link Explorer Arabic search query resolution and strict dual-API isolation.
+
+### 3. Verification Evidence
+- **TypeScript**: `node ./node_modules/typescript/bin/tsc --noEmit` exited 0 (clean, 0 errors).
+- **Vitest**: `npm test` passed **38/38 test files, 190/190 tests passing**.
+- **Prisma**: `npx prisma validate` validated successfully (schema valid).

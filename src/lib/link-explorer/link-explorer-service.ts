@@ -233,7 +233,7 @@ export async function resolveLinkExplorerInput(
       }
 
       const searchRes = await fetch(
-        `/api/discovery/v1/general?q=${encodeURIComponent(analyzed.identifier)}&pageSize=24`
+        `/api/discovery/v1/general?q=${encodeURIComponent(analyzed.identifier)}&pageSize=24&page=${page}`
       );
       const searchData = (await searchRes.json()) as DiscoveryApiResponse;
       rawResponse = searchData;

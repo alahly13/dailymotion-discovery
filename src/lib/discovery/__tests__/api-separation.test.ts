@@ -143,5 +143,43 @@ describe("Strict API v1 and v2 Separation", () => {
       // Zero calls made to V1 endpoint!
       expect(requestedRoutes.every((r) => !r.includes("/api/discovery/v1/"))).toBe(true);
     });
+
+    it("Link Explorer V1 resolves Arabic multi-word search queries via V1 general search", async () => {
+      const requestedRoutes: string[] = [];
+      global.fetch = vi.fn(async (input: RequestInfo | URL) => {
+        const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+        requestedRoutes.push(url);
+        return mockJsonResponse({
+          ok: true,
+          items: [{ id: "x9arabic", title: "رقص افراح شعبيه مصرى", version: "v1", kind: "video" }],
+        });
+      });
+
+      const res = await resolveLinkExplorerInput("رقص افراح شعبيه مصرى", "v1");
+
+      expect(res.ok).toBe(true);
+      expect(res.effectiveKind).toBe("search");
+      expect(res.version).toBe("v1");
+      expect(res.items.length).toBe(1);
+      expect(requestedRoutes.some((r) => r.includes("/api/discovery/v1/general"))).toBe(true);
+      expect(requestedRoutes.every((r) => !r.includes("/api/discovery/v2/"))).toBe(true);
+    });
+
+    it("Link Explorer V2 rejects Arabic multi-word search queries with honest v2 message and zero V1 calls", async () => {
+      const requestedRoutes: string[] = [];
+      global.fetch = vi.fn(async (input: RequestInfo | URL) => {
+        const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+        requestedRoutes.push(url);
+        return mockJsonResponse({ ok: true, items: [] });
+      });
+
+      const res = await resolveLinkExplorerInput("رقص افراح شعبيه مصرى", "v2");
+
+      expect(res.ok).toBe(false);
+      expect(res.effectiveKind).toBe("search");
+      expect(res.version).toBe("v2");
+      expect(res.error).toContain("API v2 does not support global keyword search");
+      expect(requestedRoutes.length).toBe(0);
+    });
   });
 });

@@ -357,6 +357,26 @@ export function analyzeDailymotionUrlOrId(input: string): DailymotionAnalyzedLin
     };
   }
 
+  // Handle multi-word text, Arabic/Unicode search queries, or general search phrases
+  if (/\s+/.test(cleanId) || (!/^[a-zA-Z0-9_\-\.]+$/.test(cleanId) && !cleanId.startsWith("http"))) {
+    return {
+      kind: "search",
+      rawInput,
+      identifier: cleanId,
+      canonicalUrl: `https://www.dailymotion.com/search/${encodeURIComponent(cleanId)}`,
+      apiPathV1: `/videos?search=${encodeURIComponent(cleanId)}`,
+      apiPathV2: null,
+      displayLabel: `Search Query: "${cleanId}"`,
+      warnings: [
+        ...warnings,
+        {
+          code: "v2_no_global_search",
+          message: "Dailymotion API v2 does not offer global search. Global queries use v1 search.",
+        },
+      ],
+    };
+  }
+
   // Fallback to channel/username handle
   return {
     kind: "channel",

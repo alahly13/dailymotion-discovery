@@ -89,6 +89,25 @@ describe("analyzeDailymotionUrlOrId", () => {
     expect(search.apiPathV2).toBeNull();
   });
 
+  it("analyzes multi-word and non-slug search queries (Arabic, Unicode, phrases)", () => {
+    const arabicQuery = analyzeDailymotionUrlOrId("رقص افراح شعبيه مصرى");
+    expect(arabicQuery.kind).toBe("search");
+    expect(arabicQuery.identifier).toBe("رقص افراح شعبيه مصرى");
+    expect(arabicQuery.apiPathV1).toBe(`/videos?search=${encodeURIComponent("رقص افراح شعبيه مصرى")}`);
+    expect(arabicQuery.apiPathV2).toBeNull();
+    expect(arabicQuery.warnings.some((w) => w.code === "v2_no_global_search")).toBe(true);
+
+    const englishPhrase = analyzeDailymotionUrlOrId("popular wedding music");
+    expect(englishPhrase.kind).toBe("search");
+    expect(englishPhrase.identifier).toBe("popular wedding music");
+    expect(englishPhrase.apiPathV1).toBe(`/videos?search=${encodeURIComponent("popular wedding music")}`);
+    expect(englishPhrase.apiPathV2).toBeNull();
+
+    const singleUnicode = analyzeDailymotionUrlOrId("مصر");
+    expect(singleUnicode.kind).toBe("search");
+    expect(singleUnicode.identifier).toBe("مصر");
+  });
+
   it("analyzes explicit type prefixes", () => {
     const prefVideo = analyzeDailymotionUrlOrId("video:x123abc");
     expect(prefVideo.kind).toBe("video");

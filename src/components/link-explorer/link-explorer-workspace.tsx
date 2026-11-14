@@ -46,6 +46,7 @@ import {
   type LinkExplorerResolution,
 } from "@/lib/link-explorer/link-explorer-service";
 import { ResultCard, formatDuration, formatViews } from "@/components/discovery/result-card";
+import { AddToPlaylistModal } from "@/components/playlists/add-to-playlist-modal";
 import { RawJsonDrawer } from "@/components/discovery/raw-json-drawer";
 import { ApiErrorAlert } from "@/components/discovery/api-error-alert";
 import { useDiscoveryWorkspace } from "@/stores/discovery-workspace-store";
@@ -131,11 +132,14 @@ export function LinkExplorerWorkspace() {
   }, []);
 
   const handleVersionChange = (nextVersion: ApiVersion) => {
+    // Strictly update the active API version without auto-triggering network queries or search
     setVersion(nextVersion);
     setRestoredFromHistory(false);
-    if (resolution?.analyzed) {
-      void executeResolution(input, nextVersion);
-    }
+    const params = new URLSearchParams(searchParams.toString());
+    params.set("v", nextVersion);
+    startTransition(() => {
+      router.replace(`?${params.toString()}`, { scroll: false });
+    });
   };
 
   async function executeResolution(targetInput: string, targetVersion: ApiVersion) {
@@ -338,6 +342,7 @@ export function LinkExplorerWorkspace() {
                 <option value="playlist">Force Playlist</option>
                 <option value="livestream">Force Livestream</option>
                 <option value="user">Force User</option>
+                <option value="search">Force Search Query (v1)</option>
               </select>
             </div>
 
@@ -397,6 +402,7 @@ export function LinkExplorerWorkspace() {
                   effectiveKind === "playlist" && "bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/20",
                   effectiveKind === "livestream" && "bg-red-500/15 text-red-600 dark:text-red-400 border border-red-500/20",
                   effectiveKind === "user" && "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20",
+                  effectiveKind === "search" && "bg-teal-500/15 text-teal-600 dark:text-teal-400 border border-teal-500/20",
                   effectiveKind === "unsupported" && "bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/20"
                 )}
               >
@@ -432,25 +438,59 @@ export function LinkExplorerWorkspace() {
             </div>
           </div>
 
-          {/* Canonical API strategy description */}
+          {/* Canonical API strategy description with active track highlights */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs font-mono text-muted-foreground bg-surface p-2.5 rounded-lg border border-border/50">
-            <div>
-              <span className="font-sans font-medium text-foreground">API v1 Strategy: </span>
+            <div className={cn("p-2 rounded-md transition-all", version === "v1" ? "border border-emerald-500/40 bg-emerald-500/10 text-emerald-950 dark:text-emerald-200" : "border border-transparent")}>
+              <div className="flex items-center justify-between mb-1">
+                <span className="font-sans font-medium text-foreground">API v1 Strategy</span>
+                {version === "v1" && (
+                  <span className="text-[10px] uppercase font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-500/20 px-1.5 py-0.5 rounded">
+                    Active Track
+                  </span>
+                )}
+              </div>
               {analyzedPreview.apiPathV1 ? (
                 <code className="text-emerald-600 dark:text-emerald-400">{analyzedPreview.apiPathV1}</code>
               ) : (
                 "None"
               )}
             </div>
-            <div>
-              <span className="font-sans font-medium text-foreground">API v2 Strategy: </span>
+            <div className={cn("p-2 rounded-md transition-all", version === "v2" ? "border border-indigo-500/40 bg-indigo-500/10 text-indigo-950 dark:text-indigo-200" : "border border-transparent")}>
+              <div className="flex items-center justify-between mb-1">
+                <span className="font-sans font-medium text-foreground">API v2 Strategy</span>
+                {version === "v2" && (
+                  <span className="text-[10px] uppercase font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-500/20 px-1.5 py-0.5 rounded">
+                    Active Track
+                  </span>
+                )}
+              </div>
               {analyzedPreview.apiPathV2 ? (
                 <code className="text-indigo-600 dark:text-indigo-400">{analyzedPreview.apiPathV2}</code>
               ) : (
-                <span className="text-muted-foreground italic">No global v2 endpoint</span>
+                <span className="text-muted-foreground italic">No global v2 endpoint (profile-scoped only)</span>
               )}
             </div>
           </div>
+
+          {/* Notice when current version differs from resolution version */}
+          {resolution && resolution.version !== version && (
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 rounded-lg border border-primary/30 bg-primary/5 p-3 text-xs text-foreground">
+              <div className="flex items-center gap-2">
+                <Sparkles className="h-4 w-4 text-primary shrink-0" />
+                <span>
+                  Active API version switched to <strong className="uppercase">{version}</strong>. The results below were fetched from API <strong className="uppercase">{resolution.version}</strong>.
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => void executeResolution(input, version)}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-primary text-primary-foreground text-xs font-semibold hover:opacity-90 transition-all cursor-pointer shrink-0 shadow-2xs"
+              >
+                <RefreshCw className="h-3.5 w-3.5" />
+                Re-analyze on {version.toUpperCase()}
+              </button>
+            </div>
+          )}
 
           {/* Warnings if any */}
           {analyzedPreview.warnings && analyzedPreview.warnings.length > 0 && (
@@ -506,6 +546,7 @@ export function LinkExplorerWorkspace() {
                       )}
                       {effectiveKind === "playlist" && <Library className="h-6 w-6" />}
                       {effectiveKind === "livestream" && <Radio className="h-6 w-6 text-red-500 animate-pulse" />}
+                      {effectiveKind === "search" && <Search className="h-6 w-6 text-teal-500" />}
                     </div>
                     <div>
                       <h2 className="text-lg font-bold text-foreground line-clamp-1">
@@ -562,6 +603,12 @@ export function LinkExplorerWorkspace() {
                         </>
                       )}
                     </button>
+
+                    {/* Add to Playlist Action */}
+                    <AddToPlaylistModal
+                      item={mainItem}
+                      onAdded={() => {}}
+                    />
 
                     {/* External Link */}
                     {resolution.analyzed.canonicalUrl && (
@@ -628,6 +675,8 @@ export function LinkExplorerWorkspace() {
                   <Layers className="h-4 w-4 text-primary" />
                   {effectiveKind === "video"
                     ? "Related Videos"
+                    : effectiveKind === "search"
+                    ? `Search Results for "${resolution.analyzed.identifier}" (${resolution.items.length} items)`
                     : `${resolution.analyzed.displayLabel} Catalog (${resolution.items.length} items)`}
                 </h3>
               </div>
