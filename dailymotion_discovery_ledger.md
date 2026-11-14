@@ -2199,6 +2199,7 @@ CONFIRM_DB_APPLY=true npm run db:apply
 - Environment preflight: `node scripts/validate-all-env.mjs` exited 0 (clean).
 - Database preflight: `npm run db:validate` exited 0 (clean).
 - Git security check: `git check-ignore .env .dev.vars .prod.vars` confirmed 100% ignored. Zero secrets exposed.
+- Vercel Production Deployment: Successfully deployed to production (`dpl_F2uaiQMmA49nZCQcKsuA43wgYQA2`), status **`● Ready`** at `https://dailymotion-discovery.vercel.app` (duration 45s). Turbopack build cleanly emitted 225+ static/dynamic output items without CSR bailout.
 
 ## Known Limitations
 
