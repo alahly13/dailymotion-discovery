@@ -34,6 +34,7 @@ export interface LinkExplorerResolution {
   items: DiscoveryItem[];
   relatedItems?: DiscoveryItem[];
   hasMore?: boolean;
+  page?: number;
   total?: number;
   error?: string;
   reason?: string;
@@ -42,7 +43,8 @@ export interface LinkExplorerResolution {
 export async function resolveLinkExplorerInput(
   input: string,
   version: ApiVersion = "v1",
-  overrideKind?: DailymotionResourceKind
+  overrideKind?: DailymotionResourceKind,
+  page: number = 1
 ): Promise<LinkExplorerResolution> {
   const analyzed = analyzeDailymotionUrlOrId(input);
 
@@ -117,7 +119,7 @@ export async function resolveLinkExplorerInput(
 
       // Fetch channel videos catalog
       const videosRes = await fetch(
-        `/api/discovery/${version}/channels?mode=videos&owner=${encodeURIComponent(analyzed.identifier)}&pageSize=24`
+        `/api/discovery/${version}/channels?mode=videos&owner=${encodeURIComponent(analyzed.identifier)}&pageSize=24&page=${page}`
       );
       const videosData = (await videosRes.json()) as DiscoveryApiResponse;
       if (videosData.ok) {
@@ -139,7 +141,7 @@ export async function resolveLinkExplorerInput(
 
       // Fetch playlist videos
       const videosRes = await fetch(
-        `/api/discovery/${version}/playlists?mode=videos&id=${encodeURIComponent(analyzed.identifier)}&pageSize=50`
+        `/api/discovery/${version}/playlists?mode=videos&id=${encodeURIComponent(analyzed.identifier)}&pageSize=50&page=${page}`
       );
       const videosData = (await videosRes.json()) as DiscoveryApiResponse;
       if (videosData.ok) {
@@ -213,6 +215,7 @@ export async function resolveLinkExplorerInput(
       items,
       relatedItems,
       hasMore,
+      page,
       total,
     };
   } catch (err) {

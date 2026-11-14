@@ -2135,22 +2135,27 @@ CONFIRM_DB_APPLY=true npm run db:apply
 ### 1. Navigation Simplification & Discovery Architecture Consolidation
 - Streamlined `AppShell` (`src/components/layout/app-shell.tsx`) navigation into 4 clean, focused sections:
   - **OVERVIEW**: Dashboard (`/`)
-  - **DISCOVERY**: Global Search (`/global-search`), Link Explorer (`/link-explorer`)
+  - **DISCOVERY**:
+    - Global Search (`/global-search` with nested `V1 — Legacy` and `V2 — Current` links)
+    - Link Explorer (`/link-explorer` with nested `V1 — Legacy` and `V2 — Current` links)
   - **LIBRARY**: Saved Items (`/saved-items`), Search History (`/search-history`), Collections (`/collections`)
-  - **SYSTEM**: Settings (`/settings`), Admin (`/admin`), Storage & R2 (`/storage`), Capabilities (`/capabilities`)
-- Consolidated 13 legacy discovery routes into server-side query-preserving redirects (`src/lib/navigation/discovery-redirect.ts`):
-  - `/general-v1` -> `/global-search?v=v1`
-  - `/general-v2` -> `/global-search?v=v2`
+  - **SYSTEM**: Settings (`/settings`), Account (`/account`), Admin (`/admin`), Storage & R2 (`/storage`), Capabilities (`/capabilities`)
+- Implemented collapsible desktop navigation supporting full view (`w-64`, content `lg:pl-64`) and compact icon rail (`w-16`, content `lg:pl-16`), with preference persisted in `localStorage` (`dm_sidebar_open`) and fully responsive mobile drawer navigation.
+- Added dedicated Account page (`src/app/account/page.tsx`) with administrator identity (`asdy@dailymotion.discov.com`), session lifecycle details, password change form (`/api/admin/change-password`), and system quick links.
+- Consolidated legacy discovery routes into server-side query-preserving redirects (`src/lib/navigation/discovery-redirect.ts`):
+  - `/channels-v1` -> `/link-explorer?v=v1&url=...`
+  - `/channels-v2` -> `/link-explorer?v=v2&url=...`
+  - `/channel-explorer` -> `/link-explorer?url=...`
+  - `/playlists-v1` -> `/link-explorer?v=v1&url=...`
+  - `/playlists-v2` -> `/link-explorer?v=v2&url=...`
+  - `/users-v1` -> `/link-explorer?v=v1&url=...`
+  - `/users-v2` -> `/link-explorer?v=v2&url=...`
+  - `/live-v1` -> `/link-explorer?v=v1&url=...`
+  - `/live-v2` -> `/link-explorer?v=v2&url=...`
   - `/videos-v1` -> `/global-search?v=v1&type=video`
   - `/videos-v2` -> `/global-search?v=v2&type=video`
-  - `/channels-v1` -> `/global-search?v=v1&type=channel`
-  - `/channels-v2` -> `/global-search?v=v2&type=channel`
-  - `/playlists-v1` -> `/global-search?v=v1&type=playlist`
-  - `/playlists-v2` -> `/global-search?v=v2&type=playlist`
-  - `/users-v1` -> `/global-search?v=v1&type=user`
-  - `/users-v2` -> `/global-search?v=v2&type=user`
-  - `/live-v1` -> `/global-search?v=v1&type=live`
-  - `/live-v2` -> `/global-search?v=v2&type=live`
+  - `/general-v1` -> `/global-search?v=v1`
+  - `/general-v2` -> `/global-search?v=v2`
   - `/search` -> `/global-search` (preserving all parameters, query transforms, and offline replay)
   - `/admin` -> `/admin/migrations`
 
@@ -2189,10 +2194,10 @@ CONFIRM_DB_APPLY=true npm run db:apply
   - Link Explorer resolution paths and error recovery strategies.
 
 ### 5. Verification Evidence
-- TypeScript compilation: `tsc --noEmit` exited 0 (clean, zero errors).
-- Vitest test suite: 31/31 test files passed, 146/146 tests passed (`npm test`).
-- Environment preflight: `node scripts/validate-all-env.mjs` exited 0.
-- Database preflight: `npm run db:validate` exited 0.
+- TypeScript compilation: `node ./node_modules/typescript/bin/tsc --noEmit` exited 0 (clean, zero errors).
+- Vitest test suite: 32/32 test files passed, 150/150 tests passed (`npm test`).
+- Environment preflight: `node scripts/validate-all-env.mjs` exited 0 (clean).
+- Database preflight: `npm run db:validate` exited 0 (clean).
 - Git security check: `git check-ignore .env .dev.vars .prod.vars` confirmed 100% ignored. Zero secrets exposed.
 
 ## Known Limitations

@@ -101,7 +101,7 @@ export const V2_VIDEO_FIELD_OPTIONS: ParamOption[] = [
   { value: "profile.name", label: "profile.name" },
 ];
 
-const CATEGORIES: ParamOption[] = [
+export const CATEGORIES: ParamOption[] = [
   "news", "sport", "music", "tech", "fun", "people", "animals", "auto",
   "creation", "kids", "lifestyle", "school", "travel", "tv", "videogames", "webcam",
 ].map((c) => ({ value: c, label: c }));
@@ -129,6 +129,7 @@ export const V1_SEARCH_SCHEMA: ParamDef[] = [
   { key: "familyFilter", wire: "family_filter", label: "Family filter", description: "ON hides explicit content (API default). OFF exposes explicit results — use deliberately.", group: "safety", control: "boolean3", default: null, auth: "public", docUrl: V1_GLOBAL_DOC },
   { key: "explicit", wire: "explicit", label: "Explicit content", description: "Limit to an explicit flag value.", group: "safety", control: "select", options: [{ value: "", label: "Any" }, { value: "true", label: "Explicit" }, { value: "false", label: "Non-explicit" }], default: null, auth: "public", docUrl: V1_DOC },
   { key: "localization", wire: "localization", label: "Localization", description: "Result locale (detect or locale code). v1 global param.", group: "localization", control: "text", default: null, auth: "public", docUrl: V1_GLOBAL_DOC },
+  { key: "country", wire: "country", label: "Country", description: "Country filter.", group: "localization", control: "text", default: null, auth: "public", docUrl: V1_GLOBAL_DOC },
   { key: "sort", wire: "sort", label: "Sort", description: "Endpoint ordering. relevance needs a query.", group: "sorting", control: "select", options: V1_VIDEO_SORTS, default: "relevance", auth: "public", docUrl: V1_DOC },
   { key: "fields", wire: "fields", label: "Response fields", description: "Sparse selection. id + title always kept.", group: "sorting", control: "fields", default: null, auth: "public", docUrl: V1_DOC },
   { key: "pageSize", wire: "limit", label: "Page size (limit)", description: "1–100 per page.", group: "sorting", control: "number", default: "20", min: 1, max: 100, auth: "public", docUrl: V1_DOC },

@@ -33,10 +33,13 @@ import {
   X,
 } from "lucide-react";
 import {
+  CATEGORIES,
   V1_MANDATORY_FIELDS,
   V1_VIDEO_FIELD_OPTIONS,
+  V1_VIDEO_SORTS,
   V2_MANDATORY_FIELDS,
   V2_VIDEO_FIELD_OPTIONS,
+  V2_VIDEO_SORTS,
   buildSearchCacheKey,
   resolveFields,
   resolveSort,
@@ -159,6 +162,7 @@ export function UnifiedSearch() {
   const workspace = useDiscoveryWorkspace();
   const merged = useMergedDataset();
   const [version, setVersion] = useState<ApiVersion>(workspace.lastSearchVersion ?? "v1");
+  const [resourceType, setResourceType] = useState<string>("general");
   const [query, setQuery] = useState("");
   const [profileId, setProfileId] = useState("");
   const [filters, setFilters] = useState<Record<string, string>>({});
@@ -235,11 +239,20 @@ export function UnifiedSearch() {
       if (!active) return;
       const vParam = sp.get("v");
       if (vParam === "v1" || vParam === "v2") setVersion(vParam);
+      const typeParam = sp.get("type");
+      if (typeParam) {
+        if (typeParam === "video" || typeParam === "videos") setResourceType("videos");
+        else if (typeParam === "channel" || typeParam === "channels") setResourceType("channels");
+        else if (typeParam === "playlist" || typeParam === "playlists") setResourceType("playlists");
+        else if (typeParam === "user" || typeParam === "users") setResourceType("users");
+        else if (typeParam === "live") setResourceType("live");
+        else setResourceType(typeParam);
+      }
       if (sp.has("q")) setQuery(sp.get("q") ?? "");
       if (sp.has("profileId")) setProfileId(sp.get("profileId") ?? "");
       const hydrated: Record<string, string> = {};
       for (const [k, val] of sp.entries()) {
-        if (!["v", "q", "profileId", "page", "mode", "fields", "snapshotType", "snapshotId", "replay"].includes(k) && val) {
+        if (!["v", "q", "type", "profileId", "page", "mode", "fields", "snapshotType", "snapshotId", "replay"].includes(k) && val) {
           hydrated[k] = val;
         }
       }
@@ -281,6 +294,13 @@ export function UnifiedSearch() {
     setNotice(null);
     setHasSearched(false);
     setIsReplayMode(false);
+    try {
+      const sp = new URLSearchParams(window.location.search);
+      sp.set("v", next);
+      window.history.replaceState(null, "", `?${sp.toString()}`);
+    } catch {
+      // Non-fatal
+    }
   }
 
   // Count active API filters that deviate from default
@@ -344,7 +364,8 @@ export function UnifiedSearch() {
       if (resolvedFields) params.set("fields", resolvedFields.join(","));
       params.set("page", String(page));
 
-      const response = await fetch(`/api/discovery/${version}/general?${params.toString()}`);
+      const endpointResource = resourceType === "general" ? "general" : resourceType;
+      const response = await fetch(`/api/discovery/${version}/${endpointResource}?${params.toString()}`);
       const data = (await response.json()) as
         | { ok: true; result: { items: DiscoveryItem[]; page: number; pageSize: number; total: number | null; hasMore: boolean; capped: boolean; endpoint: string } }
         | DiscoveryFailure;
@@ -373,6 +394,7 @@ export function UnifiedSearch() {
 
       const shareParams = new URLSearchParams(params);
       shareParams.set("v", version);
+      if (resourceType !== "general") shareParams.set("type", resourceType);
       window.history.replaceState(null, "", `?${shareParams.toString()}`);
 
       if (!append) {
@@ -603,20 +625,20 @@ export function UnifiedSearch() {
             <button
               type="button"
               onClick={() => switchVersion("v1")}
-              className={`rounded-md px-3 py-1.5 text-xs font-black transition cursor-pointer ${
+              className={`rounded-md px-3.5 py-1.5 text-xs font-black transition cursor-pointer ${
                 version === "v1" ? "bg-[var(--primary)] text-white shadow-xs" : "text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
               }`}
             >
-              V1 Legacy / Global Search
+              V1 — Legacy
             </button>
             <button
               type="button"
               onClick={() => switchVersion("v2")}
-              className={`rounded-md px-3 py-1.5 text-xs font-black transition cursor-pointer ${
+              className={`rounded-md px-3.5 py-1.5 text-xs font-black transition cursor-pointer ${
                 version === "v2" ? "bg-[var(--primary)] text-white shadow-xs" : "text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
               }`}
             >
-              V2 REST Catalog
+              V2 — Current
             </button>
           </div>
 
@@ -742,6 +764,60 @@ export function UnifiedSearch() {
               ✓ {saveFlash}
             </span>
           )}
+        </div>
+
+        {/* Quick API Filters Toolbar */}
+        <div className="flex flex-wrap items-center gap-2.5 pt-2 border-t border-[var(--border)]/60 text-xs">
+          {/* Resource Type */}
+          <div className="flex items-center gap-1.5">
+            <span className="text-[10px] font-black uppercase tracking-wider text-[var(--muted-foreground)]">Resource:</span>
+            <select
+              aria-label="Resource Type"
+              value={resourceType}
+              onChange={(e) => setResourceType(e.target.value)}
+              className="h-8 rounded-lg border border-[var(--border)] bg-[var(--surface-container-low)] px-2.5 text-xs font-bold text-[var(--foreground)] cursor-pointer"
+            >
+              <option value="general">All Resources</option>
+              <option value="videos">Videos</option>
+              <option value="channels">Channels / Profiles</option>
+              <option value="playlists">Playlists</option>
+              <option value="users">Users</option>
+              <option value="live">Live / Streams</option>
+            </select>
+          </div>
+
+          {/* Category */}
+          {version === "v1" && (
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] font-black uppercase tracking-wider text-[var(--muted-foreground)]">Category:</span>
+              <select
+                aria-label="Category"
+                value={filters.channel ?? ""}
+                onChange={(e) => setFilter("channel", e.target.value)}
+                className="h-8 rounded-lg border border-[var(--border)] bg-[var(--surface-container-low)] px-2.5 text-xs font-bold text-[var(--foreground)] cursor-pointer"
+              >
+                <option value="">Any Category</option>
+                {CATEGORIES.map((c) => (
+                  <option key={c.value} value={c.value}>{c.label}</option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {/* Sort */}
+          <div className="flex items-center gap-1.5">
+            <span className="text-[10px] font-black uppercase tracking-wider text-[var(--muted-foreground)]">Sort:</span>
+            <select
+              aria-label="Sort"
+              value={filters.sort ?? (version === "v1" ? "relevance" : "-created_at")}
+              onChange={(e) => setFilter("sort", e.target.value)}
+              className="h-8 rounded-lg border border-[var(--border)] bg-[var(--surface-container-low)] px-2.5 text-xs font-bold text-[var(--foreground)] cursor-pointer"
+            >
+              {(version === "v1" ? V1_VIDEO_SORTS : V2_VIDEO_SORTS).map((s) => (
+                <option key={s.value} value={s.value}>{s.label}</option>
+              ))}
+            </select>
+          </div>
         </div>
 
         {/* Collapsible API Parameters Panel (strictly outbound network parameters) */}

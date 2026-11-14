@@ -31,9 +31,9 @@ function fetchLabel(source: ChannelSourceSummary) {
 }
 
 function explorerHref(source: ChannelSourceSummary) {
-  const params = new URLSearchParams({ source: source.sourceInput });
+  const params = new URLSearchParams({ url: source.sourceInput });
   if (source.latestResumableAttemptId) params.set("resumeJobId", source.latestResumableAttemptId);
-  return `/channel-explorer?${params.toString()}`;
+  return `/link-explorer?${params.toString()}`;
 }
 
 function Stat({ label, value }: { label: string; value: string }) {
@@ -73,9 +73,9 @@ export default async function ChannelsPage() {
             These channels come from DB-backed Channel Explorer history. Search and filter surfaces use saved public metadata only.
           </p>
         </div>
-        <Link href="/channel-explorer" className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md bg-[var(--primary)] px-4 text-center text-sm font-black text-white transition hover:bg-[var(--accent-strong)] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[var(--ring)]">
+        <Link href="/link-explorer" className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md bg-[var(--primary)] px-4 text-center text-sm font-black text-white transition hover:bg-[var(--accent-strong)] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[var(--ring)]">
           <Play className="h-4 w-4" aria-hidden="true" />
-          Channel Explorer
+          Link Explorer
         </Link>
       </section>
 
@@ -88,8 +88,8 @@ export default async function ChannelsPage() {
           <Database className="h-7 w-7 text-[var(--primary)]" aria-hidden="true" />
           <h2 className="text-xl font-black">No saved channel attempts yet</h2>
           <p className="text-sm leading-6 text-[var(--muted-foreground)]">Analyze a public Dailymotion source, start a fetch, and stop or complete at least one chunk to populate persisted history here.</p>
-          <Link href="/channel-explorer" className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md bg-[var(--primary)] px-4 py-2 text-sm font-black text-white transition hover:bg-[var(--accent-strong)] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[var(--ring)]">
-            Start Fetch
+          <Link href="/link-explorer" className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md bg-[var(--primary)] px-4 py-2 text-sm font-black text-white transition hover:bg-[var(--accent-strong)] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[var(--ring)]">
+            Start Explore
             <ArrowRight className="h-4 w-4" aria-hidden="true" />
           </Link>
         </Card>

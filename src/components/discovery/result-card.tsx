@@ -332,7 +332,7 @@ export function ResultCard({
               </p>
             )}
 
-            {renderActions(`/channel-explorer?channel=${encodeURIComponent(channelId)}`, "Explore Channel")}
+            {renderActions(`/link-explorer?url=${encodeURIComponent(channelId)}`, "Explore Channel")}
           </div>
         </article>
 

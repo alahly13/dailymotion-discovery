@@ -32,9 +32,9 @@ function sourceName(source: NonNullable<Awaited<ReturnType<typeof getPersistedCo
 }
 
 function explorerHref(sourceInput: string, resumeJobId?: string | null) {
-  const params = new URLSearchParams({ source: sourceInput });
+  const params = new URLSearchParams({ url: sourceInput });
   if (resumeJobId) params.set("resumeJobId", resumeJobId);
-  return `/channel-explorer?${params.toString()}`;
+  return `/link-explorer?${params.toString()}`;
 }
 
 function Stat({ label, value }: { label: string; value: string }) {

@@ -1,7 +1,7 @@
-import { redirectToGlobalSearch } from "@/lib/navigation/discovery-redirect";
+import { redirectToLinkExplorer } from "@/lib/navigation/discovery-redirect";
 
 export default async function PlaylistsV2Page(props: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  await redirectToGlobalSearch(props.searchParams, { v: "v2", type: "playlist" });
+  await redirectToLinkExplorer(props.searchParams, { v: "v2", defaultKind: "playlist" });
 }

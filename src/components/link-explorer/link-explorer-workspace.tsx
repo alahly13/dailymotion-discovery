@@ -77,6 +77,8 @@ export function LinkExplorerWorkspace() {
   const [analyzedPreview, setAnalyzedPreview] = useState<DailymotionAnalyzedLink | null>(null);
 
   const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
   const [resolution, setResolution] = useState<LinkExplorerResolution | null>(null);
   const [rawDrawerOpen, setRawDrawerOpen] = useState(false);
   const [copiedUrl, setCopiedUrl] = useState(false);
@@ -113,9 +115,10 @@ export function LinkExplorerWorkspace() {
   async function executeResolution(targetInput: string, targetVersion: ApiVersion) {
     if (!targetInput.trim()) return;
     setLoading(true);
+    setCurrentPage(1);
     try {
       const selectedKind = overrideKind === "auto" ? undefined : overrideKind;
-      const res = await resolveLinkExplorerInput(targetInput.trim(), targetVersion, selectedKind);
+      const res = await resolveLinkExplorerInput(targetInput.trim(), targetVersion, selectedKind, 1);
       setResolution(res);
 
       // Update URL query parameters seamlessly
@@ -127,6 +130,32 @@ export function LinkExplorerWorkspace() {
       });
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function handleLoadMore() {
+    if (!resolution?.analyzed || loadingMore) return;
+    setLoadingMore(true);
+    try {
+      const nextPage = currentPage + 1;
+      const selectedKind = overrideKind === "auto" ? undefined : overrideKind;
+      const res = await resolveLinkExplorerInput(input.trim(), version, selectedKind, nextPage);
+      if (res.ok && res.items.length > 0) {
+        setResolution((prev) => {
+          if (!prev) return res;
+          return {
+            ...prev,
+            items: [...prev.items, ...res.items],
+            hasMore: res.hasMore,
+            page: nextPage,
+          };
+        });
+        setCurrentPage(nextPage);
+      } else {
+        setResolution((prev) => (prev ? { ...prev, hasMore: false } : prev));
+      }
+    } finally {
+      setLoadingMore(false);
     }
   }
 
@@ -179,25 +208,25 @@ export function LinkExplorerWorkspace() {
             type="button"
             onClick={() => handleVersionChange("v1")}
             className={cn(
-              "rounded-md px-3 py-1.5 text-xs font-medium transition-colors cursor-pointer",
+              "rounded-md px-3 py-1.5 text-xs font-bold transition-colors cursor-pointer",
               version === "v1"
                 ? "bg-emerald-600 text-white shadow-xs"
                 : "text-muted-foreground hover:text-foreground hover:bg-surface-muted"
             )}
           >
-            v1 — Legacy API
+            V1 — Legacy
           </button>
           <button
             type="button"
             onClick={() => handleVersionChange("v2")}
             className={cn(
-              "rounded-md px-3 py-1.5 text-xs font-medium transition-colors cursor-pointer",
+              "rounded-md px-3 py-1.5 text-xs font-bold transition-colors cursor-pointer",
               version === "v2"
                 ? "bg-indigo-600 text-white shadow-xs"
                 : "text-muted-foreground hover:text-foreground hover:bg-surface-muted"
             )}
           >
-            v2 — Modern REST
+            V2 — Current
           </button>
         </div>
       </div>
@@ -570,6 +599,30 @@ export function LinkExplorerWorkspace() {
                   );
                 })}
               </div>
+
+              {/* Load More Pagination for Multi-Page Catalogs */}
+              {resolution.hasMore && (
+                <div className="flex justify-center pt-4">
+                  <button
+                    type="button"
+                    disabled={loadingMore}
+                    onClick={() => void handleLoadMore()}
+                    className="inline-flex min-h-10 items-center gap-2 rounded-lg bg-[var(--primary)] px-5 text-xs font-black text-white hover:opacity-95 disabled:opacity-50 transition-all cursor-pointer shadow-xs"
+                  >
+                    {loadingMore ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Loading Next Page...
+                      </>
+                    ) : (
+                      <>
+                        <RefreshCw className="h-3.5 w-3.5" />
+                        Load More Videos (Page {currentPage + 1})
+                      </>
+                    )}
+                  </button>
+                </div>
+              )}
             </div>
           )}
         </div>
