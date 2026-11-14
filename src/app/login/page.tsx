@@ -2,7 +2,6 @@
 
 import { useState, useTransition, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import Link from "next/link";
 import {
   AlertCircle,
   ArrowRight,
@@ -14,10 +13,22 @@ import {
   Mail,
   RotateCw,
   ShieldCheck,
+  Sparkles,
   User,
 } from "lucide-react";
 import { ThemeToggle } from "@/components/layout/theme-toggle";
 
+/**
+ * Standalone Security Gateway & Platform Login Portal (2026)
+ *
+ * What this controls:
+ * 1. Independent full-viewport gateway outside the internal AppShell (no sidebar, no internal nav).
+ * 2. Supabase Auth SSR session verification and cookie establishment.
+ * 3. Support for canonical administrator identity `asdy` and email credentials.
+ * 4. 7-day session persistence toggle (ADMIN_SESSION_TTL_SECONDS=604800).
+ * 5. Integrated password recovery flow.
+ * 6. Responsive 2026 Luxury True OLED Obsidian aesthetic with light/dark theme support.
+ */
 function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -82,7 +93,7 @@ function LoginForm() {
           return;
         }
 
-        setSuccessMessage("Authentication verified. Redirecting to workspace...");
+        setSuccessMessage("Authentication verified. Opening your research workspace...");
 
         // Ensure safe return destination
         const safeDestination =
@@ -136,9 +147,15 @@ function LoginForm() {
   };
 
   return (
-    <div className="min-h-screen flex flex-col justify-between bg-[var(--background)] text-[var(--foreground)] selection:bg-[var(--primary)] selection:text-[var(--primary-foreground)]">
-      {/* Top utility bar */}
-      <header className="w-full flex items-center justify-between px-6 py-4 border-b border-[var(--border)] bg-[var(--surface)]/80 backdrop-blur-md">
+    <div className="min-h-screen flex flex-col justify-between bg-[var(--background)] text-[var(--foreground)] selection:bg-[var(--primary)] selection:text-[var(--primary-foreground)] relative overflow-hidden">
+      {/* Subtle radial ambient background glow for luxury dark mode */}
+      <div
+        className="pointer-events-none absolute -top-40 left-1/2 -translate-x-1/2 w-[650px] h-[400px] rounded-full bg-gradient-to-b from-purple-600/10 via-blue-600/5 to-transparent blur-3xl"
+        aria-hidden="true"
+      />
+
+      {/* Standalone Gateway Top Bar */}
+      <header className="relative z-10 w-full flex items-center justify-between px-6 py-4 border-b border-[var(--border)] bg-[var(--surface)]/70 backdrop-blur-xl">
         <div className="flex items-center gap-3">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
@@ -151,40 +168,40 @@ function LoginForm() {
               Dailymotion Discovery
             </span>
             <span className="block text-[10px] font-bold uppercase tracking-wider text-[var(--muted-foreground)]">
-              Platform Authentication (2026)
+              Security Gateway & Platform Portal
             </span>
           </div>
         </div>
 
         <div className="flex items-center gap-3">
-          <span className="hidden sm:inline-flex items-center gap-1 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-0.5 text-[11px] font-extrabold text-emerald-500 dark:text-emerald-400">
-            <ShieldCheck className="h-3 w-3" />
+          <span className="hidden sm:inline-flex items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 text-[11px] font-extrabold text-emerald-500 dark:text-emerald-400">
+            <ShieldCheck className="h-3.5 w-3.5" />
             <span>Supabase SSR Enforced</span>
           </span>
           <ThemeToggle />
         </div>
       </header>
 
-      {/* Main card container */}
-      <main className="flex-1 flex items-center justify-center px-4 py-12 sm:px-6 lg:px-8">
-        <div className="w-full max-w-md space-y-6">
-          {/* Card */}
-          <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-6 sm:p-8 shadow-xl shadow-black/5 dark:shadow-black/25">
+      {/* Main Standalone Gateway Card Container */}
+      <main className="relative z-10 flex-1 flex items-center justify-center px-4 py-12 sm:px-6 lg:px-8">
+        <div className="w-full max-w-md sm:max-w-lg space-y-6">
+          {/* Gateway Card */}
+          <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)]/95 backdrop-blur-xl p-8 sm:p-10 shadow-2xl shadow-black/10 dark:shadow-black/50 transition-all">
             {/* Header branding inside card */}
-            <div className="text-center space-y-2 mb-6">
-              <div className="inline-flex h-12 w-12 items-center justify-center rounded-xl bg-[color-mix(in_srgb,var(--primary)_15%,transparent)] text-[var(--primary)] mb-1">
+            <div className="text-center space-y-2 mb-8">
+              <div className="inline-flex h-14 w-14 items-center justify-center rounded-2xl bg-[color-mix(in_srgb,var(--primary)_12%,transparent)] text-[var(--primary)] mb-2 shadow-inner border border-[var(--border)]">
                 {mode === "signin" ? (
-                  <Lock className="h-6 w-6" aria-hidden="true" />
+                  <Lock className="h-7 w-7" aria-hidden="true" />
                 ) : (
-                  <KeyRound className="h-6 w-6" aria-hidden="true" />
+                  <KeyRound className="h-7 w-7" aria-hidden="true" />
                 )}
               </div>
-              <h1 className="text-2xl font-black tracking-tight text-[var(--foreground)]">
+              <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-[var(--foreground)]">
                 {mode === "signin" ? "Sign In to Dailymotion Discovery" : "Account Password Recovery"}
               </h1>
-              <p className="text-xs text-[var(--muted-foreground)] max-w-xs mx-auto">
+              <p className="text-xs sm:text-sm text-[var(--muted-foreground)] max-w-sm mx-auto leading-relaxed">
                 {mode === "signin"
-                  ? "Access your owner-scoped research catalog, Saved Titles, and dual-API discovery tools."
+                  ? "Access your owner-scoped research catalog, Saved Titles manifest, and dual-API discovery workspaces."
                   : "Enter your registered email address to receive secure recovery instructions."}
               </p>
             </div>
@@ -193,7 +210,7 @@ function LoginForm() {
             {errorMessage && (
               <div
                 role="alert"
-                className="mb-4 flex items-start gap-2.5 rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-600 dark:text-red-400 font-medium"
+                className="mb-5 flex items-start gap-3 rounded-xl border border-red-500/30 bg-red-500/10 p-3.5 text-xs text-red-600 dark:text-red-400 font-medium"
               >
                 <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
                 <span className="flex-1 leading-relaxed">{errorMessage}</span>
@@ -203,7 +220,7 @@ function LoginForm() {
             {successMessage && (
               <div
                 role="status"
-                className="mb-4 flex items-start gap-2.5 rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-3 text-xs text-emerald-600 dark:text-emerald-400 font-medium"
+                className="mb-5 flex items-start gap-3 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3.5 text-xs text-emerald-600 dark:text-emerald-400 font-medium"
               >
                 <CheckCircle2 className="h-4 w-4 shrink-0 mt-0.5" />
                 <span className="flex-1 leading-relaxed">{successMessage}</span>
@@ -212,9 +229,9 @@ function LoginForm() {
 
             {mode === "signin" ? (
               /* Sign In Form */
-              <form onSubmit={handleSignIn} className="space-y-4" noValidate>
+              <form onSubmit={handleSignIn} className="space-y-5" noValidate>
                 {/* Account identifier field */}
-                <div className="space-y-1.5">
+                <div className="space-y-2">
                   <label
                     htmlFor="identifier"
                     className="block text-xs font-bold text-[var(--foreground)] uppercase tracking-wider"
@@ -222,7 +239,7 @@ function LoginForm() {
                     Email or Account Identifier
                   </label>
                   <div className="relative">
-                    <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3 text-[var(--muted-foreground)]">
+                    <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3.5 text-[var(--muted-foreground)]">
                       <User className="h-4 w-4" aria-hidden="true" />
                     </div>
                     <input
@@ -234,13 +251,13 @@ function LoginForm() {
                       value={identifier}
                       onChange={(e) => setIdentifier(e.target.value)}
                       placeholder="asdy or asdy@dailymotion.discov.com"
-                      className="block w-full rounded-lg border border-[var(--border)] bg-[var(--surface-container-low)] pl-9 pr-3 py-2 text-sm text-[var(--foreground)] placeholder:text-[var(--muted-foreground)] focus:border-[var(--primary)] focus:outline-hidden focus:ring-1 focus:ring-[var(--primary)]"
+                      className="block w-full rounded-xl border border-[var(--border)] bg-[var(--surface-container-low)] pl-10 pr-3.5 py-2.5 text-sm text-[var(--foreground)] placeholder:text-[var(--muted-foreground)] focus:border-[var(--primary)] focus:outline-hidden focus:ring-1 focus:ring-[var(--primary)] transition"
                     />
                   </div>
                 </div>
 
                 {/* Password field */}
-                <div className="space-y-1.5">
+                <div className="space-y-2">
                   <div className="flex items-center justify-between">
                     <label
                       htmlFor="password"
@@ -257,7 +274,7 @@ function LoginForm() {
                     </button>
                   </div>
                   <div className="relative">
-                    <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3 text-[var(--muted-foreground)]">
+                    <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3.5 text-[var(--muted-foreground)]">
                       <Lock className="h-4 w-4" aria-hidden="true" />
                     </div>
                     <input
@@ -269,13 +286,13 @@ function LoginForm() {
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
                       placeholder="••••••••••••"
-                      className="block w-full rounded-lg border border-[var(--border)] bg-[var(--surface-container-low)] pl-9 pr-10 py-2 text-sm text-[var(--foreground)] placeholder:text-[var(--muted-foreground)] focus:border-[var(--primary)] focus:outline-hidden focus:ring-1 focus:ring-[var(--primary)]"
+                      className="block w-full rounded-xl border border-[var(--border)] bg-[var(--surface-container-low)] pl-10 pr-11 py-2.5 text-sm text-[var(--foreground)] placeholder:text-[var(--muted-foreground)] focus:border-[var(--primary)] focus:outline-hidden focus:ring-1 focus:ring-[var(--primary)] transition"
                     />
                     <button
                       type="button"
                       onClick={() => setShowPassword((prev) => !prev)}
                       aria-label={showPassword ? "Hide password" : "Show password"}
-                      className="absolute inset-y-0 right-0 flex items-center pr-3 text-[var(--muted-foreground)] hover:text-[var(--foreground)] cursor-pointer"
+                      className="absolute inset-y-0 right-0 flex items-center pr-3.5 text-[var(--muted-foreground)] hover:text-[var(--foreground)] cursor-pointer"
                     >
                       {showPassword ? (
                         <EyeOff className="h-4 w-4" aria-hidden="true" />
@@ -288,7 +305,7 @@ function LoginForm() {
 
                 {/* Remember session checkbox */}
                 <div className="flex items-center justify-between pt-1">
-                  <label className="flex items-center gap-2 cursor-pointer select-none">
+                  <label className="flex items-center gap-2.5 cursor-pointer select-none">
                     <input
                       type="checkbox"
                       checked={rememberMe}
@@ -301,12 +318,12 @@ function LoginForm() {
                   </label>
                 </div>
 
-                {/* Submit button */}
+                {/* Submit button with high-contrast armor */}
                 <div className="pt-2">
                   <button
                     type="submit"
                     disabled={isPending}
-                    className="w-full inline-flex items-center justify-center gap-2 rounded-lg bg-primary text-primary-foreground font-bold px-4 py-2.5 text-sm shadow-md transition hover:opacity-90 active:scale-[0.99] disabled:opacity-50 cursor-pointer"
+                    className="w-full inline-flex items-center justify-center gap-2 rounded-xl bg-primary text-primary-foreground font-extrabold px-5 py-3 text-sm shadow-lg transition hover:opacity-95 active:scale-[0.99] disabled:opacity-50 cursor-pointer"
                   >
                     {isPending ? (
                       <>
@@ -315,7 +332,7 @@ function LoginForm() {
                       </>
                     ) : (
                       <>
-                        <span>Sign In</span>
+                        <span>Sign In to Platform</span>
                         <ArrowRight className="h-4 w-4" />
                       </>
                     )}
@@ -324,8 +341,8 @@ function LoginForm() {
               </form>
             ) : (
               /* Forgot Password Form */
-              <form onSubmit={handleForgotPassword} className="space-y-4" noValidate>
-                <div className="space-y-1.5">
+              <form onSubmit={handleForgotPassword} className="space-y-5" noValidate>
+                <div className="space-y-2">
                   <label
                     htmlFor="recoveryEmail"
                     className="block text-xs font-bold text-[var(--foreground)] uppercase tracking-wider"
@@ -333,7 +350,7 @@ function LoginForm() {
                     Account Email Address
                   </label>
                   <div className="relative">
-                    <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3 text-[var(--muted-foreground)]">
+                    <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3.5 text-[var(--muted-foreground)]">
                       <Mail className="h-4 w-4" aria-hidden="true" />
                     </div>
                     <input
@@ -345,16 +362,16 @@ function LoginForm() {
                       value={recoveryEmail}
                       onChange={(e) => setRecoveryEmail(e.target.value)}
                       placeholder="asdy@dailymotion.discov.com"
-                      className="block w-full rounded-lg border border-[var(--border)] bg-[var(--surface-container-low)] pl-9 pr-3 py-2 text-sm text-[var(--foreground)] placeholder:text-[var(--muted-foreground)] focus:border-[var(--primary)] focus:outline-hidden focus:ring-1 focus:ring-[var(--primary)]"
+                      className="block w-full rounded-xl border border-[var(--border)] bg-[var(--surface-container-low)] pl-10 pr-3.5 py-2.5 text-sm text-[var(--foreground)] placeholder:text-[var(--muted-foreground)] focus:border-[var(--primary)] focus:outline-hidden focus:ring-1 focus:ring-[var(--primary)] transition"
                     />
                   </div>
                 </div>
 
-                <div className="pt-2 space-y-2">
+                <div className="pt-2 space-y-3">
                   <button
                     type="submit"
                     disabled={isPending || recoverySent}
-                    className="w-full inline-flex items-center justify-center gap-2 rounded-lg bg-primary text-primary-foreground font-bold px-4 py-2.5 text-sm shadow-md transition hover:opacity-90 disabled:opacity-50 cursor-pointer"
+                    className="w-full inline-flex items-center justify-center gap-2 rounded-xl bg-primary text-primary-foreground font-extrabold px-5 py-3 text-sm shadow-lg transition hover:opacity-95 disabled:opacity-50 cursor-pointer"
                   >
                     {isPending ? (
                       <>
@@ -376,7 +393,7 @@ function LoginForm() {
                       setErrorMessage(null);
                       setSuccessMessage(null);
                     }}
-                    className="w-full inline-flex items-center justify-center rounded-lg border border-[var(--border)] bg-[var(--surface-container-low)] font-bold px-4 py-2 text-xs text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--surface-container-high)] transition cursor-pointer"
+                    className="w-full inline-flex items-center justify-center rounded-xl border border-[var(--border)] bg-[var(--surface-container-low)] font-bold px-4 py-2.5 text-xs text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--surface-container-high)] transition cursor-pointer"
                   >
                     Back to Sign In
                   </button>
@@ -385,7 +402,7 @@ function LoginForm() {
             )}
 
             {/* Account scope & security reassurance note */}
-            <div className="mt-6 border-t border-[var(--border)] pt-4 text-center">
+            <div className="mt-8 border-t border-[var(--border)] pt-4 text-center">
               <p className="text-[11px] text-[var(--muted-foreground)] leading-relaxed">
                 Authorized Personnel Only. Every session is cryptographically validated and strictly
                 owner-scoped. Registration of new unapproved accounts is prohibited.
@@ -394,9 +411,12 @@ function LoginForm() {
           </div>
 
           {/* Footer information */}
-          <div className="text-center text-xs text-[var(--muted-foreground)] space-y-1">
-            <p className="font-semibold text-[var(--foreground)]">Dailymotion Discovery Platform</p>
-            <p className="text-[11px]">
+          <div className="text-center text-xs text-[var(--muted-foreground)] space-y-1.5">
+            <p className="font-bold text-[var(--foreground)] flex items-center justify-center gap-1.5">
+              <Sparkles className="h-3.5 w-3.5 text-purple-400" />
+              <span>Dailymotion Discovery Platform (2026)</span>
+            </p>
+            <p className="text-[11px] text-[var(--muted-foreground)]">
               Dual-API V1/V2 · Cloudflare R2 Cloud Sync · IndexedDB Local-First Architecture
             </p>
           </div>
@@ -404,7 +424,7 @@ function LoginForm() {
       </main>
 
       {/* Bottom status bar */}
-      <footer className="w-full py-3 px-6 text-center border-t border-[var(--border)] bg-[var(--surface)] text-[11px] text-[var(--muted-foreground)]">
+      <footer className="relative z-10 w-full py-3.5 px-6 text-center border-t border-[var(--border)] bg-[var(--surface)]/70 backdrop-blur-md text-[11px] text-[var(--muted-foreground)]">
         <span>Protected by Supabase SSR & Cloudflare Worker Security Architecture (2026)</span>
       </footer>
     </div>

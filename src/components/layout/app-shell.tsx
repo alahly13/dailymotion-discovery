@@ -197,6 +197,24 @@ export function AppShell({ children }: { children: ReactNode }) {
     return targetV === activeVersion;
   };
 
+  // Standalone Authentication Gateway Page:
+  // If user is on an authentication gateway route (/login, /admin/login, /auth/*),
+  // bypass the internal application shell entirely (no sidebar, no internal navigation, no headers)
+  // so the login page renders as a 100% standalone, isolated external gateway portal outside the app.
+  const isAuthRoute =
+    pathname === "/login" ||
+    pathname?.startsWith("/login/") ||
+    pathname === "/admin/login" ||
+    pathname?.startsWith("/auth/");
+
+  if (isAuthRoute) {
+    return (
+      <div className="min-h-screen bg-[var(--background)] text-[var(--foreground)] selection:bg-[var(--primary)] selection:text-[var(--primary-foreground)]">
+        {children}
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-[var(--background)] text-[var(--foreground)] overflow-x-hidden">
       {/* ── Desktop Persistent Sidebar (Expanded: w-64 | Collapsed: w-16) ──── */}

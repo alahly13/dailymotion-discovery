@@ -41,7 +41,10 @@ Scope: Project source-of-truth ledger, updated after Search Architecture Consoli
    - `src/lib/auth/auth-service.ts`: Server-side Supabase SSR session validation. Exports `getServerAuthSession()`, `requireAuth()`, and `requireAdminAuth()`.
    - `src/lib/supabase/middleware.ts` & `src/proxy.ts`: Next.js 16 proxy interceptor. Whitelists public paths (`/login`, `/auth/callback`, `/api/auth/*`, static assets) and redirects unauthenticated traffic from `/` and all private workspaces directly to `/login`. Redirects authenticated users from `/login` to `/`. Restricts `/admin/*` and `/api/admin/*` to verified administrators.
 
-2. **Dedicated `/login` Portal (`src/app/login/page.tsx`)**:
+2. **Dedicated Standalone Security Gateway (`/login` & `src/components/layout/app-shell.tsx`)**:
+   - Detached the login page completely from the internal application shell (`AppShell`). Unauthenticated visitors arriving at `/login` see zero internal navigation links, zero sidebars, and zero internal app headers.
+   - Built a 100% standalone full-viewport security gateway portal with luxury ambient backdrop glow, high-contrast inputs, password toggle, 7-day session persistence, and password recovery.
+   - When authenticated, users enter the application where `AppShell` renders the complete navigation and dashboard workspace.
    - Dailymotion Discovery luxury obsidian styling matching the 2026 OLED aesthetic.
    - Dual identifier support (email or `asdy` alias) and password with show/hide toggle.
    - Remember-session checkbox honoring Supabase SSR cookie persistence.
