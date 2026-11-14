@@ -1,13 +1,14 @@
-// Link Explorer Workspace — Universal Dailymotion URL & Identifier Discovery Center
+// Link Explorer Workspace — Advanced Dailymotion Resource Explorer & Channel Intelligence (2026)
 //
 // What this controls: Unified URL and ID analysis workspace supporting any Dailymotion link,
 // handle, video ID, playlist ID, or livestream with automatic detection, manual override,
-// API v1 vs v2 switching, deep channel crawler bridging, and IndexedDB snapshots.
+// API v1 vs v2 switching, deep multi-page catalog discovery, Resource Intelligence Overview,
+// fine-grained fetch knobs, Provider vs Local filters, and SHA-256 manifest exports.
 // Scope: Link Explorer (/link-explorer).
 
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import {
@@ -18,9 +19,11 @@ import {
   Check,
   Compass,
   Copy,
+  Download,
   ExternalLink,
   Eye,
   FileCode2,
+  FileSpreadsheet,
   Globe,
   Layers,
   Library,
@@ -29,6 +32,7 @@ import {
   Radio,
   RefreshCw,
   Search,
+  Sliders,
   Sparkles,
   Tv,
   User,
@@ -42,9 +46,23 @@ import {
   type DailymotionResourceKind,
 } from "@/lib/platforms/dailymotion/dailymotion-url-analyzer";
 import {
+  DEFAULT_SCAN_CONFIG,
   resolveLinkExplorerInput,
-  type LinkExplorerResolution,
 } from "@/lib/link-explorer/link-explorer-service";
+import type {
+  LinkExplorerManifest,
+  LinkExplorerResolution,
+  ScanBudgetConfig,
+  ScanProgressState,
+} from "@/lib/link-explorer/link-explorer-types";
+import { ResourceIntelligenceOverview } from "./resource-intelligence-overview";
+import { AdvancedFetchSettingsPanel } from "./advanced-fetch-settings-panel";
+import { ScanProgressBar } from "./scan-progress-bar";
+import {
+  LinkExplorerFilters,
+  type LocalFilterCriteria,
+  type LocalSortOption,
+} from "./link-explorer-filters";
 import { ResultCard, formatDuration, formatViews } from "@/components/discovery/result-card";
 import { AddToPlaylistModal } from "@/components/playlists/add-to-playlist-modal";
 import { RawJsonDrawer } from "@/components/discovery/raw-json-drawer";
@@ -84,6 +102,13 @@ export function LinkExplorerWorkspace() {
   const [overrideKind, setOverrideKind] = useState<DailymotionResourceKind | "auto">("auto");
   const [analyzedPreview, setAnalyzedPreview] = useState<DailymotionAnalyzedLink | null>(null);
 
+  // Scan Config State
+  const [scanConfig, setScanConfig] = useState<ScanBudgetConfig>(DEFAULT_SCAN_CONFIG);
+  const [scanProgress, setScanProgress] = useState<ScanProgressState | null>(null);
+  const [isPaused, setIsPaused] = useState(false);
+  const abortControllerRef = useRef<AbortController | null>(null);
+
+  // Core Resolution State
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
@@ -91,6 +116,16 @@ export function LinkExplorerWorkspace() {
   const [rawDrawerOpen, setRawDrawerOpen] = useState(false);
   const [copiedUrl, setCopiedUrl] = useState(false);
   const [restoredFromHistory, setRestoredFromHistory] = useState(false);
+
+  // Local In-Memory Filters and Sorters (Zero Network Calls)
+  const [activeYearFilter, setActiveYearFilter] = useState<number | null>(null);
+  const [localSort, setLocalSort] = useState<LocalSortOption>("api_order");
+  const [localFilters, setLocalFilters] = useState<LocalFilterCriteria>({
+    searchQuery: "",
+    durationRange: "all",
+    viewsRange: "all",
+    year: null,
+  });
 
   // Sync real-time detection preview when input changes
   useEffect(() => {
@@ -110,7 +145,6 @@ export function LinkExplorerWorkspace() {
   }, []);
 
   const handleVersionChange = (nextVersion: ApiVersion) => {
-    // Strictly update the active API version without auto-triggering network queries or search
     setVersion(nextVersion);
     setRestoredFromHistory(false);
     const params = new URLSearchParams(searchParams.toString());
@@ -120,38 +154,52 @@ export function LinkExplorerWorkspace() {
     });
   };
 
-  async function executeResolution(targetInput: string, targetVersion: ApiVersion) {
+  async function executeResolution(
+    targetInput: string,
+    targetVersion: ApiVersion,
+    overrideConfig?: Partial<ScanBudgetConfig>
+  ) {
     const clean = targetInput.trim();
     if (!clean) return;
+
+    // Abort any ongoing crawler scan
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    const abortCtrl = new AbortController();
+    abortControllerRef.current = abortCtrl;
+
     void captureLinkSubmission(clean, targetVersion, analyzedPreview ?? undefined);
     setLoading(true);
     setRestoredFromHistory(false);
+    setIsPaused(false);
     setCurrentPage(1);
+    setActiveYearFilter(null);
+
+    const effectiveBudgetConfig: ScanBudgetConfig = {
+      ...scanConfig,
+      ...overrideConfig,
+    };
+
     try {
       const selectedKind = overrideKind === "auto" ? undefined : overrideKind;
-      const res = await resolveLinkExplorerInput(targetInput.trim(), targetVersion, selectedKind, 1);
-      setResolution(res);
+      const res = await resolveLinkExplorerInput(
+        clean,
+        targetVersion,
+        selectedKind,
+        effectiveBudgetConfig,
+        (progress) => setScanProgress(progress),
+        abortCtrl.signal
+      );
 
-      if (res.ok && res.items.length > 0) {
-        void captureSearchSnapshot({
-          workspace: "link_explorer",
-          query: targetInput.trim(),
-          route: "/link-explorer",
-          apiVersion: targetVersion,
-          resourceType: selectedKind ? selectedKind.toUpperCase() : (res.effectiveKind ? res.effectiveKind.toUpperCase() : "ALL"),
-          mode: targetVersion === "v1" ? "search" : "browse",
-          apiParams: { url: targetInput.trim() },
-          rawResponse: res,
-          items: res.items,
-          pageIndex: 1,
-          hasMore: res.hasMore,
-          totalResults: res.items.length,
-        });
+      setResolution(res);
+      if (res.scanProgress) {
+        setScanProgress(res.scanProgress);
       }
 
       // Update URL query parameters seamlessly
       const params = new URLSearchParams(searchParams.toString());
-      params.set("url", targetInput.trim());
+      params.set("url", clean);
       params.set("v", targetVersion);
       startTransition(() => {
         router.replace(`?${params.toString()}`, { scroll: false });
@@ -162,20 +210,32 @@ export function LinkExplorerWorkspace() {
   }
 
   async function handleLoadMore() {
-    if (!resolution?.analyzed || loadingMore) return;
+    if (!resolution?.analyzed || loadingMore || !resolution.ok) return;
     setLoadingMore(true);
     try {
       const nextPage = currentPage + 1;
       const selectedKind = overrideKind === "auto" ? undefined : overrideKind;
-      const res = await resolveLinkExplorerInput(input.trim(), version, selectedKind, nextPage);
+      const res = await resolveLinkExplorerInput(
+        input.trim(),
+        version,
+        selectedKind,
+        { ...scanConfig, maxPages: 1 },
+        undefined,
+        abortControllerRef.current?.signal
+      );
+
       if (res.ok && res.items.length > 0) {
         setResolution((prev) => {
           if (!prev) return res;
+          const existingKeys = new Set(prev.items.map((it) => discoveryCompositeKey(it.apiVersion, it.kind, it.id)));
+          const newItems = res.items.filter((it) => !existingKeys.has(discoveryCompositeKey(it.apiVersion, it.kind, it.id)));
+          const combined = [...prev.items, ...newItems];
           return {
             ...prev,
-            items: [...prev.items, ...res.items],
+            items: combined,
             hasMore: res.hasMore,
             page: nextPage,
+            intelligence: res.intelligence ?? prev.intelligence,
           };
         });
         setCurrentPage(nextPage);
@@ -206,27 +266,196 @@ export function LinkExplorerWorkspace() {
     }
   };
 
+  const handlePauseScan = () => {
+    setIsPaused(true);
+  };
+
+  const handleResumeScan = () => {
+    setIsPaused(false);
+  };
+
+  const handleCancelScan = () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    setLoading(false);
+    setScanProgress((prev) => (prev ? { ...prev, status: "interrupted" } : null));
+  };
+
+  // Export Manifest as JSON
+  const handleExportJson = () => {
+    if (!resolution?.manifest) return;
+    const blob = new Blob([JSON.stringify(resolution.manifest, null, 2)], {
+      type: "application/json",
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${resolution.manifest.manifestId}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  // Export Manifest as CSV
+  const handleExportCsv = () => {
+    if (!resolution?.items || resolution.items.length === 0) return;
+    const headers = ["ID", "Title", "Kind", "API_Version", "Views", "Duration_Sec", "Created_At", "Owner", "URL"];
+    const rows = resolution.items.map((it) => [
+      `"${it.id}"`,
+      `"${(it.title || "").replace(/"/g, '""')}"`,
+      `"${it.kind}"`,
+      `"${it.apiVersion}"`,
+      it.views ?? 0,
+      it.duration ?? 0,
+      `"${it.createdAt || ""}"`,
+      `"${(it.ownerName || it.ownerId || "").replace(/"/g, '""')}"`,
+      `"${it.url || ""}"`,
+    ]);
+    const csvContent = "\uFEFF" + [headers.join(","), ...rows.map((r) => r.join(","))].join("\r\n");
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `dm-catalog-${resolution.analyzed.identifier}-${Date.now()}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   const effectiveKind =
     overrideKind !== "auto"
       ? overrideKind
       : resolution?.effectiveKind || analyzedPreview?.kind || "video";
 
+  // Compute available years for filtering
+  const availableYears = useMemo(() => {
+    if (!resolution?.items) return [];
+    const set = new Set<number>();
+    for (const it of resolution.items) {
+      if (it.createdAt) {
+        const yr = new Date(it.createdAt).getUTCFullYear();
+        if (!Number.isNaN(yr)) set.add(yr);
+      }
+    }
+    return Array.from(set).sort((a, b) => b - a);
+  }, [resolution?.items]);
+
+  // Apply In-Memory Filtering and Sorting Pipeline
+  const visibleItems = useMemo(() => {
+    if (!resolution?.items) return [];
+    let list = [...resolution.items];
+
+    // 1. Year Filter from Intelligence Overview
+    if (activeYearFilter !== null) {
+      list = list.filter((it) => {
+        if (!it.createdAt) return false;
+        const yr = new Date(it.createdAt).getUTCFullYear();
+        return yr === activeYearFilter;
+      });
+    }
+
+    // 2. Year Filter from Local Filters Dropdown
+    if (localFilters.year !== null) {
+      list = list.filter((it) => {
+        if (!it.createdAt) return false;
+        const yr = new Date(it.createdAt).getUTCFullYear();
+        return yr === localFilters.year;
+      });
+    }
+
+    // 3. Search Query Filter
+    if (localFilters.searchQuery.trim()) {
+      const q = localFilters.searchQuery.trim().toLowerCase();
+      list = list.filter((it) => {
+        const matchTitle = (it.title || "").toLowerCase().includes(q);
+        const matchDesc = (it.description || "").toLowerCase().includes(q);
+        const matchTags = (it.tags || []).some((t) => t.toLowerCase().includes(q));
+        const matchId = (it.id || "").toLowerCase().includes(q);
+        const matchOwner = (it.ownerName || it.ownerId || "").toLowerCase().includes(q);
+        return matchTitle || matchDesc || matchTags || matchId || matchOwner;
+      });
+    }
+
+    // 4. Duration Range Filter
+    if (localFilters.durationRange !== "all") {
+      list = list.filter((it) => {
+        if (it.duration === null || it.duration === undefined) return false;
+        if (localFilters.durationRange === "short") return it.duration < 300;
+        if (localFilters.durationRange === "medium") return it.duration >= 300 && it.duration <= 1200;
+        if (localFilters.durationRange === "long") return it.duration > 1200;
+        return true;
+      });
+    }
+
+    // 5. Views Range Filter
+    if (localFilters.viewsRange !== "all") {
+      list = list.filter((it) => {
+        const v = it.views || 0;
+        if (localFilters.viewsRange === "under_1k") return v < 1000;
+        if (localFilters.viewsRange === "1k_10k") return v >= 1000 && v < 10000;
+        if (localFilters.viewsRange === "10k_100k") return v >= 10000 && v < 100000;
+        if (localFilters.viewsRange === "over_100k") return v >= 100000;
+        return true;
+      });
+    }
+
+    // 6. Local Sorter
+    if (localSort === "newest") {
+      list.sort((a, b) => {
+        const tA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+        const tB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+        return tB - tA;
+      });
+    } else if (localSort === "oldest") {
+      list.sort((a, b) => {
+        const tA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+        const tB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+        return tA - tB;
+      });
+    } else if (localSort === "views_desc") {
+      list.sort((a, b) => (b.views || 0) - (a.views || 0));
+    } else if (localSort === "views_asc") {
+      list.sort((a, b) => (a.views || 0) - (b.views || 0));
+    } else if (localSort === "duration_desc") {
+      list.sort((a, b) => (b.duration || 0) - (a.duration || 0));
+    } else if (localSort === "duration_asc") {
+      list.sort((a, b) => (a.duration || 0) - (b.duration || 0));
+    } else if (localSort === "title_asc") {
+      list.sort((a, b) => (a.title || "").localeCompare(b.title || ""));
+    } else if (localSort === "title_desc") {
+      list.sort((a, b) => (b.title || "").localeCompare(a.title || ""));
+    } else if (localSort === "engagement_desc") {
+      list.sort((a, b) => {
+        const likesA = Number(a.extra?.likes_total) || 0;
+        const viewsA = a.views || 1;
+        const ratioA = viewsA > 0 ? likesA / viewsA : 0;
+
+        const likesB = Number(b.extra?.likes_total) || 0;
+        const viewsB = b.views || 1;
+        const ratioB = viewsB > 0 ? likesB / viewsB : 0;
+
+        return ratioB - ratioA;
+      });
+    }
+
+    return list;
+  }, [resolution?.items, activeYearFilter, localFilters, localSort]);
+
   return (
     <div className="space-y-6">
-      {/* Top Header & Version Switcher Bar */}
+      {/* Top Header & API Version Switcher Bar */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-border/70 pb-4">
         <div>
           <div className="flex items-center gap-2">
             <h1 className="text-2xl font-bold tracking-tight text-foreground flex items-center gap-2">
               <LinkIcon className="h-6 w-6 text-primary" />
-              Link Explorer
+              Link Explorer & Channel Intelligence
             </h1>
             <span className="rounded-md bg-primary/10 px-2 py-0.5 text-xs font-semibold text-primary">
-              Universal Discovery
+              2026 Workspace
             </span>
           </div>
           <p className="mt-1 text-sm text-muted-foreground">
-            Analyze any Dailymotion URL or identifier without scraping. Deep-fetch videos, channels, playlists, and livestreams.
+            Exhaustive discovery, profile analytics, and multi-page catalog crawler for Dailymotion resources.
           </p>
         </div>
 
@@ -259,7 +488,7 @@ export function LinkExplorerWorkspace() {
         </div>
       </div>
 
-      {/* Restored From History Banner */}
+      {/* Restored From History Notice */}
       {restoredFromHistory && (
         <div className="flex items-center justify-between gap-3 rounded-xl border border-emerald-500/40 bg-emerald-500/10 p-3.5 text-emerald-600 dark:text-emerald-400">
           <div className="flex items-center gap-2.5">
@@ -365,46 +594,72 @@ export function LinkExplorerWorkspace() {
         </div>
       </div>
 
-      {/* Detection & Strategy Banner */}
-      {analyzedPreview && (
-        <div className="rounded-xl border border-border bg-surface-raised/40 p-4 space-y-3">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-2.5">
-              <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                Detected Resource:
-              </span>
-              <span
-                className={cn(
-                  "inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold capitalize",
-                  effectiveKind === "video" && "bg-blue-500/15 text-blue-600 dark:text-blue-400 border border-blue-500/20",
-                  effectiveKind === "channel" && "bg-purple-500/15 text-purple-600 dark:text-purple-400 border border-purple-500/20",
-                  effectiveKind === "playlist" && "bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/20",
-                  effectiveKind === "livestream" && "bg-red-500/15 text-red-600 dark:text-red-400 border border-red-500/20",
-                  effectiveKind === "user" && "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20",
-                  effectiveKind === "search" && "bg-teal-500/15 text-teal-600 dark:text-teal-400 border border-teal-500/20",
-                  effectiveKind === "unsupported" && "bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/20"
-                )}
-              >
-                {effectiveKind}
-              </span>
-              <span className="text-xs text-muted-foreground font-mono">
-                ID: {analyzedPreview.identifier}
-              </span>
-            </div>
+      {/* Advanced Fetch Settings Panel (Expandable directly beneath search input) */}
+      <AdvancedFetchSettingsPanel
+        version={version}
+        config={scanConfig}
+        onChangeConfig={(next) => setScanConfig(next)}
+        onResetDefaults={() => setScanConfig(DEFAULT_SCAN_CONFIG)}
+      />
 
-            <div className="flex items-center gap-2">
-              {analyzedPreview.canonicalUrl && (
+      {/* Real-Time Detection Pill Banner */}
+      {analyzedPreview && (
+        <div className="rounded-xl border border-border bg-surface-raised/40 p-3.5 flex flex-wrap items-center justify-between gap-3 text-xs">
+          <div className="flex items-center gap-2.5">
+            <span className="font-semibold uppercase tracking-wider text-muted-foreground">
+              Detected Target:
+            </span>
+            <span
+              className={cn(
+                "inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold capitalize",
+                effectiveKind === "video" && "bg-blue-500/15 text-blue-600 dark:text-blue-400 border border-blue-500/20",
+                effectiveKind === "channel" && "bg-purple-500/15 text-purple-600 dark:text-purple-400 border border-purple-500/20",
+                effectiveKind === "playlist" && "bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/20",
+                effectiveKind === "livestream" && "bg-red-500/15 text-red-600 dark:text-red-400 border border-red-500/20",
+                effectiveKind === "user" && "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20",
+                effectiveKind === "search" && "bg-teal-500/15 text-teal-600 dark:text-teal-400 border border-teal-500/20",
+                effectiveKind === "unsupported" && "bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/20"
+              )}
+            >
+              {effectiveKind}
+            </span>
+            <span className="text-muted-foreground font-mono">
+              ID: {analyzedPreview.identifier}
+            </span>
+          </div>
+
+          <div className="flex items-center gap-2">
+            {analyzedPreview.canonicalUrl && (
+              <button
+                type="button"
+                onClick={handleCopyCanonical}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-border bg-surface text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-surface-muted transition-colors cursor-pointer"
+              >
+                {copiedUrl ? <Check className="h-3 w-3 text-emerald-500" /> : <Copy className="h-3 w-3" />}
+                {copiedUrl ? "Copied" : "Copy URL"}
+              </button>
+            )}
+
+            {resolution && (
+              <>
                 <button
                   type="button"
-                  onClick={handleCopyCanonical}
+                  onClick={handleExportJson}
                   className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-border bg-surface text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-surface-muted transition-colors cursor-pointer"
+                  title="Export Manifest as JSON"
                 >
-                  {copiedUrl ? <Check className="h-3 w-3 text-emerald-500" /> : <Copy className="h-3 w-3" />}
-                  {copiedUrl ? "Copied" : "Copy URL"}
+                  <Download className="h-3 w-3" />
+                  Export JSON
                 </button>
-              )}
-
-              {resolution && (
+                <button
+                  type="button"
+                  onClick={handleExportCsv}
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-border bg-surface text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-surface-muted transition-colors cursor-pointer"
+                  title="Export Catalog as CSV"
+                >
+                  <FileSpreadsheet className="h-3 w-3" />
+                  CSV
+                </button>
                 <button
                   type="button"
                   onClick={() => setRawDrawerOpen(true)}
@@ -413,76 +668,21 @@ export function LinkExplorerWorkspace() {
                   <FileCode2 className="h-3 w-3" />
                   Raw JSON
                 </button>
-              )}
-            </div>
+              </>
+            )}
           </div>
-
-          {/* Canonical API strategy description with active track highlights */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs font-mono text-muted-foreground bg-surface p-2.5 rounded-lg border border-border/50">
-            <div className={cn("p-2 rounded-md transition-all", version === "v1" ? "border border-emerald-500/40 bg-emerald-500/10 text-emerald-950 dark:text-emerald-200" : "border border-transparent")}>
-              <div className="flex items-center justify-between mb-1">
-                <span className="font-sans font-medium text-foreground">API v1 Strategy</span>
-                {version === "v1" && (
-                  <span className="text-[10px] uppercase font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-500/20 px-1.5 py-0.5 rounded">
-                    Active Track
-                  </span>
-                )}
-              </div>
-              {analyzedPreview.apiPathV1 ? (
-                <code className="text-emerald-600 dark:text-emerald-400">{analyzedPreview.apiPathV1}</code>
-              ) : (
-                "None"
-              )}
-            </div>
-            <div className={cn("p-2 rounded-md transition-all", version === "v2" ? "border border-indigo-500/40 bg-indigo-500/10 text-indigo-950 dark:text-indigo-200" : "border border-transparent")}>
-              <div className="flex items-center justify-between mb-1">
-                <span className="font-sans font-medium text-foreground">API v2 Strategy</span>
-                {version === "v2" && (
-                  <span className="text-[10px] uppercase font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-500/20 px-1.5 py-0.5 rounded">
-                    Active Track
-                  </span>
-                )}
-              </div>
-              {analyzedPreview.apiPathV2 ? (
-                <code className="text-indigo-600 dark:text-indigo-400">{analyzedPreview.apiPathV2}</code>
-              ) : (
-                <span className="text-muted-foreground italic">No global v2 endpoint (profile-scoped only)</span>
-              )}
-            </div>
-          </div>
-
-          {/* Notice when current version differs from resolution version */}
-          {resolution && resolution.version !== version && (
-            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 rounded-lg border border-primary/30 bg-primary/5 p-3 text-xs text-foreground">
-              <div className="flex items-center gap-2">
-                <Sparkles className="h-4 w-4 text-primary shrink-0" />
-                <span>
-                  Active API version switched to <strong className="uppercase">{version}</strong>. The results below were fetched from API <strong className="uppercase">{resolution.version}</strong>.
-                </span>
-              </div>
-              <button
-                type="button"
-                onClick={() => void executeResolution(input, version)}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-primary text-primary-foreground text-xs font-semibold hover:opacity-90 transition-all cursor-pointer shrink-0 shadow-2xs"
-              >
-                <RefreshCw className="h-3.5 w-3.5" />
-                Re-analyze on {version.toUpperCase()}
-              </button>
-            </div>
-          )}
-
-          {/* Warnings if any */}
-          {analyzedPreview.warnings && analyzedPreview.warnings.length > 0 && (
-            <div className="space-y-1">
-              {analyzedPreview.warnings.map((w, i) => (
-                <div key={i} className="flex items-start gap-2 text-xs text-amber-600 dark:text-amber-400">
-                  <AlertCircle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
-                  <span>{w.message}</span>
-                </div>
-              ))}
-            </div>
-          )}
         </div>
+      )}
+
+      {/* Live Scan Progress Monitor */}
+      {scanProgress && (
+        <ScanProgressBar
+          progress={scanProgress}
+          isPaused={isPaused}
+          onPause={handlePauseScan}
+          onResume={handleResumeScan}
+          onCancel={handleCancelScan}
+        />
       )}
 
       {/* Error / Redirect State */}
@@ -515,6 +715,7 @@ export function LinkExplorerWorkspace() {
                 onClick={() => {
                   setInput("");
                   setResolution(null);
+                  setScanProgress(null);
                 }}
                 className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-surface transition-all cursor-pointer"
               >
@@ -569,160 +770,39 @@ export function LinkExplorerWorkspace() {
       {/* Resolution Workspace Display */}
       {resolution && resolution.ok && (
         <div className="space-y-6">
-          {/* Main Item Highlight (Video / Channel / Playlist / Live) */}
-          {resolution.item && (() => {
-            const mainItem = resolution.item;
-            const cKey = discoveryCompositeKey(mainItem.apiVersion, mainItem.kind, mainItem.id);
-            const isSaved = merged.savedKeys.has(cKey) || workspace.isItemSaved(mainItem.apiVersion, mainItem.kind, mainItem.id);
+          {/* RESOURCE INTELLIGENCE OVERVIEW (Positioned directly below search input) */}
+          {resolution.intelligence && (
+            <ResourceIntelligenceOverview
+              data={resolution.intelligence}
+              activeYearFilter={activeYearFilter}
+              onSelectYearFilter={(yr) => setActiveYearFilter(yr)}
+            />
+          )}
 
-            return (
-              <div className="rounded-xl border border-border bg-card p-5 shadow-xs space-y-4">
-                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-border/50 pb-4">
-                  <div className="flex items-center gap-3">
-                    <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10 text-primary">
-                      {effectiveKind === "video" && <Tv className="h-6 w-6" />}
-                      {(effectiveKind === "channel" || effectiveKind === "profile" || effectiveKind === "user") && (
-                        <UsersRound className="h-6 w-6" />
-                      )}
-                      {effectiveKind === "playlist" && <Library className="h-6 w-6" />}
-                      {effectiveKind === "livestream" && <Radio className="h-6 w-6 text-red-500 animate-pulse" />}
-                      {effectiveKind === "search" && <Search className="h-6 w-6 text-teal-500" />}
-                    </div>
-                    <div>
-                      <h2 className="text-lg font-bold text-foreground line-clamp-1">
-                        {mainItem.title || resolution.analyzed.displayLabel}
-                      </h2>
-                      <p className="text-xs text-muted-foreground flex items-center gap-2 font-mono">
-                        <span>ID: {mainItem.id}</span>
-                        {(mainItem.ownerName || mainItem.ownerId) && (
-                          <span>Owner: {mainItem.ownerName || mainItem.ownerId}</span>
-                        )}
-                      </p>
-                    </div>
-                  </div>
+          {/* PROVIDER VS LOCAL FILTER & SORT BAR */}
+          {resolution.items.length > 0 && (
+            <LinkExplorerFilters
+              version={version}
+              serverSort={scanConfig.serverSort || "recent"}
+              onChangeServerSort={(sort) => {
+                setScanConfig((prev) => ({ ...prev, serverSort: sort }));
+                void executeResolution(input, version, { serverSort: sort });
+              }}
+              localSort={localSort}
+              onChangeLocalSort={(s) => setLocalSort(s)}
+              filters={localFilters}
+              onChangeFilters={(f) => setLocalFilters(f)}
+              totalLoadedItems={resolution.items.length}
+              totalVisibleItems={visibleItems.length}
+              availableYears={availableYears}
+            />
+          )}
 
-                  <div className="flex flex-wrap items-center gap-2">
-                    {/* Action for Channels: Deep Fetch in Channel Explorer */}
-                    {(effectiveKind === "channel" || effectiveKind === "profile" || effectiveKind === "user") && (
-                      <Link
-                        href={`/channel-explorer?channel=${encodeURIComponent(resolution.analyzed.identifier)}`}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-semibold hover:opacity-95 transition-all shadow-2xs"
-                      >
-                        <Compass className="h-3.5 w-3.5" />
-                        Deep Fetch Crawler
-                      </Link>
-                    )}
-
-                    {/* Save Item Action */}
-                    <button
-                      type="button"
-                      onClick={() => {
-                        void merged.coordinator.toggleSaveItem(mainItem);
-                        if (workspace.isItemSaved(mainItem.apiVersion, mainItem.kind, mainItem.id)) {
-                          workspace.removeItem(mainItem.apiVersion, mainItem.kind, mainItem.id);
-                        } else {
-                          workspace.saveItem(mainItem);
-                        }
-                      }}
-                      className={cn(
-                        "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-semibold transition-colors cursor-pointer",
-                        isSaved
-                          ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
-                          : "border-border bg-surface text-muted-foreground hover:text-foreground hover:bg-surface-muted"
-                      )}
-                    >
-                      {isSaved ? (
-                        <>
-                          <BookmarkCheck className="h-3.5 w-3.5" />
-                          Saved
-                        </>
-                      ) : (
-                        <>
-                          <Bookmark className="h-3.5 w-3.5" />
-                          Save
-                        </>
-                      )}
-                    </button>
-
-                    {/* Add to Playlist Action */}
-                    <AddToPlaylistModal
-                      item={mainItem}
-                      onAdded={() => {}}
-                    />
-
-                    {/* External Link */}
-                    {resolution.analyzed.canonicalUrl && (
-                      <a
-                        href={resolution.analyzed.canonicalUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border bg-surface text-xs font-semibold text-muted-foreground hover:text-foreground hover:bg-surface-muted transition-colors"
-                      >
-                        <ExternalLink className="h-3.5 w-3.5" />
-                        Open on Dailymotion
-                      </a>
-                    )}
-                  </div>
-                </div>
-
-                {/* Video Thumbnail & Metadata Details */}
-                {effectiveKind === "video" && (
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-                    <div className="relative aspect-video rounded-lg overflow-hidden bg-surface-muted border border-border">
-                      {mainItem.thumbnail ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img
-                          src={mainItem.thumbnail}
-                          alt={mainItem.title}
-                          className="h-full w-full object-cover"
-                        />
-                      ) : (
-                        <div className="flex h-full w-full items-center justify-center text-muted-foreground">
-                          <Tv className="h-10 w-10 opacity-30" />
-                        </div>
-                      )}
-                      {mainItem.duration !== null && (
-                        <span className="absolute bottom-2 right-2 rounded bg-black/80 px-2 py-0.5 text-xs font-mono font-medium text-white">
-                          {formatDuration(mainItem.duration)}
-                        </span>
-                      )}
-                    </div>
-
-                    <div className="md:col-span-2 space-y-3">
-                      <p className="text-sm text-foreground/90 whitespace-pre-line line-clamp-4">
-                        {mainItem.description || "No description provided for this video."}
-                      </p>
-                      <div className="flex flex-wrap gap-4 text-xs font-medium text-muted-foreground pt-2 border-t border-border/50">
-                        <span>{formatViews(mainItem.views)}</span>
-                        {mainItem.createdAt && (
-                          <span>Published: {new Date(mainItem.createdAt).toLocaleDateString()}</span>
-                        )}
-                        {mainItem.category && <span>Category: {mainItem.category}</span>}
-                        {mainItem.country && <span>Country: {mainItem.country}</span>}
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-            );
-          })()}
-
-          {/* Related Items or Video Catalog Grid */}
-          {(resolution.items.length > 0 || (resolution.relatedItems && resolution.relatedItems.length > 0)) && (
+          {/* CATALOG ITEMS RESPONSIVE GRID */}
+          {visibleItems.length > 0 ? (
             <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <h3 className="text-base font-bold text-foreground flex items-center gap-2">
-                  <Layers className="h-4 w-4 text-primary" />
-                  {effectiveKind === "video"
-                    ? "Related Videos"
-                    : effectiveKind === "search"
-                    ? `Search Results for "${resolution.analyzed.identifier}" (${resolution.items.length} items)`
-                    : `${resolution.analyzed.displayLabel} Catalog (${resolution.items.length} items)`}
-                </h3>
-              </div>
-
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4">
-                {(resolution.items.length > 0 ? resolution.items : resolution.relatedItems || []).map((cardItem) => {
+                {visibleItems.map((cardItem) => {
                   const cKey = discoveryCompositeKey(cardItem.apiVersion, cardItem.kind, cardItem.id);
                   const isSaved = merged.savedKeys.has(cKey) || workspace.isItemSaved(cardItem.apiVersion, cardItem.kind, cardItem.id);
 
@@ -780,11 +860,38 @@ export function LinkExplorerWorkspace() {
                 </div>
               )}
             </div>
+          ) : (
+            resolution.items.length > 0 && (
+              <div className="rounded-xl border border-border/70 bg-card/60 p-8 text-center space-y-2">
+                <p className="text-sm font-bold text-foreground">
+                  No items match the current local filter criteria.
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Try clearing your search query, adjusting the duration slider, or selecting another year.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveYearFilter(null);
+                    setLocalFilters({
+                      searchQuery: "",
+                      durationRange: "all",
+                      viewsRange: "all",
+                      year: null,
+                    });
+                    setLocalSort("api_order");
+                  }}
+                  className="mt-2 inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-bold text-primary-foreground hover:opacity-90"
+                >
+                  Clear All Filters
+                </button>
+              </div>
+            )
           )}
         </div>
       )}
 
-      {/* Raw JSON Drawer */}
+      {/* Raw JSON Inspection Drawer */}
       {resolution && (
         <RawJsonDrawer
           open={rawDrawerOpen}

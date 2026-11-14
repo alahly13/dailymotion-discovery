@@ -24,6 +24,83 @@ Scope: Project source-of-truth ledger, updated after Search Architecture Consoli
 - [Future Roadmap](#future-roadmap)
 - [Agent Instructions](#agent-instructions)
 
+## 2026-11-14 Advanced Link Explorer, Complete Channel Catalog Discovery & Resource Intelligence Workspace
+
+**User intent addressed**
+- Transformed the Link Explorer (`/link-explorer`) from a basic single-page URL resolver into a professional **Dailymotion Resource Explorer & Channel Intelligence Workspace**.
+- Maintained 100% strict independence between **API V1 (Legacy)** and **API V2 (Current REST)** across endpoints, pagination dialects, sorting algorithms, and sparse field selection profiles.
+- Integrated a universal input analyzer accepting full video URLs, short URLs (`dai.ly`), channel handles (`@handle`), profile URLs, playlists, livestreams, bare IDs, and typed prefixes (`channel:`, `user:`, `playlist:`, `video:`).
+- Built the **Resource Intelligence Overview** placed prominently below the search input, featuring:
+  - Complete profile header with verified badge, avatar, clickable canonical link, creation date, country, language, bio, active API track pill, and catalog scan status.
+  - 4 Content statistics cards displaying provider-reported totals vs locally retrieved items, catalog coverage percentage, and resource breakdown (videos, playlists, livestreams).
+  - Chronological landmarks: Oldest retrieved video (title, thumbnail, duration, direct link), newest retrieved video, and live activity status (active within 30 days vs dormant).
+  - Year distribution cards with percentage progress bars and interactive one-click year filtering.
+- Implemented an exhaustive multi-page catalog crawler with:
+  - 4 Scan Strategies: `Quick Scan` (1 page), `Standard Scan` (up to 5-10 pages), `Deep Catalog Scan` (full catalog pagination with date-window partitioning), and `Custom Fetch`.
+  - Configurable knobs: Page size (25, 50, 100), max pages budget (1..50, unlimited), safe throttle delay (0-1000ms), and sparse field selection profiles (`Basic`, `Standard`, `Extended`, `Custom`).
+  - Recursive date-window partitioning (Year -> Month) to bypass Dailymotion's 1,000-item query window cap.
+  - Robust V2 playlist handling that continues pagination when `hasMore` is true even if `items.length < pageSize` (skipping unavailable/deleted videos).
+  - Live `ScanProgressBar` with Pause, Resume, and Cancel execution controls.
+- Delivered unmistakable **Provider vs Local Filters** with visual capability badges:
+  - Server-side sort vs Local instant sort (`LOCAL ONLY · ZERO API CALLS`).
+  - Full-width collapsible in-memory filter panel: keyword search inside loaded catalog, duration range, view count range, and publication year selector.
+- Added catalog manifest generation with SHA-256 integrity checksums, exportable as formatted JSON and UTF-8 CSV with BOM.
+
+**Architecture & Implementation Details**
+
+1. **Link Explorer Types & Intelligence Models (`src/lib/link-explorer/link-explorer-types.ts`)**:
+   - Defines `ScanStrategy`, `ScanCompletenessStatus`, `FieldSelectionProfile`, and `ScanBudgetConfig`.
+   - Exports `ResourceIntelligenceData` capturing profile metadata, provider vs local statistics, chronological landmarks, and year/month distribution graphs.
+   - Provides `computeResourceIntelligence(items, mainItem, version, analyzed, catalogStatus)` computing exact oldest/newest videos, active vs dormant state, coverage ratios, and year percentages without scraping or synthetic ratings.
+
+2. **Full-Catalog Discovery Engine & Partitioning Service (`src/lib/link-explorer/link-explorer-service.ts`)**:
+   - `resolveLinkExplorerInput`: Coordinates single-item lookup, multi-page catalog discovery, and recursive date window partitioning.
+   - Strict V1 vs V2 independence:
+     - V1 sends unix timestamp boundaries (`createdAfter`, `createdBefore`), supports `recent`, `old`, `visited`, `trending`, and caps pagination at 10 pages (1,000 items).
+     - V2 sends ISO-8601 strings, strictly restricts server-side sorting to `created_at` or `-created_at`, and handles `next` cursor pagination.
+     - V2 Playlist resilience: follows `hasMore` / `next` regardless of omitted unavailable video gaps.
+   - Recursive Date Partitioning: When deep scan encounters channels with > 1,000 items, splits the catalog backwards by calendar year from current year down to channel inception, crawling each partition up to provider boundaries.
+   - Deduplication: Deduplicates all items across pages and partitions via `discoveryCompositeKey(apiVersion, kind, id)`.
+   - `computeCatalogChecksum`: Computes deterministic SHA-256 / hex checksum for manifest verification.
+   - `resolveFieldSelection`: Maps sparse field selection profiles (`basic`, `standard`, `extended`) to exact API-specific field sets without mixing schemas.
+   - Rejects keyword searches with `keyword_search_redirect` linking directly to Global Search.
+
+3. **Resource Intelligence Overview Component (`src/components/link-explorer/resource-intelligence-overview.tsx`)**:
+   - Luxury obsidian design system matching OLED true black tokens.
+   - Displays avatar, name, verified badge, canonical Dailymotion link, country, language, bio with expandable toggle, and active API track badge.
+   - Real-time statistics counters: Provider Total, Retrieved Items, Catalog Coverage percentage with progress bar, and Resource Breakdown.
+   - Chronological landmark cards for oldest and newest retrieved videos with 16:9 thumbnail previews, formatted duration overlays, titles, video IDs, and direct Dailymotion links.
+   - Interactive year distribution grid where clicking any year filters the loaded catalog locally without network overhead.
+
+4. **Advanced Fetch Settings Panel (`src/components/link-explorer/advanced-fetch-settings-panel.tsx`)**:
+   - Expandable control panel directly under the search bar.
+   - Strategy switcher: Quick Scan, Standard Scan, Deep Catalog Scan, Custom Fetch.
+   - Knobs: Items per page (25, 50, 100), max pages budget, throttle delay (0-1000ms), sparse field sets, and date range bounds (`dateFrom`, `dateTo`).
+
+5. **Scan Progress Bar & Execution Controls (`src/components/link-explorer/scan-progress-bar.tsx`)**:
+   - Real-time tracking of crawl status (`discovering`, `fetching_pages`, `splitting_date_ranges`, `paused`, `completed`, `completed_with_known_limitations`, `failed`).
+   - Live metrics: Pages fetched, unique items, duplicates skipped, throttle delay, active partition label.
+   - Interactive controls: Pause, Resume, and Cancel (via `AbortController`).
+
+6. **Provider vs Local Filters with Capability Indicators (`src/components/link-explorer/link-explorer-filters.tsx`)**:
+   - Displays clear capability badges (`API V1`, `API V2`, `LOCAL ONLY · ZERO API CALLS`, `UNAVAILABLE`).
+   - Dual-mode sorting: server-side sort vs instant local sorting (Most viewed, Least viewed, Longest duration, Shortest duration, Title A-Z/Z-A, Engagement ratio).
+   - Full-width collapsible in-memory filter panel: keyword search inside loaded results, duration presets, view count tiers, and publication year selector.
+
+7. **Link Explorer Workspace Integration (`src/components/link-explorer/link-explorer-workspace.tsx`)**:
+   - Seamlessly connects all components into the main Link Explorer view.
+   - Adds Manifest Actions: Export JSON (with SHA-256 checksum), Export CSV (with UTF-8 BOM), and Raw JSON Drawer inspection.
+   - In-memory reactive filtering pipeline for instant zero-latency filtering across loaded items.
+
+8. **Automated Unit Tests (`src/lib/link-explorer/__tests__/link-explorer-intelligence.test.ts`)**:
+   - Tests intelligence calculation, oldest/newest video extraction, active/dormant status, year percentages, deterministic SHA-256 checksums, independent field selection, and keyword search redirection. 4/4 tests passing.
+
+**Verification Results**
+- `npx vitest run src/lib/link-explorer/__tests__/link-explorer-intelligence.test.ts`: 4/4 unit tests passed.
+- `tsc --noEmit`: 0 TypeScript errors across the entire repository.
+- `prisma validate`: Schema at `prisma/schema.prisma` is valid.
+- Zero local production builds run (strictly adhering to memory/resource constraints).
+
 ## 2026-11-14 Saved Items Crash Resolution, Reactive Theme Toggle & Resilient Error Boundary Architecture
 
 **User intent addressed**
