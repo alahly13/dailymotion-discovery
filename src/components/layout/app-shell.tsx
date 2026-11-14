@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname, useSearchParams } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
 import {
   ArrowUpRight,
@@ -111,10 +111,11 @@ function BrandMark({ size }: { size: "md" | "sm" }) {
 
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
-  const searchParams = useSearchParams();
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
+  // Active API version state ("v1" | "v2") derived safely on the client without Next.js CSR bailout
+  const [activeVersion, setActiveVersion] = useState<"v1" | "v2">("v1");
 
   // Restore sidebar preference from localStorage
   useEffect(() => {
@@ -128,6 +129,25 @@ export function AppShell({ children }: { children: ReactNode }) {
       // Fallback
     }
   }, []);
+
+  // Sync active API version from URL search string without triggering useSearchParams CSR bailout
+  useEffect(() => {
+    const updateVersion = () => {
+      try {
+        if (typeof window !== "undefined") {
+          const v = new URLSearchParams(window.location.search).get("v");
+          setActiveVersion(v === "v2" ? "v2" : "v1");
+        }
+      } catch {
+        // Fallback
+      }
+    };
+
+    updateVersion();
+
+    window.addEventListener("popstate", updateVersion);
+    return () => window.removeEventListener("popstate", updateVersion);
+  }, [pathname]);
 
   const toggleSidebar = () => {
     setIsSidebarOpen((prev) => {
@@ -144,12 +164,9 @@ export function AppShell({ children }: { children: ReactNode }) {
   // Close mobile drawer on route navigation
   useEffect(() => {
     setMobileMenuOpen(false);
-  }, [pathname, searchParams]);
+  }, [pathname]);
 
   const isOpen = mounted ? isSidebarOpen : true;
-
-  // Active state checkers
-  const currentVersionParam = searchParams.get("v") || "v1";
 
   const isParentActive = (href: string) => {
     if (href === "/") return pathname === "/";
@@ -159,8 +176,8 @@ export function AppShell({ children }: { children: ReactNode }) {
   const isSublinkActive = (sub: NavSubLink) => {
     const [targetPath, queryPart] = sub.href.split("?");
     if (pathname !== targetPath) return false;
-    const targetV = new URLSearchParams(queryPart).get("v");
-    return targetV === currentVersionParam;
+    const targetV = (new URLSearchParams(queryPart).get("v") || "v1") as "v1" | "v2";
+    return targetV === activeVersion;
   };
 
   return (
@@ -291,6 +308,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                               <Link
                                 key={sub.href}
                                 href={sub.href}
+                                onClick={() => setActiveVersion(sub.version)}
                                 className={cn(
                                   "flex items-center gap-2 rounded px-2 py-1 text-[11px] font-semibold transition",
                                   subActive
@@ -410,7 +428,10 @@ export function AppShell({ children }: { children: ReactNode }) {
                                   <Link
                                     key={sub.href}
                                     href={sub.href}
-                                    onClick={() => setMobileMenuOpen(false)}
+                                    onClick={() => {
+                                      setActiveVersion(sub.version);
+                                      setMobileMenuOpen(false);
+                                    }}
                                     className={cn(
                                       "flex items-center gap-2 rounded px-2 py-1 text-[11px] font-semibold transition",
                                       subActive
