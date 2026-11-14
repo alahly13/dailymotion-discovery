@@ -176,24 +176,24 @@ export default function DashboardPage() {
           <div className="flex flex-wrap lg:flex-col gap-2.5 shrink-0 min-w-[200px]">
             <Link
               href="/global-search"
-              className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg bg-primary px-4 text-xs font-bold text-primary-foreground shadow-xs hover:opacity-90 transition active:scale-[0.98]"
+              className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg bg-neutral-900 text-white hover:bg-neutral-800 dark:bg-white dark:text-black dark:hover:bg-neutral-100 px-4 text-xs font-black shadow-xs transition active:scale-[0.98]"
             >
-              <Globe className="h-4 w-4" />
-              Open Global Search
-              <ArrowRight className="h-3.5 w-3.5 ml-1" />
+              <Globe className="h-4 w-4 shrink-0 text-white dark:text-black" />
+              <span className="font-black text-white dark:text-black">Open Global Search</span>
+              <ArrowRight className="h-3.5 w-3.5 ml-1 shrink-0 text-white dark:text-black" />
             </Link>
             
             <Link
               href="/link-explorer"
-              className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-[var(--border-strong)] bg-[var(--surface)] px-4 text-xs font-bold text-[var(--foreground)] hover:bg-[var(--surface-muted)] transition active:scale-[0.98]"
+              className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-[var(--border-strong)] bg-[var(--surface)] px-4 text-xs font-bold text-[var(--foreground)] hover:bg-[var(--surface-container-high)] hover:border-white/30 transition active:scale-[0.98]"
             >
-              <Link2 className="h-4 w-4 text-primary" />
+              <Link2 className="h-4 w-4 text-[var(--primary)]" />
               Open Link Explorer
             </Link>
 
             <Link
               href="/capabilities"
-              className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-[var(--border)] bg-transparent px-4 text-xs font-bold text-muted-foreground hover:text-foreground hover:bg-[var(--surface-muted)] transition"
+              className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-[var(--border)] bg-transparent px-4 text-xs font-bold text-muted-foreground hover:text-foreground hover:bg-[var(--surface-container-high)] transition"
             >
               <Sliders className="h-3.5 w-3.5" />
               API Comparison Matrix

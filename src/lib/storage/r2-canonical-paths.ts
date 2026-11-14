@@ -22,6 +22,7 @@ export const CANONICAL_DATASET_SLUGS = [
   "collection-items",
   "saved-searches",
   "search-history",
+  "saved-titles",
   "research-notes",
   "legacy-supabase-archive",
 ] as const;
@@ -102,4 +103,24 @@ export function legacyArchiveObjectKey(ownerId: string, batchTag: string, legacy
 
 export function ownerScopePrefix(ownerId: string): string {
   return `${R2_CANONICAL_PREFIX}/${normalizeStorageOwnerId(ownerId)}/`;
+}
+
+/**
+ * Authoritative Canonical R2 Paths for Saved Titles Manifest System (2026)
+ */
+export function savedTitlesRootPrefix(ownerId: string): string {
+  return `${R2_CANONICAL_PREFIX}/${normalizeStorageOwnerId(ownerId)}/saved-titles`;
+}
+
+export function savedTitlesManifestKey(ownerId: string): string {
+  return `${savedTitlesRootPrefix(ownerId)}/manifest.json`;
+}
+
+export function savedTitlesVersionPointerKey(ownerId: string): string {
+  return `${savedTitlesRootPrefix(ownerId)}/version.json`;
+}
+
+export function savedTitlesGenerationManifestKey(ownerId: string, generationId: string): string {
+  const gen = assertSafeSegment(generationId, "generationId");
+  return `${savedTitlesRootPrefix(ownerId)}/generations/${gen}/manifest.json`;
 }

@@ -101,11 +101,11 @@ export function ApiStatusBar() {
             type="button"
             onClick={() => setExpanded((v) => !v)}
             aria-expanded={expanded}
-            className="min-h-8 rounded-md border border-[var(--border)] px-2 text-[11px] font-black uppercase"
+            className="min-h-8 rounded-md border border-[var(--border-strong)] bg-[var(--surface-container-low)] px-3 text-[11px] font-black uppercase text-[var(--foreground)] hover:bg-[var(--surface-container-high)] hover:border-white/30 transition cursor-pointer"
           >
             {expanded ? "Hide usage" : "Usage"}
           </button>
-          <Link href="/settings" className="inline-flex min-h-8 items-center rounded-md border border-[var(--border)] px-2 text-[11px] font-black uppercase">
+          <Link href="/settings" className="inline-flex min-h-8 items-center rounded-md border border-[var(--border-strong)] bg-[var(--surface-container-low)] px-3 text-[11px] font-black uppercase text-[var(--foreground)] hover:bg-[var(--surface-container-high)] hover:border-white/30 transition">
             Settings
           </Link>
         </span>

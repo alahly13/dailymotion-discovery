@@ -1,0 +1,200 @@
+# CRITICAL: Agent-Owned Code Inspection, Resource Efficiency & Remote Vercel Deployment
+
+These instructions are mandatory and take priority over any unnecessary local execution or redundant implementation work.
+
+## 1. Inspect and Understand the Existing Codebase Yourself
+
+You are responsible for independently inspecting, reading, analyzing, and understanding the actual application source code before making any changes.
+
+Do not rely solely on:
+- Previous implementation reports.
+- Project documentation or the project ledger.
+- Assumptions about how a feature works.
+- Existing comments that may be outdated.
+- A previous agent's claims that something has already been implemented.
+
+Inspect the actual relevant source files, configurations, database schemas, migrations, API clients, authentication logic, components, and existing integrations.
+
+Trace how the current implementation works across the entire application before deciding what to change.
+
+Identify:
+- Existing functionality that should be reused.
+- Existing code that is incomplete or incorrect.
+- Duplicate or conflicting implementations.
+- Actual dependencies between components and services.
+- Existing persistence and security mechanisms.
+- The smallest safe set of changes required.
+
+**Do not create a replacement implementation before checking whether an existing implementation already performs the required function.**
+
+Do not invent file paths, architecture, environment variables, database models, or API behavior.
+
+Make implementation decisions based on inspected source code and verified behavior.
+
+## 2. Avoid Unnecessary Files and Test Artifacts
+
+Keep the repository clean and production-focused.
+
+Do not create unnecessary:
+- Test files.
+- Duplicate test suites.
+- Temporary scripts.
+- Debugging utilities.
+- Mock services that duplicate existing infrastructure.
+- Artificial fixtures.
+- Generated reports inside the source directory.
+- Temporary logs or diagnostic files.
+- Documentation files that merely repeat existing documentation.
+
+Before creating any file, inspect whether an appropriate existing file or module can be extended.
+
+Reuse the existing test framework, utilities, fixtures, and test files.
+
+Add or modify tests only when they provide meaningful coverage for newly introduced or corrected behavior.
+
+Do not add tests merely to increase the test count or make a completion report look impressive.
+
+Never delete useful existing tests just to reduce execution time.
+
+## 3. My Computer Has Limited Hardware Resources
+
+My development computer is low-specification and has limited RAM and processing power.
+
+You must minimize local resource consumption.
+
+**DO NOT RUN ANY LOCAL PRODUCTION BUILD OR BUILD-BASED DEPLOYMENT COMMANDS.**
+
+Strictly prohibited:
+
+- `npm run build`
+- `next build`
+- `vercel build`
+- `vercel deploy --prebuilt`
+- Any equivalent local production build command.
+
+Do not repeatedly execute expensive commands.
+
+Do not install unnecessary packages or introduce additional dependencies.
+
+Do not run multiple resource-intensive processes in parallel.
+
+Do not launch unnecessary browser instances, background workers, or full-project scans when a focused inspection is sufficient.
+
+Avoid running the entire test suite repeatedly after every small modification.
+
+## 4. Prefer Intelligent Static Inspection and Targeted Validation
+
+Use a resource-efficient workflow:
+
+1. Read the relevant source files.
+2. Trace the affected functionality.
+3. Inspect existing tests and validation scripts.
+4. Identify the exact root cause.
+5. Implement the smallest complete and safe fix.
+6. Review the Git diff.
+7. Run only lightweight, relevant validation commands when necessary and affordable.
+
+Prioritize:
+- Source-code inspection.
+- TypeScript static checks.
+- ESLint on changed files.
+- Existing targeted unit tests.
+- Existing configuration validation.
+- Prisma schema validation when relevant.
+
+Do not create new test infrastructure simply to validate a small change.
+
+If a validation command is resource-intensive, unnecessary, or unavailable, do not run it on my computer. Clearly report that it was not executed and explain how it will be verified remotely.
+
+## 5. GitHub Push → Automatic Vercel Remote Build
+
+Use GitHub and Vercel as the primary deployment and production-build infrastructure.
+
+The expected deployment workflow is:
+
+1. Complete the source-code inspection.
+2. Implement the necessary changes.
+3. Review the complete Git diff.
+4. Verify that no secrets, generated artifacts, or unrelated files are included.
+5. Commit the changes to the existing Git branch.
+6. Push to the existing GitHub repository.
+7. Allow the configured GitHub–Vercel integration to trigger the remote deployment automatically.
+8. Inspect the actual Vercel deployment associated with the pushed commit.
+9. Review the remote build logs and deployment result.
+10. Confirm whether the deployment is `Ready`, `Failed`, or still in progress.
+
+Do not trigger an unnecessary second deployment if the Git integration has already started the correct deployment.
+
+Do not use local build commands to prepare the deployment.
+
+Use available Vercel integration tools, deployment APIs, dashboard access, or appropriate lightweight status inspection to verify the actual deployment.
+
+## 6. Verify the Exact Commit, Not Just the Latest Deployment
+
+Always connect deployment verification to the exact Git commit you pushed.
+
+Report:
+
+- GitHub repository.
+- Branch name.
+- Commit SHA.
+- Whether the commit was successfully pushed.
+- Vercel deployment ID.
+- Deployment source commit.
+- Build result.
+- Production deployment status.
+- Production URL, when verified.
+
+A successful Git push does not automatically mean that the Vercel deployment succeeded.
+
+An HTTP 200 response from the website does not prove that every modified feature works.
+
+Never claim a successful deployment without checking the actual Vercel deployment status.
+
+## 7. Use Vercel Remote Builds as the Main Build Verification
+
+The remote Vercel build is the authoritative production-build verification for this project.
+
+If the remote build fails:
+
+1. Inspect the actual Vercel build logs.
+2. Identify the exact error and affected source file.
+3. Fix the underlying problem locally using lightweight inspection and validation.
+4. Commit and push the correction.
+5. Verify the subsequent remote deployment.
+
+Do not attempt to solve a remote build failure by running a full local production build.
+
+## 8. Work Efficiently and Avoid Unnecessary Changes
+
+Do not turn every task into a full application rewrite.
+
+Preserve the existing architecture and working functionality.
+
+Do not modify unrelated files.
+
+Do not create duplicate authentication systems, API clients, storage services, database models, or UI components when suitable implementations already exist.
+
+Avoid unnecessary migrations, infrastructure changes, dependency updates, and configuration changes.
+
+When a requested feature already exists, verify it and improve it only where necessary.
+
+When a problem is isolated, fix the root cause instead of rebuilding the surrounding system.
+
+## 9. Honest Completion Reporting
+
+At the end of each task, clearly distinguish:
+
+- Inspected directly in source code.
+- Implemented.
+- Validated locally with lightweight checks.
+- Tested using existing tests.
+- Verified through the actual Vercel remote build.
+- Verified through live production behavior.
+- Not verified, with a precise explanation.
+
+Do not claim that a feature works merely because its UI exists or its TypeScript compiles.
+
+Do not claim a production deployment is successful merely because the code was pushed.
+
+**Your priority is to use your own code-inspection and analysis capabilities intelligently, minimize the workload on my computer, make the smallest reliable changes, and use GitHub + Vercel remote infrastructure for production builds and deployment verification.**

@@ -320,14 +320,14 @@ export function AppShell({ children }: { children: ReactNode }) {
                                 className={cn(
                                   "flex items-center gap-2 rounded px-2 py-1 text-[11px] font-semibold transition",
                                   subActive
-                                    ? "bg-primary text-primary-foreground shadow-2xs font-bold"
+                                    ? "bg-neutral-900 text-white dark:bg-white dark:text-black shadow-2xs font-black"
                                     : "text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--surface-container-high)]"
                                 )}
                               >
                                 <span
                                   className={cn(
                                     "h-1.5 w-1.5 rounded-full",
-                                    subActive ? "bg-primary-foreground" : "bg-[var(--muted-foreground)]"
+                                    subActive ? "bg-white dark:bg-black" : "bg-[var(--muted-foreground)]"
                                   )}
                                 />
                                 <span>{sub.label}</span>
@@ -451,7 +451,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                                     <span
                                       className={cn(
                                         "h-1.5 w-1.5 rounded-full",
-                                        subActive ? "bg-primary-foreground" : "bg-[var(--muted-foreground)]"
+                                        subActive ? "bg-white dark:bg-black" : "bg-[var(--muted-foreground)]"
                                       )}
                                     />
                                     <span>{sub.label}</span>

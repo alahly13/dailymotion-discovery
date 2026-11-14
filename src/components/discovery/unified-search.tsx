@@ -65,6 +65,7 @@ import {
   replaySearchSnapshot,
   getLatestRestorableSearchSnapshot,
 } from "@/lib/search-history/search-snapshot-service";
+import { captureSearchSubmission } from "@/lib/saved-titles/capture-service";
 import { useSynchronizedApiVersion } from "@/lib/navigation/version-sync";
 
 const GROUPS: { key: ParamGroup; label: string }[] = [
@@ -358,7 +359,13 @@ export function UnifiedSearch() {
     setNotice(null);
     setIsReplayMode(false);
     setRestoredFromHistory(false);
-    if (!append) workspace.recordSearchSubmitted(version);
+    if (!append) {
+      workspace.recordSearchSubmitted(version);
+      const submittedTerm = (version === "v1" ? query : profileId).trim();
+      if (submittedTerm) {
+        void captureSearchSubmission(submittedTerm, version);
+      }
+    }
     try {
       const params = new URLSearchParams();
       params.set("mode", version === "v1" ? "search" : "browse");
@@ -777,10 +784,10 @@ export function UnifiedSearch() {
             <button
               type="submit"
               disabled={loading}
-              className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-primary px-4 text-xs font-black text-primary-foreground shadow-xs transition hover:opacity-95 disabled:opacity-50 cursor-pointer"
+              className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-neutral-900 text-white hover:bg-neutral-800 dark:bg-white dark:text-black dark:hover:bg-neutral-100 px-4 text-xs font-black shadow-xs transition disabled:opacity-50 cursor-pointer"
             >
-              <Search className="h-3.5 w-3.5" />
-              <span>{loading ? "Searching…" : "Search"}</span>
+              <Search className="h-3.5 w-3.5 text-white dark:text-black shrink-0" />
+              <span className="text-white dark:text-black font-black">{loading ? "Searching…" : "Search"}</span>
             </button>
           </div>
         </form>

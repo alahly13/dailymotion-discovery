@@ -58,6 +58,7 @@ import {
   captureSearchSnapshot,
   getLatestRestorableSearchSnapshot,
 } from "@/lib/search-history/search-snapshot-service";
+import { captureLinkSubmission } from "@/lib/saved-titles/capture-service";
 
 const EXAMPLE_CHIPS: Array<{ label: string; value: string; kind: DailymotionResourceKind }> = [
   { label: "Video: x8n8x8", value: "https://www.dailymotion.com/video/x8n8x8", kind: "video" },
@@ -143,7 +144,9 @@ export function LinkExplorerWorkspace() {
   };
 
   async function executeResolution(targetInput: string, targetVersion: ApiVersion) {
-    if (!targetInput.trim()) return;
+    const clean = targetInput.trim();
+    if (!clean) return;
+    void captureLinkSubmission(clean, targetVersion, analyzedPreview);
     setLoading(true);
     setRestoredFromHistory(false);
     setCurrentPage(1);

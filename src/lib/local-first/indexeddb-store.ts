@@ -19,7 +19,7 @@ import {
  */
 
 export const LOCAL_IDB_NAME = "dailymotion_discovery_local_v1";
-export const LOCAL_IDB_VERSION = 2;
+export const LOCAL_IDB_VERSION = 3;
 
 export const LOCAL_STORES = {
   SAVED_ITEMS: "entities_saved_items",
@@ -33,6 +33,7 @@ export const LOCAL_STORES = {
   SYNC_JOURNAL: "sync_journal",
   SEARCH_SNAPSHOTS: "search_snapshots",
   SEARCH_SNAPSHOT_PAGES: "search_snapshot_pages",
+  SAVED_TITLES: "entities_saved_titles",
 } as const;
 
 export type LocalStoreName = (typeof LOCAL_STORES)[keyof typeof LOCAL_STORES];
@@ -233,6 +234,7 @@ const KEY_PATHS: Record<LocalStoreName, string> = {
   [LOCAL_STORES.SYNC_JOURNAL]: "journalId",
   [LOCAL_STORES.SEARCH_SNAPSHOTS]: "id",
   [LOCAL_STORES.SEARCH_SNAPSHOT_PAGES]: "id",
+  [LOCAL_STORES.SAVED_TITLES]: "id",
 };
 
 /**
@@ -291,6 +293,10 @@ function openNativeIndexedDB(): Promise<IDBDatabase> {
             os.createIndex("by_route", "route", { unique: false });
           } else if (storeName === LOCAL_STORES.SEARCH_SNAPSHOT_PAGES) {
             os.createIndex("by_snapshotId", "snapshotId", { unique: false });
+          } else if (storeName === LOCAL_STORES.SAVED_TITLES) {
+            os.createIndex("by_ownerId", "ownerId", { unique: false });
+            os.createIndex("by_status", "status", { unique: false });
+            os.createIndex("by_createdAt", "createdAt", { unique: false });
           }
         }
       }
