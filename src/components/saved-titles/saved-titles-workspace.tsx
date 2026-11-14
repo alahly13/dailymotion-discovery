@@ -69,6 +69,11 @@ export function SavedTitlesWorkspace() {
 
   // 1. Resolve authenticated user identity
   const loadUserAndData = useCallback(async () => {
+    // Safety timer to prevent indefinite loading in low-connectivity or high-latency environments
+    const safetyTimer = setTimeout(() => {
+      setLoading(false);
+    }, 1500);
+
     try {
       const res = await fetch("/api/auth/session", { cache: "no-store" });
       if (res.ok) {
@@ -86,6 +91,7 @@ export function SavedTitlesWorkspace() {
     } catch {
       // Fallback
     } finally {
+      clearTimeout(safetyTimer);
       setLoading(false);
     }
   }, []);

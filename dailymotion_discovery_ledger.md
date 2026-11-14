@@ -24,6 +24,45 @@ Scope: Project source-of-truth ledger, updated after Search Architecture Consoli
 - [Future Roadmap](#future-roadmap)
 - [Agent Instructions](#agent-instructions)
 
+## 2026-11-14 Full-Width Collapsible Local Filters, 7-Day Search Retention, Search History Instant Loading & Real-Time Saved Titles Auto-Capture
+
+**User intent addressed**
+- Redesigned the Local Filters interface on Global Search (`/global-search`): converted the previously cramped, narrow left column into a modern, full-width collapsible panel positioned directly below the search box and above the results area.
+- Configured Local Filters to be collapsed by default with an interactive expand/collapse toggle displaying total loaded items and active filters count.
+- Expanded the search results display area to span the full page width with a flexible responsive grid (`grid-cols-1 sm:grid-cols-2 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4 w-full`), allowing 3 cards on desktop, 4 on wide displays, and 5 on ultrawide monitors without squishing.
+- Guaranteed 7-day retention of search results in the UI across page reloads, tab switches, and visits until a new search is explicitly conducted.
+- Fixed the Search History page (`/search-history`) which previously hung indefinitely on "Loading IndexedDB search history…" due to unhandled connection blocking and missing fallback timeouts.
+- Wired automatic capture of every executed search query into Saved Titles (`entities_saved_titles` in IndexedDB) with status `pending_sync` and origin `Global Search`, ensuring it immediately reflects in `/saved-titles`.
+- Strengthened owner alias bridging across `local-owner`, `asdy`, and authenticated Supabase UUIDs so captured titles and search snapshots are never lost during session hydration transitions.
+
+**Architecture & Implementation Details**
+
+1. **Full-Width Collapsible Local Filters & Flexible Results Grid (`src/components/discovery/unified-search.tsx`)**:
+   - Eliminated the restrictive side-by-side layout (`<aside className="w-full lg:w-80">` next to `<main>`).
+   - Placed `<DiscoveryLocalFilterPanel />` in a dedicated full-width container directly following the search form and error alerts.
+   - Initialized `isLocalFiltersOpen` to `false` (collapsed by default). Added a header toggle button with `ChevronDown` / `ChevronUp` and active filter chips counter.
+   - Refactored the results grid to `grid grid-cols-1 sm:grid-cols-2 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4 w-full`, providing optimal responsive spacing and card sizing across all viewports.
+
+2. **7-Day Search Results Retention & Reload Persistence (`src/components/discovery/unified-search.tsx` & `src/lib/search-history/search-snapshot-service.ts`)**:
+   - Upgraded `getLatestRestorableSearchSnapshot` mount restoration in `unified-search.tsx`. Previously, presence of `?q=...` in the URL caused snapshot restoration to be skipped on page reload. Now, if the URL query matches the latest snapshot query (or if no URL query exists), results, pagination, and parameters are seamlessly restored from the 7-day IndexedDB snapshot with an informational status notice (`Retained search results (N items · 7-day persistence)`).
+   - Executing a new search replaces the active snapshot and restarts the 7-day TTL (`expiresAt: timestamp + 7 * 86_400_000`).
+
+3. **Search History Loading Hang Prevention & Real-Time Sync (`src/lib/local-first/indexeddb-store.ts` & `src/app/search-history/page.tsx`)**:
+   - Added a 3500ms safety timeout to `openNativeIndexedDB`, along with `req.onblocked` and `db.onversionchange` handlers to prevent unhandled lock contention across multiple browser tabs during IndexedDB schema upgrades.
+   - Added a 1500ms safety timer to `loadSnapshots` in `src/app/search-history/page.tsx` ensuring the UI transitions out of the loading state even in degraded environments.
+   - Exported and dispatched `SEARCH_HISTORY_CHANGED_EVENT = "dm:search-history-changed"`. `SearchHistoryPage` listens to this event for immediate zero-refresh snapshot list updates.
+   - Updated replay links to point canonically to `/global-search?replay=${id}`.
+
+4. **Real-Time Saved Titles Auto-Capture & Identity Bridging (`src/components/discovery/unified-search.tsx`, `src/lib/saved-titles/capture-service.ts`, `src/lib/saved-titles/local-storage.ts`, & `src/components/saved-titles/saved-titles-workspace.tsx`)**:
+   - Connected `captureSearchSubmission(activeSearchTerm, version, ownerId)` into the `runSearch` execution pipeline. Every search query is automatically recorded in `entities_saved_titles` as `kind: "search_query"` with status `pending_sync`.
+   - Updated `getAllOwnerSavedTitles` to match titles captured under `local-owner`, `asdy`, or `admin` when accessed by authenticated owners (UUID or admin alias), preventing dropped records during session initialization.
+   - Added safety timer (1500ms) to `SavedTitlesWorkspace` in `src/components/saved-titles/saved-titles-workspace.tsx`.
+
+**Verification Results**
+- `npm run typecheck` (`next typegen && tsc --noEmit`): Exit code 0, 0 TypeScript errors.
+- `prisma validate`: Schema at `prisma/schema.prisma` is valid.
+- Zero local production builds run (strictly adhering to memory/resource constraints).
+
 ## 2026-11-14 Header Clutter Elimination, Unified R2 Cloud Sync Engine, Contrast Shield & Strict Link Explorer Isolation
 
 **User intent addressed**
@@ -234,6 +273,45 @@ Scope: Project source-of-truth ledger, updated after Search Architecture Consoli
 - Password correctness (unreachable auth layer). Nothing was changed about it.
 
 - [Agent Instructions](#agent-instructions)
+
+## 2026-11-14 Full-Width Collapsible Local Filters, 7-Day Search Retention, Search History Instant Loading & Real-Time Saved Titles Auto-Capture
+
+**User intent addressed**
+- Redesigned the Local Filters interface on Global Search (`/global-search`): converted the previously cramped, narrow left column into a modern, full-width collapsible panel positioned directly below the search box and above the results area.
+- Configured Local Filters to be collapsed by default with an interactive expand/collapse toggle displaying total loaded items and active filters count.
+- Expanded the search results display area to span the full page width with a flexible responsive grid (`grid-cols-1 sm:grid-cols-2 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4 w-full`), allowing 3 cards on desktop, 4 on wide displays, and 5 on ultrawide monitors without squishing.
+- Guaranteed 7-day retention of search results in the UI across page reloads, tab switches, and visits until a new search is explicitly conducted.
+- Fixed the Search History page (`/search-history`) which previously hung indefinitely on "Loading IndexedDB search history…" due to unhandled connection blocking and missing fallback timeouts.
+- Wired automatic capture of every executed search query into Saved Titles (`entities_saved_titles` in IndexedDB) with status `pending_sync` and origin `Global Search`, ensuring it immediately reflects in `/saved-titles`.
+- Strengthened owner alias bridging across `local-owner`, `asdy`, and authenticated Supabase UUIDs so captured titles and search snapshots are never lost during session hydration transitions.
+
+**Architecture & Implementation Details**
+
+1. **Full-Width Collapsible Local Filters & Flexible Results Grid (`src/components/discovery/unified-search.tsx`)**:
+   - Eliminated the restrictive side-by-side layout (`<aside className="w-full lg:w-80">` next to `<main>`).
+   - Placed `<DiscoveryLocalFilterPanel />` in a dedicated full-width container directly following the search form and error alerts.
+   - Initialized `isLocalFiltersOpen` to `false` (collapsed by default). Added a header toggle button with `ChevronDown` / `ChevronUp` and active filter chips counter.
+   - Refactored the results grid to `grid grid-cols-1 sm:grid-cols-2 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4 w-full`, providing optimal responsive spacing and card sizing across all viewports.
+
+2. **7-Day Search Results Retention & Reload Persistence (`src/components/discovery/unified-search.tsx` & `src/lib/search-history/search-snapshot-service.ts`)**:
+   - Upgraded `getLatestRestorableSearchSnapshot` mount restoration in `unified-search.tsx`. Previously, presence of `?q=...` in the URL caused snapshot restoration to be skipped on page reload. Now, if the URL query matches the latest snapshot query (or if no URL query exists), results, pagination, and parameters are seamlessly restored from the 7-day IndexedDB snapshot with an informational status notice (`Retained search results (N items · 7-day persistence)`).
+   - Executing a new search replaces the active snapshot and restarts the 7-day TTL (`expiresAt: timestamp + 7 * 86_400_000`).
+
+3. **Search History Loading Hang Prevention & Real-Time Sync (`src/lib/local-first/indexeddb-store.ts` & `src/app/search-history/page.tsx`)**:
+   - Added a 3500ms safety timeout to `openNativeIndexedDB`, along with `req.onblocked` and `db.onversionchange` handlers to prevent unhandled lock contention across multiple browser tabs during IndexedDB schema upgrades.
+   - Added a 1500ms safety timer to `loadSnapshots` in `src/app/search-history/page.tsx` ensuring the UI transitions out of the loading state even in degraded environments.
+   - Exported and dispatched `SEARCH_HISTORY_CHANGED_EVENT = "dm:search-history-changed"`. `SearchHistoryPage` listens to this event for immediate zero-refresh snapshot list updates.
+   - Updated replay links to point canonically to `/global-search?replay=${id}`.
+
+4. **Real-Time Saved Titles Auto-Capture & Identity Bridging (`src/components/discovery/unified-search.tsx`, `src/lib/saved-titles/capture-service.ts`, `src/lib/saved-titles/local-storage.ts`, & `src/components/saved-titles/saved-titles-workspace.tsx`)**:
+   - Connected `captureSearchSubmission(activeSearchTerm, version, ownerId)` into the `runSearch` execution pipeline. Every search query is automatically recorded in `entities_saved_titles` as `kind: "search_query"` with status `pending_sync`.
+   - Updated `getAllOwnerSavedTitles` to match titles captured under `local-owner`, `asdy`, or `admin` when accessed by authenticated owners (UUID or admin alias), preventing dropped records during session initialization.
+   - Added safety timer (1500ms) to `SavedTitlesWorkspace` in `src/components/saved-titles/saved-titles-workspace.tsx`.
+
+**Verification Results**
+- `npm run typecheck` (`next typegen && tsc --noEmit`): Exit code 0, 0 TypeScript errors.
+- `prisma validate`: Schema at `prisma/schema.prisma` is valid.
+- Zero local production builds run (strictly adhering to memory/resource constraints).
 
 ## 2026-11-14 Header Clutter Elimination, Unified R2 Cloud Sync Engine, Contrast Shield & Strict Link Explorer Isolation
 

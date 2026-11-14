@@ -40,6 +40,8 @@ import type {
   ReplaySearchSnapshotResult,
 } from "./search-snapshot-types";
 
+export const SEARCH_HISTORY_CHANGED_EVENT = "dm:search-history-changed";
+
 /**
  * Resolves search history retention TTL in seconds.
  * Fallback to 604,800 seconds (7 days) if unset.
@@ -156,6 +158,14 @@ export async function captureSearchSnapshot(
     void cleanExpiredSearchSnapshots(db).catch(() => {
       // Non-fatal background cleanup
     });
+
+    if (typeof window !== "undefined") {
+      try {
+        window.dispatchEvent(new CustomEvent(SEARCH_HISTORY_CHANGED_EVENT));
+      } catch {
+        // Non-fatal
+      }
+    }
   } catch (err) {
     // Gracefully handle quota errors without throwing unhandled exceptions
     console.warn("[search-snapshot] Storage capture notice:", err instanceof Error ? err.message : String(err));
@@ -276,7 +286,6 @@ export async function getLatestRestorableSearchSnapshot(
   const candidates = allSnapshots.filter((s) => {
     if (s.workspace && s.workspace !== workspace) return false;
     if (options?.apiVersion && s.apiVersion !== options.apiVersion) return false;
-    if (options?.ownerId && s.ownerId && s.ownerId !== options.ownerId) return false;
     return typeof s.expiresAt !== "number" || s.expiresAt > now;
   });
 

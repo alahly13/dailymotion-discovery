@@ -281,28 +281,69 @@ let cachedBrowserAdapter: LocalStoreAdapter | null = null;
 
 function openNativeIndexedDB(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    const req = window.indexedDB.open(LOCAL_IDB_NAME, LOCAL_IDB_VERSION);
-    req.onupgradeneeded = () => {
-      const db = req.result;
-      for (const storeName of Object.values(LOCAL_STORES)) {
-        if (!db.objectStoreNames.contains(storeName)) {
-          const os = db.createObjectStore(storeName, { keyPath: KEY_PATHS[storeName] });
-          if (storeName === LOCAL_STORES.SEARCH_SNAPSHOTS) {
-            os.createIndex("by_expiresAt", "expiresAt", { unique: false });
-            os.createIndex("by_capturedAt", "capturedAt", { unique: false });
-            os.createIndex("by_route", "route", { unique: false });
-          } else if (storeName === LOCAL_STORES.SEARCH_SNAPSHOT_PAGES) {
-            os.createIndex("by_snapshotId", "snapshotId", { unique: false });
-          } else if (storeName === LOCAL_STORES.SAVED_TITLES) {
-            os.createIndex("by_ownerId", "ownerId", { unique: false });
-            os.createIndex("by_status", "status", { unique: false });
-            os.createIndex("by_createdAt", "createdAt", { unique: false });
+    let settled = false;
+    // Safety timeout: never allow IndexedDB open to hang the application
+    const timer = setTimeout(() => {
+      if (!settled) {
+        settled = true;
+        console.warn("[IndexedDB] Database open timed out after 3500ms; falling back safely.");
+        reject(new Error("IndexedDB open timed out"));
+      }
+    }, 3500);
+
+    try {
+      const req = window.indexedDB.open(LOCAL_IDB_NAME, LOCAL_IDB_VERSION);
+      req.onblocked = () => {
+        console.warn("[IndexedDB] Database upgrade blocked by open connection in another tab.");
+      };
+      req.onupgradeneeded = () => {
+        const db = req.result;
+        for (const storeName of Object.values(LOCAL_STORES)) {
+          if (!db.objectStoreNames.contains(storeName)) {
+            const os = db.createObjectStore(storeName, { keyPath: KEY_PATHS[storeName] });
+            if (storeName === LOCAL_STORES.SEARCH_SNAPSHOTS) {
+              os.createIndex("by_expiresAt", "expiresAt", { unique: false });
+              os.createIndex("by_capturedAt", "capturedAt", { unique: false });
+              os.createIndex("by_route", "route", { unique: false });
+            } else if (storeName === LOCAL_STORES.SEARCH_SNAPSHOT_PAGES) {
+              os.createIndex("by_snapshotId", "snapshotId", { unique: false });
+            } else if (storeName === LOCAL_STORES.SAVED_TITLES) {
+              os.createIndex("by_ownerId", "ownerId", { unique: false });
+              os.createIndex("by_status", "status", { unique: false });
+              os.createIndex("by_createdAt", "createdAt", { unique: false });
+            }
           }
         }
+      };
+      req.onsuccess = () => {
+        if (!settled) {
+          settled = true;
+          clearTimeout(timer);
+          const db = req.result;
+          db.onversionchange = () => {
+            try {
+              db.close();
+            } catch {
+              // Ignore
+            }
+          };
+          resolve(db);
+        }
+      };
+      req.onerror = () => {
+        if (!settled) {
+          settled = true;
+          clearTimeout(timer);
+          reject(req.error ?? new Error("Failed to open IndexedDB"));
+        }
+      };
+    } catch (err) {
+      if (!settled) {
+        settled = true;
+        clearTimeout(timer);
+        reject(err);
       }
-    };
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error ?? new Error("Failed to open IndexedDB"));
+    }
   });
 }
 
@@ -632,6 +673,13 @@ export async function setLatestSearchPointer(
     updatedAt: now,
   });
 
+  // Canonical workspace fallback pointer
+  await db.put<LocalSyncMetadataRecord>(LOCAL_STORES.LOCAL_SYNC_METADATA, {
+    key: `latest_search::canonical::${workspace}`,
+    value: { snapshotId, updatedAt: now },
+    updatedAt: now,
+  });
+
   // Version-specific workspace pointer if apiVersion provided
   if (options?.apiVersion) {
     await db.put<LocalSyncMetadataRecord>(LOCAL_STORES.LOCAL_SYNC_METADATA, {
@@ -668,6 +716,16 @@ export async function getLatestSearchPointer(
   );
   if (generalRecord?.value && typeof generalRecord.value === "object") {
     const snapId = (generalRecord.value as { snapshotId?: string }).snapshotId;
+    if (snapId) return snapId;
+  }
+
+  // Canonical workspace fallback pointer
+  const canonicalRecord = await db.get<LocalSyncMetadataRecord>(
+    LOCAL_STORES.LOCAL_SYNC_METADATA,
+    `latest_search::canonical::${workspace}`
+  );
+  if (canonicalRecord?.value && typeof canonicalRecord.value === "object") {
+    const snapId = (canonicalRecord.value as { snapshotId?: string }).snapshotId;
     if (snapId) return snapId;
   }
 

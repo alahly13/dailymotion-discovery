@@ -52,6 +52,7 @@ import { CountrySelector } from "./country-selector";
 import {
   DEFAULT_DISCOVERY_LOCAL_FILTERS,
   applyDiscoveryResultPipeline,
+  listActiveLocalFilterChips,
   type LocalFilterState,
 } from "@/lib/filters/discovery-result-filters";
 import { DiscoveryLocalFilterPanel } from "./discovery-local-filter-panel";
@@ -65,8 +66,9 @@ import {
   replaySearchSnapshot,
   getLatestRestorableSearchSnapshot,
 } from "@/lib/search-history/search-snapshot-service";
-import { captureSearchSubmission } from "@/lib/saved-titles/capture-service";
+import { captureSearchSubmission, getClientOwnerId } from "@/lib/saved-titles/capture-service";
 import { useSynchronizedApiVersion } from "@/lib/navigation/version-sync";
+import { cn } from "@/lib/utils/cn";
 
 const GROUPS: { key: ParamGroup; label: string }[] = [
   { key: "basic", label: "Basic Filters" },
@@ -175,7 +177,7 @@ export function UnifiedSearch() {
   const [filters, setFilters] = useState<Record<string, string>>({});
   const [localFilters, setLocalFilters] = useState<LocalFilterState>(DEFAULT_DISCOVERY_LOCAL_FILTERS);
   const [isApiFiltersOpen, setIsApiFiltersOpen] = useState(false);
-  const [isLocalFiltersOpen, setIsLocalFiltersOpen] = useState(true);
+  const [isLocalFiltersOpen, setIsLocalFiltersOpen] = useState(false);
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
   const [bulkCollectionId, setBulkCollectionId] = useState("");
   const [saveFlash, setSaveFlash] = useState<string | null>(null);
@@ -243,11 +245,15 @@ export function UnifiedSearch() {
         }
       }
 
-      // 2. If no search parameters or query provided in URL, automatically restore the latest valid search snapshot
-      if (!sp.has("q") && !sp.has("profileId")) {
-        try {
-          const restorable = await getLatestRestorableSearchSnapshot("global_search");
-          if (restorable && active) {
+      // 2. Automatically restore the latest valid search snapshot (retained in IndexedDB for up to 7 days)
+      try {
+        const restorable = await getLatestRestorableSearchSnapshot("global_search");
+        if (restorable && !restorable.isExpired && restorable.items.length > 0 && active) {
+          const urlQuery = (sp.get("q") ?? "").trim().toLowerCase();
+          const snapQuery = (restorable.snapshot.query ?? "").trim().toLowerCase();
+
+          // Restore if URL has no search query OR if the URL query matches the restored snapshot
+          if (!urlQuery || urlQuery === snapQuery) {
             setVersion(restorable.snapshot.apiVersion);
             setQuery(restorable.snapshot.query || "");
             setItems(restorable.items);
@@ -274,12 +280,12 @@ export function UnifiedSearch() {
             });
             setHasSearched(true);
             setRestoredFromHistory(true);
-            setNotice("Restored from local search history · Zero API Calls");
+            setNotice(`Retained search results (${restorable.items.length} items · 7-day persistence)`);
             return;
           }
-        } catch (err) {
-          console.warn("[unified-search] Auto-restoration from local storage skipped:", err);
         }
+      } catch (err) {
+        console.warn("[unified-search] Auto-restoration from local storage skipped:", err);
       }
 
       if (!active) return;
@@ -455,22 +461,37 @@ export function UnifiedSearch() {
           resultCount: data.result.total ?? newItems.length,
         });
 
-        // 2. Automatically capture full raw JSON snapshot into IndexedDB for zero-API offline replay & restoration
-        void captureSearchSnapshot({
-          workspace: "global_search",
-          query: query || profileId,
-          route: "/global-search",
-          apiVersion: version,
-          resourceType: "ALL",
-          mode: version === "v1" ? "search" : "browse",
-          apiParams: effective,
-          localFilters: localFilters as unknown as Record<string, unknown>,
-          rawResponse: data.result,
-          items: newItems,
-          pageIndex: page,
-          hasMore: data.result.hasMore,
-          totalResults: data.result.total ?? newItems.length,
-        });
+        // 2. Automatically capture full raw JSON snapshot into IndexedDB for zero-API offline replay & 7-day retention
+        // and register the search query into Saved Titles Manifest for the authenticated owner
+        void (async () => {
+          try {
+            const ownerId = await getClientOwnerId();
+            const activeSearchTerm = (query || profileId || "").trim();
+
+            await captureSearchSnapshot({
+              workspace: "global_search",
+              query: activeSearchTerm,
+              route: "/global-search",
+              apiVersion: version,
+              resourceType: "ALL",
+              mode: version === "v1" ? "search" : "browse",
+              apiParams: effective,
+              localFilters: localFilters as unknown as Record<string, unknown>,
+              rawResponse: data.result,
+              items: newItems,
+              pageIndex: page,
+              hasMore: data.result.hasMore,
+              totalResults: data.result.total ?? newItems.length,
+              ownerId,
+            });
+
+            if (activeSearchTerm) {
+              await captureSearchSubmission(activeSearchTerm, version, ownerId);
+            }
+          } catch (err) {
+            console.warn("[unified-search] Snapshot/SavedTitle capture error:", err);
+          }
+        })();
 
         workspace.recordSearchOutcome(version, true, 1);
       } else {
@@ -529,6 +550,10 @@ export function UnifiedSearch() {
 
     return { total: items.length, videos, channels, playlists, live, users };
   }, [items]);
+
+  const activeLocalChipsCount = useMemo(() => {
+    return listActiveLocalFilterChips(localFilters).length;
+  }, [localFilters]);
 
   // Smart Query Transforms
   const handleTrimSpaces = () => {
@@ -982,23 +1007,60 @@ export function UnifiedSearch() {
         />
       )}
 
-      {/* ── Sibling Results Workspace (Left = Local Filters, Right = Results) ── */}
+      {/* ── Full-Width Collapsible Local Filters Bar & Panel (Directly after Search Form) ── */}
       {hasSearched && !failure && (
-        <div className="flex flex-col lg:flex-row items-start gap-5">
-          {/* Left Side: Dedicated Collapsible Local Filters Panel */}
+        <div className="w-full rounded-xl border border-[var(--border)] bg-[var(--card)] p-3.5 shadow-xs transition-all">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="inline-flex items-center gap-1.5 rounded-md bg-emerald-500/15 px-2.5 py-1 text-[11px] font-black uppercase text-emerald-600 dark:text-emerald-400">
+                <Filter className="h-3.5 w-3.5" />
+                Local Filters · In-Memory (Zero API Calls)
+              </span>
+              <span className="text-xs font-semibold text-[var(--muted-foreground)]">
+                Showing <strong className="text-[var(--foreground)]">{visibleItems.length}</strong> of{" "}
+                <strong className="text-[var(--foreground)]">{items.length}</strong> loaded items
+              </span>
+              {activeLocalChipsCount > 0 && (
+                <span className="rounded-full bg-emerald-500/20 px-2 py-0.5 text-[10px] font-bold text-emerald-400">
+                  {activeLocalChipsCount} active
+                </span>
+              )}
+            </div>
+
+            <button
+              type="button"
+              onClick={toggleLocalFilters}
+              className={cn(
+                "inline-flex h-8 items-center gap-1.5 rounded-lg border px-3 text-xs font-bold transition cursor-pointer select-none",
+                isLocalFiltersOpen
+                  ? "border-[var(--primary)] bg-[color-mix(in_srgb,var(--primary)_12%,transparent)] text-[var(--primary)]"
+                  : "border-[var(--border)] bg-[var(--surface-container-low)] text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
+              )}
+              aria-expanded={isLocalFiltersOpen}
+            >
+              <Filter className="h-3.5 w-3.5" />
+              <span>{isLocalFiltersOpen ? "Collapse Local Filters" : "Expand Local Filters"}</span>
+              {isLocalFiltersOpen ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+            </button>
+          </div>
+
+          {/* Full-Width Expanded Local Filter Panel */}
           {isLocalFiltersOpen && (
-            <aside className="w-full lg:w-80 2xl:w-88 shrink-0 lg:sticky lg:top-16 lg:max-h-[calc(100vh-5rem)] lg:overflow-y-auto">
+            <div className="mt-3.5 pt-3.5 border-t border-[var(--border)] w-full">
               <DiscoveryLocalFilterPanel
                 value={localFilters}
                 onChange={setLocalFilters}
                 totalLoaded={items.length}
                 filteredCount={visibleItems.length}
               />
-            </aside>
+            </div>
           )}
+        </div>
+      )}
 
-          {/* Right Side: Main Search Workspace & Results Grid */}
-          <main className="flex-1 min-w-0 space-y-4 w-full">
+      {/* ── Full-Width Flexible Results Area (Directly after Local Filters) ── */}
+      {hasSearched && !failure && (
+        <main className="w-full space-y-4">
             {/* Header Controls Bar */}
             <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[var(--border)] bg-[var(--card)] p-3.5 shadow-xs">
               {/* Resource Distribution Tabs */}
@@ -1174,7 +1236,7 @@ export function UnifiedSearch() {
               </div>
             )}
 
-            {/* Results Grid with Desktop >= 3 cards per row */}
+            {/* Results Grid with Full-Width Responsive Flex: 1 col on mobile, 2 on tablet, 3 on laptop, 4 on desktop, 5 on ultrawide */}
             {visibleItems.length === 0 ? (
               <div className="flex min-h-60 flex-col items-center justify-center rounded-2xl border border-dashed border-[var(--border)] p-8 text-center bg-[var(--card)]/50">
                 <Search className="h-10 w-10 text-[var(--muted-foreground)]/50 mb-3" />
@@ -1192,7 +1254,7 @@ export function UnifiedSearch() {
                 </button>
               </div>
             ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3 2xl:grid-cols-4 min-[1850px]:grid-cols-5 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4 w-full">
                 {visibleItems.map((item) => {
                   const cKey = discoveryCompositeKey(item.apiVersion, item.kind, item.id);
                   const isSavedLocal = merged.savedKeys.has(cKey) || workspace.isItemSaved(item.apiVersion, item.kind, item.id);
@@ -1257,8 +1319,7 @@ export function UnifiedSearch() {
               </div>
             )}
           </main>
-        </div>
-      )}
+        )}
 
       {/* Empty State before any search is run */}
       {!hasSearched && (

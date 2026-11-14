@@ -26,7 +26,11 @@ import {
   type LocalSearchSnapshotPageRecord,
   type LocalSearchSnapshotRecord,
 } from "@/lib/local-first/indexeddb-store";
-import { removeSearchSnapshot } from "@/lib/search-history/search-snapshot-service";
+import {
+  removeSearchSnapshot,
+  SEARCH_HISTORY_CHANGED_EVENT,
+} from "@/lib/search-history/search-snapshot-service";
+import { useDiscoveryWorkspace } from "@/stores/discovery-workspace-store";
 import { RawJsonDrawer } from "@/components/discovery/raw-json-drawer";
 
 function formatExpiryTime(expiresAt: number): string {
@@ -52,6 +56,7 @@ function getDateGroup(isoDate: string): string {
 }
 
 export default function SearchHistoryPage() {
+  const workspace = useDiscoveryWorkspace();
   const [snapshots, setSnapshots] = useState<LocalSearchSnapshotRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
@@ -61,19 +66,35 @@ export default function SearchHistoryPage() {
   const [flashMessage, setFlashMessage] = useState<string | null>(null);
 
   const loadSnapshots = async () => {
+    // Safety timer to prevent lingering loading state
+    const safetyTimer = setTimeout(() => {
+      setLoading(false);
+    }, 1500);
+
     try {
       setLoading(true);
       const list = await listSearchSnapshots({ includeExpired: false });
       setSnapshots(list);
-    } catch {
-      // Non-fatal
+    } catch (err) {
+      console.warn("[search-history] Load notice:", err);
     } finally {
+      clearTimeout(safetyTimer);
       setLoading(false);
     }
   };
 
   useEffect(() => {
     void loadSnapshots();
+
+    // Listen to real-time search snapshot capture events
+    const handleUpdate = () => {
+      void loadSnapshots();
+    };
+
+    window.addEventListener(SEARCH_HISTORY_CHANGED_EVENT, handleUpdate);
+    return () => {
+      window.removeEventListener(SEARCH_HISTORY_CHANGED_EVENT, handleUpdate);
+    };
   }, []);
 
   const handleDelete = async (id: string) => {
@@ -266,11 +287,11 @@ export default function SearchHistoryPage() {
             Searches run in Unified Search, Video Discovery, or Channel Explorer will appear here automatically.
           </p>
           <Link
-            href="/search"
-            className="mt-4 inline-flex min-h-9 items-center gap-1.5 rounded-lg bg-primary px-4 text-xs font-black text-primary-foreground hover:opacity-90"
+            href="/global-search"
+            className="mt-4 inline-flex min-h-9 items-center gap-1.5 rounded-lg bg-primary px-4 text-xs font-black text-primary-foreground hover:opacity-90 cursor-pointer shadow-xs"
           >
             <Search className="h-3.5 w-3.5" />
-            <span>Go to Search Workspace</span>
+            <span>Go to Global Search</span>
           </Link>
         </div>
       ) : (
@@ -340,8 +361,8 @@ export default function SearchHistoryPage() {
                       {/* Action Buttons */}
                       <div className="mt-4 flex flex-wrap items-center gap-1.5 border-t border-[var(--border)] pt-3">
                         <Link
-                          href={`/search?replay=${encodeURIComponent(snap.id)}`}
-                          className="inline-flex min-h-8 flex-1 items-center justify-center gap-1 rounded-md bg-primary px-2.5 text-xs font-bold text-primary-foreground transition hover:opacity-90"
+                          href={`/global-search?replay=${encodeURIComponent(snap.id)}`}
+                          className="inline-flex min-h-8 flex-1 items-center justify-center gap-1 rounded-md bg-primary px-2.5 text-xs font-bold text-primary-foreground transition hover:opacity-90 shadow-2xs"
                           title="Replay results completely offline with ZERO API calls"
                         >
                           <Play className="h-3 w-3" />
