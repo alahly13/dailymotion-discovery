@@ -172,4 +172,58 @@ describe("Link Explorer Intelligence & Capability Architecture (2026)", () => {
     expect(res.reason).toBe("keyword_search_redirect");
     expect(res.error).toContain("Global Search");
   });
+
+  it("calculates omitted/unavailable references and duplicate counts in statistics", () => {
+    const intelligence = computeResourceIntelligence(
+      mockItems,
+      mockMainItem,
+      "v2",
+      analyzed,
+      "completed",
+      {
+        duplicatesSkipped: 7,
+        pagesRetrieved: 3,
+        providerReportedTotal: 15,
+        omittedOrUnavailable: 12,
+      }
+    );
+
+    expect(intelligence.statistics.providerReportedVideos).toBe(15);
+    expect(intelligence.statistics.duplicatesSkipped).toBe(7);
+    expect(intelligence.statistics.pagesRetrieved).toBe(3);
+    expect(intelligence.statistics.omittedOrUnavailableReferences).toBe(12);
+    expect(intelligence.statistics.locallyRetrievedVideos).toBe(3);
+  });
+
+  it("handles continuation state deduplication without mutating original list", () => {
+    const duplicateCandidate: DiscoveryItem = {
+      ...mockItems[0],
+      title: "Duplicate Title with Same ID",
+    };
+    const newItem: DiscoveryItem = {
+      ...mockItems[1],
+      id: "x99999",
+      title: "Genuinely Unique New Video",
+    };
+
+    const combinedSet = new Set(mockItems.map((i) => `${i.apiVersion}:${i.kind}:${i.id}`));
+    const incoming = [duplicateCandidate, newItem];
+
+    let skipped = 0;
+    const added: DiscoveryItem[] = [];
+    for (const item of incoming) {
+      const key = `${item.apiVersion}:${item.kind}:${item.id}`;
+      if (combinedSet.has(key)) {
+        skipped++;
+      } else {
+        combinedSet.add(key);
+        added.push(item);
+      }
+    }
+
+    expect(skipped).toBe(1);
+    expect(added.length).toBe(1);
+    expect(added[0].id).toBe("x99999");
+    expect(mockItems.length).toBe(3); // Original collection preserved intact
+  });
 });

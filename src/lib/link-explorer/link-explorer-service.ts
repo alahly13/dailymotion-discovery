@@ -22,6 +22,7 @@ import {
 import { discoveryCompositeKey } from "@/lib/resources/dailymotion-resource-taxonomy";
 import {
   computeResourceIntelligence,
+  type ContinuationState,
   type LinkExplorerManifest,
   type LinkExplorerResolution,
   type ResourceIntelligenceData,
@@ -46,7 +47,7 @@ export interface DiscoveryApiResponse {
 
 export const DEFAULT_SCAN_CONFIG: ScanBudgetConfig = {
   strategy: "standard",
-  pageSize: 50,
+  pageSize: 100,
   maxPages: 5,
   throttleMs: 150,
   fieldsProfile: "standard",
@@ -137,7 +138,8 @@ export async function resolveLinkExplorerInput(
   overrideKind?: DailymotionResourceKind,
   scanConfig: Partial<ScanBudgetConfig> = {},
   onProgress?: (progress: ScanProgressState) => void,
-  abortSignal?: AbortSignal
+  abortSignal?: AbortSignal,
+  continuationState?: ContinuationState
 ): Promise<LinkExplorerResolution> {
   const analyzed = analyzeDailymotionUrlOrId(input);
 
@@ -194,19 +196,32 @@ export async function resolveLinkExplorerInput(
     targetMaxPages = config.maxPages || 0; // 0 = unlimited pagination
   }
 
+  const isContinuation = Boolean(continuationState);
+  const items: DiscoveryItem[] = continuationState?.existingItems ? [...continuationState.existingItems] : [];
+  const seenCompositeKeys = new Set<string>(
+    items.map((it) => discoveryCompositeKey(it.apiVersion, it.kind, it.id))
+  );
+  let duplicateCount = continuationState?.existingDuplicates ?? 0;
+  let providerReportedTotal = continuationState?.providerReportedTotal ?? 0;
+  let omittedOrUnavailableReferences = continuationState?.omittedOrUnavailableReferences ?? 0;
+  const visitedPages = new Set<number>(continuationState?.visitedPages ?? []);
+  const visitedCursors = new Set<string>(continuationState?.visitedCursors ?? []);
+  const startPage = continuationState?.startPage ?? 1;
+  let currentNextCursor: string | null = continuationState?.nextCursor ?? null;
+
   const progressState: ScanProgressState = {
-    status: "discovering",
+    status: isContinuation ? "fetching_pages" : "discovering",
     strategy: config.strategy,
-    pagesFetched: 0,
+    pagesFetched: isContinuation ? Math.max(0, startPage - 1) : 0,
     totalPagesEstimated: null,
-    itemsDiscovered: 0,
-    uniqueItemsAdded: 0,
-    duplicateCount: 0,
+    itemsDiscovered: items.length + duplicateCount,
+    uniqueItemsAdded: items.length,
+    duplicateCount,
     activeWindowLabel: null,
     activeWindowDepth: 0,
     currentRateThrottleMs: config.throttleMs,
     error: null,
-    canResume: false,
+    canResume: true,
   };
 
   const updateProgress = (partial: Partial<ScanProgressState>) => {
@@ -216,16 +231,13 @@ export async function resolveLinkExplorerInput(
     }
   };
 
-  updateProgress({ status: "discovering" });
+  updateProgress({ status: isContinuation ? "fetching_pages" : "discovering" });
 
   try {
-    let mainItem: DiscoveryItem | null = null;
-    const items: DiscoveryItem[] = [];
-    const seenCompositeKeys = new Set<string>();
+    let mainItem: DiscoveryItem | null =
+      items.find((i) => i.kind === "channel" || i.kind === "user" || i.kind === "playlist") || null;
     let hasMore = false;
-    let providerReportedTotal = 0;
     const rawResponses: unknown[] = [];
-
     const fieldsParam = resolveFieldSelection(version, config.fieldsProfile, config.customFields);
 
     // ==========================================
@@ -335,22 +347,103 @@ export async function resolveLinkExplorerInput(
     // CASE 3: CHANNEL / PROFILE / USER CATALOG
     // ==========================================
     else if (effectiveKind === "channel" || effectiveKind === "profile" || effectiveKind === "user") {
-      // 1. First fetch profile metadata
-      updateProgress({ status: "discovering", activeWindowLabel: "Fetching Profile Metadata" });
-      const lookupRes = await fetch(
-        `/api/discovery/${version}/channels?mode=lookup&id=${encodeURIComponent(analyzed.identifier)}`,
-        { signal: abortSignal }
-      );
-      const lookupData = (await lookupRes.json()) as DiscoveryApiResponse;
-      rawResponses.push(lookupData);
+      if (!isContinuation) {
+        // 1. Fetch profile metadata
+        updateProgress({ status: "discovering", activeWindowLabel: "Fetching Profile Metadata" });
+        const lookupRes = await fetch(
+          `/api/discovery/${version}/channels?mode=lookup&id=${encodeURIComponent(analyzed.identifier)}`,
+          { signal: abortSignal }
+        );
+        const lookupData = (await lookupRes.json()) as DiscoveryApiResponse;
+        rawResponses.push(lookupData);
 
-      if (lookupData.ok) {
-        mainItem = lookupData.item ?? lookupData.result?.items?.[0] ?? lookupData.items?.[0] ?? null;
+        if (lookupData.ok) {
+          mainItem = lookupData.item ?? lookupData.result?.items?.[0] ?? lookupData.items?.[0] ?? null;
+        } else if (version === "v2") {
+          // In V2, try authenticated /me lookup if available to resolve profile ID
+          try {
+            const meRes = await fetch("/api/discovery/v2/channels?mode=me", { signal: abortSignal });
+            const meData = await meRes.json();
+            if (meData?.ok && meData.data) {
+              const rawMe = meData.data as Record<string, unknown>;
+              const profileId =
+                (rawMe?.default_profile_id as string) ||
+                (rawMe?.id as string) ||
+                ((rawMe?.profiles as Array<Record<string, unknown>>)?.[0]?.profile_id as string);
+              if (
+                profileId &&
+                (rawMe?.username === analyzed.identifier || rawMe?.screenname === analyzed.identifier)
+              ) {
+                analyzed.identifier = profileId;
+                const retryRes = await fetch(
+                  `/api/discovery/v2/channels?mode=lookup&id=${encodeURIComponent(profileId)}`,
+                  { signal: abortSignal }
+                );
+                const retryData = (await retryRes.json()) as DiscoveryApiResponse;
+                if (retryData.ok) {
+                  mainItem = retryData.item ?? retryData.result?.items?.[0] ?? retryData.items?.[0] ?? null;
+                }
+              }
+            }
+          } catch {
+            // Non-fatal fallback
+          }
+
+          if (!mainItem) {
+            const normalized = normalizeDailymotionError({
+              status: lookupData.status || 404,
+              customCode: lookupData.code as any,
+              customMessage: `In Dailymotion API v2, channel video listings require an accessible Profile ID (e.g. x1y2z3). The identifier "${analyzed.identifier}" could not be resolved to an accessible V2 Profile ID. Note: API v2 separates Users from Profiles, and profile video listings are scoped strictly to verified profiles or authenticated studio accounts. If this is a legacy channel username, consider browsing it via API v1.`,
+              apiVersion: "v2",
+              endpoint: `GET /profiles/${analyzed.identifier}`,
+              resourceType: "channel",
+            });
+            logDailymotionError(normalized);
+            updateProgress({ status: "failed", error: normalized.userMessage });
+            return {
+              ok: false,
+              analyzed,
+              effectiveKind,
+              version,
+              item: null,
+              items: [],
+              error: normalized.userMessage,
+              reason: lookupData.reason || "v2_profile_unresolved",
+              status: lookupData.status || 404,
+              normalized,
+              scanProgress: progressState,
+            };
+          }
+        } else {
+          // V1 lookup failed
+          const normalized = normalizeDailymotionError({
+            status: lookupData.status || 404,
+            customCode: lookupData.code as any,
+            customMessage: lookupData.error || `Channel "${analyzed.identifier}" could not be found on Dailymotion API v1.`,
+            apiVersion: "v1",
+            endpoint: `GET /user/${analyzed.identifier}`,
+            resourceType: "channel",
+          });
+          logDailymotionError(normalized);
+          updateProgress({ status: "failed", error: normalized.userMessage });
+          return {
+            ok: false,
+            analyzed,
+            effectiveKind,
+            version,
+            item: null,
+            items: [],
+            error: normalized.userMessage,
+            reason: lookupData.reason || "resource_not_found",
+            status: lookupData.status || 404,
+            normalized,
+            scanProgress: progressState,
+          };
+        }
       }
 
-      const totalVideosReported = mainItem?.extra?.videos_total !== undefined
-        ? Number(mainItem.extra.videos_total)
-        : null;
+      const totalVideosReported =
+        mainItem?.extra?.videos_total !== undefined ? Number(mainItem.extra.videos_total) : null;
 
       if (totalVideosReported && !Number.isNaN(totalVideosReported)) {
         providerReportedTotal = totalVideosReported;
@@ -363,9 +456,11 @@ export async function resolveLinkExplorerInput(
       // 2. Multi-page catalog pagination engine
       updateProgress({ status: "fetching_pages" });
 
-      let page = 1;
+      let page = startPage;
       let keepFetching = true;
       let reachedWindowCap = false;
+      let pagesFetchedThisRun = 0;
+      const loopBudget = targetMaxPages > 0 ? targetMaxPages : 50;
 
       while (keepFetching) {
         if (abortSignal?.aborted) {
@@ -373,9 +468,24 @@ export async function resolveLinkExplorerInput(
           break;
         }
 
+        // Loop prevention: stop if visited page number without cursor or visited cursor
+        if (visitedPages.has(page) && !currentNextCursor) {
+          updateProgress({ status: "completed_with_known_limitations" });
+          break;
+        }
+        visitedPages.add(page);
+
+        if (currentNextCursor && visitedCursors.has(currentNextCursor)) {
+          updateProgress({ status: "completed_with_known_limitations" });
+          break;
+        }
+        if (currentNextCursor) {
+          visitedCursors.add(currentNextCursor);
+        }
+
         updateProgress({
           pagesFetched: page,
-          activeWindowLabel: `Fetching Page ${page} (size: ${config.pageSize})`,
+          activeWindowLabel: `Fetching Channel Page ${page} (size: ${config.pageSize})`,
         });
 
         // Build request parameters respecting V1 vs V2 capability
@@ -385,16 +495,15 @@ export async function resolveLinkExplorerInput(
         queryParams.set("page", String(page));
         queryParams.set("pageSize", String(config.pageSize));
 
+        if (currentNextCursor) {
+          queryParams.set("nextUrl", currentNextCursor);
+        }
         if (fieldsParam) {
           queryParams.set("fields", fieldsParam);
         }
-
-        // Server-side sort support
         if (config.serverSort) {
           queryParams.set("sort", config.serverSort);
         }
-
-        // Date boundaries
         if (config.dateFrom) queryParams.set("createdAfter", config.dateFrom);
         if (config.dateTo) queryParams.set("createdBefore", config.dateTo);
 
@@ -413,8 +522,11 @@ export async function resolveLinkExplorerInput(
           break;
         }
 
+        pagesFetchedThisRun += 1;
         const pageItems = videosData.items ?? videosData.result?.items ?? [];
         hasMore = Boolean(videosData.hasMore ?? videosData.result?.hasMore);
+        currentNextCursor = videosData.result?.nextCursor ?? (videosData as any).nextCursor ?? null;
+
         if (videosData.total !== undefined && videosData.total !== null) {
           providerReportedTotal = videosData.total;
         }
@@ -429,26 +541,29 @@ export async function resolveLinkExplorerInput(
             items.push(item);
           }
         }
+        duplicateCount += duplicatesInPage;
 
         updateProgress({
-          itemsDiscovered: items.length + duplicatesInPage,
+          itemsDiscovered: items.length + duplicateCount,
           uniqueItemsAdded: items.length,
-          duplicateCount: progressState.duplicateCount + duplicatesInPage,
+          duplicateCount,
         });
 
         // Check window cap (Dailymotion caps pagination at 1000 items per query window)
         const totalConsumed = page * config.pageSize;
-        if (totalConsumed >= 1000 && hasMore) {
+        if ((totalConsumed >= 1000 || (version === "v1" && page >= 10)) && hasMore) {
           reachedWindowCap = true;
         }
 
         // Check exit conditions
         if (!hasMore || pageItems.length === 0) {
           keepFetching = false;
-        } else if (targetMaxPages > 0 && page >= targetMaxPages) {
+        } else if (targetMaxPages > 0 && pagesFetchedThisRun >= targetMaxPages) {
           keepFetching = false;
         } else if (reachedWindowCap && config.strategy !== "deep") {
           // Standard/quick scan stops at 1000 items cap
+          keepFetching = false;
+        } else if (pagesFetchedThisRun >= loopBudget) {
           keepFetching = false;
         } else {
           page += 1;
@@ -460,20 +575,19 @@ export async function resolveLinkExplorerInput(
 
       // ==========================================
       // DEEP CATALOG RECURSIVE DATE-WINDOW PARTITIONING
-      // If channel has > 1,000 items and deep scan is active
+      // If channel has > 1,000 items and deep scan is active (Recursive Year -> Month)
       // ==========================================
       if (
         config.strategy === "deep" &&
         reachedWindowCap &&
         !abortSignal?.aborted &&
-        (!targetMaxPages || targetMaxPages > page)
+        (!targetMaxPages || pagesFetchedThisRun < targetMaxPages)
       ) {
         updateProgress({
           status: "splitting_date_ranges",
           activeWindowLabel: "Splitting into Year Windows (bypassing 1,000-item cap)",
         });
 
-        // Determine earliest year: registration year or default 2005
         let startYear = 2005;
         if (mainItem?.createdAt) {
           const yr = new Date(mainItem.createdAt).getUTCFullYear();
@@ -481,10 +595,9 @@ export async function resolveLinkExplorerInput(
         }
         const currentYear = new Date().getUTCFullYear();
 
-        // Iterate backwards from current year down to start year
         for (let yr = currentYear; yr >= startYear; yr--) {
           if (abortSignal?.aborted) break;
-          if (targetMaxPages > 0 && page >= targetMaxPages) break;
+          if (targetMaxPages > 0 && pagesFetchedThisRun >= targetMaxPages) break;
 
           const yearStart = `${yr}-01-01`;
           const yearEnd = `${yr}-12-31`;
@@ -496,8 +609,9 @@ export async function resolveLinkExplorerInput(
 
           let yearPage = 1;
           let yearHasMore = true;
+          let yearCapped = false;
 
-          while (yearHasMore && (!targetMaxPages || page < targetMaxPages)) {
+          while (yearHasMore && (!targetMaxPages || pagesFetchedThisRun < targetMaxPages)) {
             if (abortSignal?.aborted) break;
 
             const qp = new URLSearchParams();
@@ -527,22 +641,96 @@ export async function resolveLinkExplorerInput(
                 items.push(item);
               }
             }
+            duplicateCount += yrDupes;
 
             page += 1;
+            pagesFetchedThisRun += 1;
             yearPage += 1;
             updateProgress({
               pagesFetched: page,
-              itemsDiscovered: items.length + yrDupes,
+              itemsDiscovered: items.length + duplicateCount,
               uniqueItemsAdded: items.length,
-              duplicateCount: progressState.duplicateCount + yrDupes,
+              duplicateCount,
             });
 
-            if (yrItems.length === 0 || !yearHasMore || yearPage > 10) {
+            if (yrItems.length === 0 || !yearHasMore) {
+              break;
+            }
+            if (yearPage > 10 && yearHasMore) {
+              yearCapped = true;
               break;
             }
 
             if (config.throttleMs > 0) {
               await delay(config.throttleMs);
+            }
+          }
+
+          // Recursive month sub-partitioning if year exceeds 1,000 items
+          if (yearCapped && !abortSignal?.aborted && (!targetMaxPages || pagesFetchedThisRun < targetMaxPages)) {
+            updateProgress({
+              activeWindowLabel: `Sub-Partitioning Year ${yr} into 12 Monthly Windows`,
+              activeWindowDepth: 2,
+            });
+
+            for (let m = 12; m >= 1; m--) {
+              if (abortSignal?.aborted) break;
+              if (targetMaxPages > 0 && pagesFetchedThisRun >= targetMaxPages) break;
+
+              const mStr = String(m).padStart(2, "0");
+              const lastDay = new Date(yr, m, 0).getDate();
+              const monthStart = `${yr}-${mStr}-01`;
+              const monthEnd = `${yr}-${mStr}-${String(lastDay).padStart(2, "0")}`;
+
+              let mPage = 1;
+              let mHasMore = true;
+
+              while (mHasMore && (!targetMaxPages || pagesFetchedThisRun < targetMaxPages)) {
+                if (abortSignal?.aborted) break;
+
+                const mQp = new URLSearchParams();
+                mQp.set("mode", "videos");
+                mQp.set("owner", analyzed.identifier);
+                mQp.set("page", String(mPage));
+                mQp.set("pageSize", String(config.pageSize));
+                mQp.set("createdAfter", monthStart);
+                mQp.set("createdBefore", monthEnd);
+                if (fieldsParam) mQp.set("fields", fieldsParam);
+                if (config.serverSort) mQp.set("sort", config.serverSort);
+
+                const mRes = await fetch(`/api/discovery/${version}/channels?${mQp.toString()}`, { signal: abortSignal });
+                const mData = (await mRes.json()) as DiscoveryApiResponse;
+                if (!mData.ok) break;
+
+                const mItems = mData.items ?? mData.result?.items ?? [];
+                mHasMore = Boolean(mData.hasMore ?? mData.result?.hasMore);
+
+                let mDupes = 0;
+                for (const item of mItems) {
+                  const cKey = discoveryCompositeKey(item.apiVersion, item.kind, item.id);
+                  if (seenCompositeKeys.has(cKey)) {
+                    mDupes += 1;
+                  } else {
+                    seenCompositeKeys.add(cKey);
+                    items.push(item);
+                  }
+                }
+                duplicateCount += mDupes;
+
+                page += 1;
+                pagesFetchedThisRun += 1;
+                mPage += 1;
+
+                updateProgress({
+                  pagesFetched: page,
+                  itemsDiscovered: items.length + duplicateCount,
+                  uniqueItemsAdded: items.length,
+                  duplicateCount,
+                });
+
+                if (mItems.length === 0 || !mHasMore || mPage > 10) break;
+                if (config.throttleMs > 0) await delay(config.throttleMs);
+              }
             }
           }
         }
@@ -561,27 +749,75 @@ export async function resolveLinkExplorerInput(
     // CASE 4: PLAYLIST EXPLORER & CATALOG
     // ==========================================
     else if (effectiveKind === "playlist") {
-      updateProgress({ status: "discovering", activeWindowLabel: "Fetching Playlist Metadata" });
-      const lookupRes = await fetch(
-        `/api/discovery/${version}/playlists?mode=lookup&id=${encodeURIComponent(analyzed.identifier)}`,
-        { signal: abortSignal }
-      );
-      const lookupData = (await lookupRes.json()) as DiscoveryApiResponse;
-      rawResponses.push(lookupData);
+      if (!isContinuation) {
+        updateProgress({ status: "discovering", activeWindowLabel: "Fetching Playlist Metadata" });
+        const lookupRes = await fetch(
+          `/api/discovery/${version}/playlists?mode=lookup&id=${encodeURIComponent(analyzed.identifier)}`,
+          { signal: abortSignal }
+        );
+        const lookupData = (await lookupRes.json()) as DiscoveryApiResponse;
+        rawResponses.push(lookupData);
 
-      if (lookupData.ok) {
-        mainItem = lookupData.item ?? lookupData.result?.items?.[0] ?? lookupData.items?.[0] ?? null;
+        if (lookupData.ok) {
+          mainItem = lookupData.item ?? lookupData.result?.items?.[0] ?? lookupData.items?.[0] ?? null;
+          if (mainItem?.extra?.videos_total !== undefined && mainItem.extra.videos_total !== null) {
+            const parsed = Number(mainItem.extra.videos_total);
+            if (!Number.isNaN(parsed)) providerReportedTotal = parsed;
+          }
+        } else {
+          const normalized = normalizeDailymotionError({
+            status: lookupData.status || 404,
+            customCode: lookupData.code as any,
+            customMessage: lookupData.error || `Playlist "${analyzed.identifier}" not found on Dailymotion API ${version}.`,
+            apiVersion: version,
+            endpoint: version === "v2" ? `GET /playlists/${analyzed.identifier}` : `GET /playlist/${analyzed.identifier}`,
+            resourceType: "playlist",
+          });
+          logDailymotionError(normalized);
+          updateProgress({ status: "failed", error: normalized.userMessage });
+          return {
+            ok: false,
+            analyzed,
+            effectiveKind,
+            version,
+            item: null,
+            items: [],
+            error: normalized.userMessage,
+            reason: lookupData.reason || "playlist_not_found",
+            status: lookupData.status || 404,
+            normalized,
+            scanProgress: progressState,
+          };
+        }
       }
 
       updateProgress({ status: "fetching_pages" });
 
-      let page = 1;
+      let page = startPage;
       let keepFetching = true;
+      let consecutiveEmptyPages = 0;
+      let pagesFetchedThisRun = 0;
+      const loopBudget = targetMaxPages > 0 ? targetMaxPages : 50;
 
       while (keepFetching) {
         if (abortSignal?.aborted) {
           updateProgress({ status: "interrupted" });
           break;
+        }
+
+        // Loop prevention
+        if (visitedPages.has(page) && !currentNextCursor) {
+          updateProgress({ status: "completed_with_known_limitations" });
+          break;
+        }
+        visitedPages.add(page);
+
+        if (currentNextCursor && visitedCursors.has(currentNextCursor)) {
+          updateProgress({ status: "completed_with_known_limitations" });
+          break;
+        }
+        if (currentNextCursor) {
+          visitedCursors.add(currentNextCursor);
         }
 
         updateProgress({
@@ -594,6 +830,9 @@ export async function resolveLinkExplorerInput(
         queryParams.set("id", analyzed.identifier);
         queryParams.set("page", String(page));
         queryParams.set("pageSize", String(config.pageSize));
+        if (currentNextCursor) {
+          queryParams.set("nextUrl", currentNextCursor);
+        }
         if (fieldsParam) queryParams.set("fields", fieldsParam);
 
         const videosRes = await fetch(
@@ -611,8 +850,11 @@ export async function resolveLinkExplorerInput(
           break;
         }
 
+        pagesFetchedThisRun += 1;
         const pageItems = videosData.items ?? videosData.result?.items ?? [];
         hasMore = Boolean(videosData.hasMore ?? videosData.result?.hasMore);
+        currentNextCursor = videosData.result?.nextCursor ?? (videosData as any).nextCursor ?? null;
+
         if (videosData.total !== undefined && videosData.total !== null) {
           providerReportedTotal = videosData.total;
         }
@@ -627,20 +869,32 @@ export async function resolveLinkExplorerInput(
             items.push(item);
           }
         }
+        duplicateCount += dupes;
 
         updateProgress({
-          itemsDiscovered: items.length + dupes,
+          itemsDiscovered: items.length + duplicateCount,
           uniqueItemsAdded: items.length,
-          duplicateCount: progressState.duplicateCount + dupes,
+          duplicateCount,
         });
 
+        if (pageItems.length === 0) {
+          consecutiveEmptyPages += 1;
+        } else {
+          consecutiveEmptyPages = 0;
+        }
+
         // SPECIAL V2 PLAYLIST HANDLING:
-        // Do NOT stop simply because pageItems.length < config.pageSize if hasMore is true!
+        // Do NOT stop simply because pageItems.length < config.pageSize or pageItems.length === 0!
         // Unavailable/deleted videos in Dailymotion playlists are filtered out, resulting in
-        // page sizes smaller than requested while further pages still exist.
-        if (!hasMore || pageItems.length === 0) {
+        // page sizes smaller than requested or even 0 while further pages still exist.
+        if (!hasMore && !currentNextCursor) {
           keepFetching = false;
-        } else if (targetMaxPages > 0 && page >= targetMaxPages) {
+        } else if (consecutiveEmptyPages >= 5) {
+          // Safe circuit breaker against infinite 0-item loops
+          keepFetching = false;
+        } else if (targetMaxPages > 0 && pagesFetchedThisRun >= targetMaxPages) {
+          keepFetching = false;
+        } else if (pagesFetchedThisRun >= loopBudget) {
           keepFetching = false;
         } else {
           page += 1;
@@ -648,6 +902,11 @@ export async function resolveLinkExplorerInput(
             await delay(config.throttleMs);
           }
         }
+      }
+
+      // Compute omitted or unavailable references count if provider reported total exceeds retrieved unique items
+      if (providerReportedTotal > 0 && providerReportedTotal > items.length && !hasMore) {
+        omittedOrUnavailableReferences = Math.max(0, providerReportedTotal - items.length);
       }
 
       updateProgress({ status: abortSignal?.aborted ? "interrupted" : "completed" });
@@ -661,7 +920,13 @@ export async function resolveLinkExplorerInput(
       mainItem,
       version,
       analyzed,
-      progressState.status
+      progressState.status,
+      {
+        duplicatesSkipped: duplicateCount,
+        pagesRetrieved: progressState.pagesFetched,
+        providerReportedTotal: providerReportedTotal || null,
+        omittedOrUnavailable: omittedOrUnavailableReferences,
+      }
     );
 
     const sha256Checksum = await computeCatalogChecksum(items, analyzed.identifier);
@@ -682,29 +947,39 @@ export async function resolveLinkExplorerInput(
       status: progressState.status,
     };
 
-    // Persist to search history snapshot asynchronously with 7-day durability
-    const snapshotItems = [
-      ...(mainItem ? [mainItem] : []),
-      ...items,
-    ];
+    const checkpoint = {
+      nextPage: progressState.pagesFetched + 1,
+      nextCursor: currentNextCursor,
+      visitedPages: Array.from(visitedPages),
+      visitedCursors: Array.from(visitedCursors),
+      canResume: hasMore || Boolean(currentNextCursor),
+    };
 
-    if (snapshotItems.length > 0) {
-      captureSearchSnapshot({
-        workspace: "link_explorer",
-        query: input,
-        route: "/link-explorer",
-        apiVersion: version,
-        resourceType: effectiveKind.toUpperCase(),
-        mode: version === "v1" ? "search" : "browse",
-        apiParams: { input, version, effectiveKind, analyzed, scanConfig: config },
-        rawResponse: rawResponses.length === 1 ? rawResponses[0] : { batches: rawResponses.length },
-        items: snapshotItems,
-        totalResults: providerReportedTotal || snapshotItems.length,
-        hasMore,
-        pageIndex: progressState.pagesFetched,
-      }).catch(() => {
-        // Non-blocking snapshot capture failure
-      });
+    // Persist to search history snapshot asynchronously with 7-day durability (only for initial scans)
+    if (!isContinuation) {
+      const snapshotItems = [
+        ...(mainItem ? [mainItem] : []),
+        ...items,
+      ];
+
+      if (snapshotItems.length > 0) {
+        captureSearchSnapshot({
+          workspace: "link_explorer",
+          query: input,
+          route: "/link-explorer",
+          apiVersion: version,
+          resourceType: effectiveKind.toUpperCase(),
+          mode: version === "v1" ? "search" : "browse",
+          apiParams: { input, version, effectiveKind, analyzed, scanConfig: config },
+          rawResponse: rawResponses.length === 1 ? rawResponses[0] : { batches: rawResponses.length },
+          items: snapshotItems,
+          totalResults: providerReportedTotal || snapshotItems.length,
+          hasMore,
+          pageIndex: progressState.pagesFetched,
+        }).catch(() => {
+          // Non-blocking snapshot capture failure
+        });
+      }
     }
 
     return {
@@ -717,9 +992,13 @@ export async function resolveLinkExplorerInput(
       hasMore,
       page: progressState.pagesFetched,
       total: providerReportedTotal || items.length,
+      nextCursor: currentNextCursor,
+      omittedOrUnavailableReferences,
+      duplicatesSkipped: duplicateCount,
       intelligence,
       scanProgress: progressState,
       manifest,
+      checkpoint,
     };
   } catch (err) {
     const normalized = normalizeDailymotionError({

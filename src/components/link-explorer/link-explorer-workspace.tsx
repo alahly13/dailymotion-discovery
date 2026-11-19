@@ -49,11 +49,12 @@ import {
   DEFAULT_SCAN_CONFIG,
   resolveLinkExplorerInput,
 } from "@/lib/link-explorer/link-explorer-service";
-import type {
-  LinkExplorerManifest,
-  LinkExplorerResolution,
-  ScanBudgetConfig,
-  ScanProgressState,
+import {
+  computeResourceIntelligence,
+  type LinkExplorerManifest,
+  type LinkExplorerResolution,
+  type ScanBudgetConfig,
+  type ScanProgressState,
 } from "@/lib/link-explorer/link-explorer-types";
 import { ResourceIntelligenceOverview } from "./resource-intelligence-overview";
 import { AdvancedFetchSettingsPanel } from "./advanced-fetch-settings-panel";
@@ -73,6 +74,7 @@ import { discoveryCompositeKey } from "@/lib/resources/dailymotion-resource-taxo
 import { cn } from "@/lib/utils/cn";
 import { useSynchronizedApiVersion } from "@/lib/navigation/version-sync";
 import {
+  appendSearchSnapshotPage,
   captureSearchSnapshot,
   getLatestRestorableSearchSnapshot,
 } from "@/lib/search-history/search-snapshot-service";
@@ -111,6 +113,9 @@ export function LinkExplorerWorkspace() {
   // Core Resolution State
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
+  const [lastAppendedToast, setLastAppendedToast] = useState<string | null>(null);
+  const latestSnapshotIdRef = useRef<string | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [resolution, setResolution] = useState<LinkExplorerResolution | null>(null);
   const [rawDrawerOpen, setRawDrawerOpen] = useState(false);
@@ -136,10 +141,42 @@ export function LinkExplorerWorkspace() {
     }
   }, [input]);
 
-  // Execute resolution ONLY if URL or ID param was explicitly provided in the address
+  // Execute resolution if URL or ID param was provided; else restore from IndexedDB
   useEffect(() => {
     if (initialUrl.trim()) {
       void executeResolution(initialUrl.trim(), initialVersion);
+    } else {
+      void getLatestRestorableSearchSnapshot("link_explorer", { apiVersion: version }).then((replay) => {
+        if (replay && replay.items.length > 0) {
+          setInput(replay.snapshot.query);
+          const analyzed = analyzeDailymotionUrlOrId(replay.snapshot.query);
+          const restoredKind = (replay.snapshot.resourceType?.toLowerCase() || analyzed.kind || "video") as DailymotionResourceKind;
+          const intelligence = computeResourceIntelligence(
+            replay.items,
+            replay.items[0] ?? null,
+            replay.snapshot.apiVersion,
+            analyzed,
+            "completed"
+          );
+
+          setResolution({
+            ok: true,
+            analyzed,
+            effectiveKind: restoredKind,
+            version: replay.snapshot.apiVersion,
+            item: replay.items[0] ?? null,
+            items: replay.items,
+            hasMore: replay.snapshot.hasMore,
+            page: replay.snapshot.currentPage || 1,
+            total: replay.snapshot.totalResults || replay.items.length,
+            intelligence,
+            scanProgress: null,
+            manifest: null,
+          });
+          setCurrentPage(replay.snapshot.currentPage || 1);
+          setRestoredFromHistory(true);
+        }
+      }).catch(() => {});
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -175,6 +212,8 @@ export function LinkExplorerWorkspace() {
     setIsPaused(false);
     setCurrentPage(1);
     setActiveYearFilter(null);
+    setLoadMoreError(null);
+    setLastAppendedToast(null);
 
     const effectiveBudgetConfig: ScanBudgetConfig = {
       ...scanConfig,
@@ -197,6 +236,26 @@ export function LinkExplorerWorkspace() {
         setScanProgress(res.scanProgress);
       }
 
+      // Capture snapshot ID for appendSearchSnapshotPage
+      if (res.ok && res.items.length > 0) {
+        captureSearchSnapshot({
+          workspace: "link_explorer",
+          query: clean,
+          route: "/link-explorer",
+          apiVersion: targetVersion,
+          resourceType: (res.effectiveKind || "video").toUpperCase(),
+          mode: targetVersion === "v1" ? "search" : "browse",
+          apiParams: { input: clean, version: targetVersion, effectiveKind: res.effectiveKind },
+          rawResponse: { totalRetrieved: res.items.length },
+          items: res.items,
+          totalResults: res.total || res.items.length,
+          hasMore: res.hasMore,
+          pageIndex: res.page || 1,
+        }).then((id) => {
+          latestSnapshotIdRef.current = id;
+        }).catch(() => {});
+      }
+
       // Update URL query parameters seamlessly
       const params = new URLSearchParams(searchParams.toString());
       params.set("url", clean);
@@ -212,8 +271,9 @@ export function LinkExplorerWorkspace() {
   async function handleLoadMore() {
     if (!resolution?.analyzed || loadingMore || !resolution.ok) return;
     setLoadingMore(true);
+    setLoadMoreError(null);
     try {
-      const nextPage = currentPage + 1;
+      const nextPage = (resolution.checkpoint?.nextPage ?? currentPage) + 1;
       const selectedKind = overrideKind === "auto" ? undefined : overrideKind;
       const res = await resolveLinkExplorerInput(
         input.trim(),
@@ -221,27 +281,43 @@ export function LinkExplorerWorkspace() {
         selectedKind,
         { ...scanConfig, maxPages: 1 },
         undefined,
-        abortControllerRef.current?.signal
+        abortControllerRef.current?.signal,
+        {
+          startPage: nextPage,
+          nextCursor: resolution.nextCursor ?? resolution.checkpoint?.nextCursor ?? null,
+          existingItems: resolution.items,
+          existingDuplicates: resolution.duplicatesSkipped ?? 0,
+          visitedPages: resolution.checkpoint?.visitedPages ?? [],
+          visitedCursors: resolution.checkpoint?.visitedCursors ?? [],
+          providerReportedTotal: resolution.total,
+          omittedOrUnavailableReferences: resolution.omittedOrUnavailableReferences ?? 0,
+        }
       );
 
-      if (res.ok && res.items.length > 0) {
-        setResolution((prev) => {
-          if (!prev) return res;
-          const existingKeys = new Set(prev.items.map((it) => discoveryCompositeKey(it.apiVersion, it.kind, it.id)));
-          const newItems = res.items.filter((it) => !existingKeys.has(discoveryCompositeKey(it.apiVersion, it.kind, it.id)));
-          const combined = [...prev.items, ...newItems];
-          return {
-            ...prev,
-            items: combined,
-            hasMore: res.hasMore,
-            page: nextPage,
-            intelligence: res.intelligence ?? prev.intelligence,
-          };
-        });
-        setCurrentPage(nextPage);
+      if (res.ok) {
+        const addedCount = res.items.length - resolution.items.length;
+        setResolution(res);
+        setCurrentPage(res.page ?? nextPage);
+
+        if (latestSnapshotIdRef.current && addedCount > 0) {
+          const newlyAdded = res.items.slice(resolution.items.length);
+          void appendSearchSnapshotPage(
+            latestSnapshotIdRef.current,
+            nextPage,
+            { page: nextPage, addedCount },
+            newlyAdded,
+            { hasMore: res.hasMore, nextCursor: res.nextCursor }
+          );
+        }
+
+        setLastAppendedToast(`${addedCount} additional records loaded`);
+        setTimeout(() => setLastAppendedToast(null), 4000);
       } else {
-        setResolution((prev) => (prev ? { ...prev, hasMore: false } : prev));
+        // Safe error state: preserves all already loaded items
+        setLoadMoreError(res.error || `Failed to fetch page ${nextPage}.`);
       }
+    } catch (err) {
+      setLoadMoreError(err instanceof Error ? err.message : "Error loading more records.");
     } finally {
       setLoadingMore(false);
     }
@@ -836,29 +912,78 @@ export function LinkExplorerWorkspace() {
                 })}
               </div>
 
-              {/* Load More Pagination for Multi-Page Catalogs */}
-              {resolution.hasMore && (
-                <div className="flex justify-center pt-4">
-                  <button
-                    type="button"
-                    disabled={loadingMore}
-                    onClick={() => void handleLoadMore()}
-                    className="inline-flex min-h-10 items-center gap-2 rounded-lg bg-primary px-5 text-xs font-black text-primary-foreground hover:opacity-95 disabled:opacity-50 transition-all cursor-pointer shadow-xs"
-                  >
-                    {loadingMore ? (
-                      <>
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                        Loading Next Page...
-                      </>
-                    ) : (
-                      <>
-                        <RefreshCw className="h-3.5 w-3.5" />
-                        Load More Videos (Page {currentPage + 1})
-                      </>
+              {/* Load More Pagination & Retrieval Status for Multi-Page Catalogs */}
+              <div className="flex flex-col items-center justify-center gap-3 pt-6 pb-2">
+                {/* Showing X of Y available references */}
+                <div className="text-xs text-muted-foreground font-medium flex flex-wrap items-center justify-center gap-2">
+                  <span>
+                    Showing {visibleItems.length} of{" "}
+                    {resolution.total !== null && resolution.total !== undefined
+                      ? `${resolution.total.toLocaleString()} available references`
+                      : "unreported provider total"}
+                  </span>
+                  {resolution.duplicatesSkipped !== undefined && resolution.duplicatesSkipped > 0 && (
+                    <span className="text-[11px] text-muted-foreground/75">
+                      ({resolution.duplicatesSkipped} duplicates skipped)
+                    </span>
+                  )}
+                  {resolution.omittedOrUnavailableReferences !== undefined &&
+                    resolution.omittedOrUnavailableReferences > 0 && (
+                      <span className="text-[11px] text-amber-600 dark:text-amber-400 font-semibold">
+                        ({resolution.omittedOrUnavailableReferences} deleted/unavailable references omitted by provider)
+                      </span>
                     )}
-                  </button>
                 </div>
-              )}
+
+                {/* Last appended notification toast */}
+                {lastAppendedToast && (
+                  <div className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/30 px-3 py-1 text-xs font-bold text-emerald-600 dark:text-emerald-400 animate-in fade-in zoom-in-95 duration-200">
+                    <Check className="h-3.5 w-3.5" />
+                    {lastAppendedToast}
+                  </div>
+                )}
+
+                {/* Load More Button */}
+                {resolution.hasMore ? (
+                  <div className="flex flex-col items-center gap-2">
+                    <button
+                      type="button"
+                      disabled={loadingMore}
+                      onClick={() => void handleLoadMore()}
+                      className="inline-flex min-h-10 items-center gap-2 rounded-lg bg-primary px-6 text-xs font-black text-primary-foreground hover:opacity-95 disabled:opacity-50 transition-all cursor-pointer shadow-xs"
+                    >
+                      {loadingMore ? (
+                        <>
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                          Loading next page...
+                        </>
+                      ) : (
+                        <>
+                          <RefreshCw className="h-3.5 w-3.5" />
+                          Load More Videos
+                        </>
+                      )}
+                    </button>
+                    {loadMoreError && (
+                      <div className="flex items-center gap-2 rounded-lg border border-destructive/40 bg-destructive/10 p-2 text-xs text-destructive">
+                        <AlertCircle className="h-4 w-4 shrink-0" />
+                        <span>{loadMoreError}</span>
+                        <button
+                          type="button"
+                          onClick={() => void handleLoadMore()}
+                          className="ml-2 font-bold underline hover:opacity-80 cursor-pointer"
+                        >
+                          Retry
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="text-xs font-semibold text-muted-foreground/80 py-1">
+                    All available pages have been retrieved ({resolution.items.length} records loaded)
+                  </div>
+                )}
+              </div>
             </div>
           ) : (
             resolution.items.length > 0 && (

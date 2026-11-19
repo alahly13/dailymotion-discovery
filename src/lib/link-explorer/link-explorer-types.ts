@@ -73,6 +73,10 @@ export interface ResourceIntelligenceData {
     totalRetrieved: number;
     isEstimated: boolean;
     coveragePercent: number | null;
+    omittedOrUnavailableReferences?: number;
+    duplicatesSkipped?: number;
+    pagesRetrieved?: number;
+    pagesRemaining?: number | null;
   };
   chronology: {
     earliestPublicationDate: string | null;
@@ -120,6 +124,17 @@ export interface LinkExplorerManifest {
   status: ScanCompletenessStatus;
 }
 
+export interface ContinuationState {
+  startPage: number;
+  nextCursor?: string | null;
+  existingItems?: DiscoveryItem[];
+  existingDuplicates?: number;
+  visitedPages?: number[];
+  visitedCursors?: string[];
+  providerReportedTotal?: number | null;
+  omittedOrUnavailableReferences?: number;
+}
+
 export interface LinkExplorerResolution {
   ok: boolean;
   analyzed: DailymotionAnalyzedLink;
@@ -131,6 +146,9 @@ export interface LinkExplorerResolution {
   hasMore?: boolean;
   page?: number;
   total?: number;
+  nextCursor?: string | null;
+  omittedOrUnavailableReferences?: number;
+  duplicatesSkipped?: number;
   error?: string;
   reason?: string;
   status?: number | null;
@@ -138,6 +156,13 @@ export interface LinkExplorerResolution {
   intelligence?: ResourceIntelligenceData | null;
   scanProgress?: ScanProgressState | null;
   manifest?: LinkExplorerManifest | null;
+  checkpoint?: {
+    nextPage: number;
+    nextCursor: string | null;
+    visitedPages: number[];
+    visitedCursors: string[];
+    canResume: boolean;
+  };
 }
 
 /**
@@ -148,7 +173,14 @@ export function computeResourceIntelligence(
   mainItem: DiscoveryItem | null,
   version: ApiVersion,
   analyzed: DailymotionAnalyzedLink,
-  catalogStatus: ScanCompletenessStatus = "completed"
+  catalogStatus: ScanCompletenessStatus = "completed",
+  extraStats?: {
+    duplicatesSkipped?: number;
+    pagesRetrieved?: number;
+    pagesRemaining?: number | null;
+    providerReportedTotal?: number | null;
+    omittedOrUnavailable?: number;
+  }
 ): ResourceIntelligenceData {
   const profileName = mainItem?.title || analyzed.displayLabel || analyzed.identifier;
   const profileId = mainItem?.id || analyzed.identifier;
@@ -163,7 +195,9 @@ export function computeResourceIntelligence(
 
   // Extract provider reported stats if present
   let providerReportedVideos: number | null = null;
-  if (mainItem?.extra?.videos_total !== undefined && mainItem.extra.videos_total !== null) {
+  if (extraStats?.providerReportedTotal !== undefined && extraStats.providerReportedTotal !== null) {
+    providerReportedVideos = extraStats.providerReportedTotal;
+  } else if (mainItem?.extra?.videos_total !== undefined && mainItem.extra.videos_total !== null) {
     const parsed = Number(mainItem.extra.videos_total);
     if (!Number.isNaN(parsed)) providerReportedVideos = parsed;
   }
@@ -300,6 +334,10 @@ export function computeResourceIntelligence(
       totalRetrieved,
       isEstimated,
       coveragePercent,
+      omittedOrUnavailableReferences: extraStats?.omittedOrUnavailable ?? 0,
+      duplicatesSkipped: extraStats?.duplicatesSkipped ?? 0,
+      pagesRetrieved: extraStats?.pagesRetrieved ?? 1,
+      pagesRemaining: extraStats?.pagesRemaining ?? null,
     },
     chronology: {
       earliestPublicationDate: oldest?.createdAt || null,

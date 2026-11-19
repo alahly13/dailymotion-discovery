@@ -212,6 +212,12 @@ export function ResourceIntelligenceOverview({
               ? "Official catalog size reported by API"
               : "Provider does not expose fixed count"}
           </p>
+          {statistics.omittedOrUnavailableReferences !== undefined &&
+            statistics.omittedOrUnavailableReferences > 0 && (
+              <p className="text-[11px] text-amber-600 dark:text-amber-400 font-semibold">
+                {statistics.omittedOrUnavailableReferences} deleted/unavailable references omitted by provider
+              </p>
+            )}
         </div>
 
         {/* Metric 2: Locally Retrieved Items */}
@@ -285,6 +291,11 @@ export function ResourceIntelligenceOverview({
           </div>
           <p className="text-[11px] text-muted-foreground">
             Deduplicated by composite identity
+            {statistics.duplicatesSkipped !== undefined && statistics.duplicatesSkipped > 0 && (
+              <span className="text-amber-500 font-semibold ml-1">
+                ({statistics.duplicatesSkipped} duplicates skipped)
+              </span>
+            )}
           </p>
         </div>
       </div>

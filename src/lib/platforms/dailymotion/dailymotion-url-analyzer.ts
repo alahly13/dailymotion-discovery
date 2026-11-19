@@ -112,7 +112,7 @@ export function analyzeDailymotionUrlOrId(input: string): DailymotionAnalyzedLin
         playlistId: cleanId,
         canonicalUrl: `https://www.dailymotion.com/playlist/${cleanId}`,
         apiPathV1: `/playlist/${cleanId}/videos`,
-        apiPathV2: `/v2/playlists/${cleanId}`,
+        apiPathV2: `/v2/playlists/${cleanId}/videos`,
         displayLabel: `Playlist ${cleanId}`,
         warnings,
       };
@@ -238,7 +238,7 @@ export function analyzeDailymotionUrlOrId(input: string): DailymotionAnalyzedLin
         playlistId: cleanPlaylistId,
         canonicalUrl: `https://www.dailymotion.com/playlist/${cleanPlaylistId}`,
         apiPathV1: `/playlist/${cleanPlaylistId}/videos`,
-        apiPathV2: `/v2/playlists/${cleanPlaylistId}`,
+        apiPathV2: `/v2/playlists/${cleanPlaylistId}/videos`,
         displayLabel: `Playlist ${cleanPlaylistId}`,
         warnings,
       };
@@ -265,7 +265,7 @@ export function analyzeDailymotionUrlOrId(input: string): DailymotionAnalyzedLin
         rawInput,
         identifier: cleanId,
         canonicalUrl: `https://www.dailymotion.com/channel/${cleanId}`,
-        apiPathV1: `/channel/${cleanId}/videos`,
+        apiPathV1: `/user/${cleanId}/videos`,
         apiPathV2: `/v2/profiles/${cleanId}/videos`,
         displayLabel: `Channel ${cleanId}`,
         warnings,

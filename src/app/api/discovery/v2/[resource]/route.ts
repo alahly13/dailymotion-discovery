@@ -71,6 +71,7 @@ export async function GET(request: Request, context: { params: Promise<{ resourc
       case "general":
       case "videos": {
         if (mode === "lookup") return NextResponse.json(await v2GetVideo(id, str(url.searchParams.get("fields"))));
+        const nextUrl = str(url.searchParams.get("nextUrl")) || str(url.searchParams.get("next")) || null;
         return NextResponse.json(
           await v2ProfileVideos(profileId, {
             visibility: (str(url.searchParams.get("visibility")) as "public" | "private" | "password" | undefined) ?? null,
@@ -81,8 +82,10 @@ export async function GET(request: Request, context: { params: Promise<{ resourc
             isExplicit: bool(url.searchParams.get("isExplicit")) ?? null,
             isForKids: bool(url.searchParams.get("isForKids")) ?? null,
             sort: str(url.searchParams.get("sort")) ?? null,
-            page, pageSize,
+            page: page ?? 1,
+            pageSize: pageSize ?? 100,
             fields: str(url.searchParams.get("fields")),
+            nextUrl,
           }, typed)
         );
       }
@@ -91,12 +94,31 @@ export async function GET(request: Request, context: { params: Promise<{ resourc
           const me = await v2Me();
           return NextResponse.json(me.ok ? { ok: true, data: me.data } : { ...me.failure, ok: false });
         }
+        if (mode === "videos") {
+          const nextUrl = str(url.searchParams.get("nextUrl")) || str(url.searchParams.get("next")) || null;
+          return NextResponse.json(
+            await v2ProfileVideos(profileId || id, {
+              visibility: (str(url.searchParams.get("visibility")) as "public" | "private" | "password" | undefined) ?? null,
+              tags: str(url.searchParams.get("tags")) ?? null,
+              createdAfterIso: iso(url.searchParams.get("createdAfter"), false),
+              createdBeforeIso: iso(url.searchParams.get("createdBefore"), true),
+              isExplicit: bool(url.searchParams.get("isExplicit")) ?? null,
+              isForKids: bool(url.searchParams.get("isForKids")) ?? null,
+              sort: str(url.searchParams.get("sort")) ?? null,
+              page: page ?? 1,
+              pageSize: pageSize ?? 100,
+              fields: str(url.searchParams.get("fields")),
+              nextUrl,
+            }, "channels")
+          );
+        }
         return NextResponse.json(await v2GetProfile(id || profileId, "channels", str(url.searchParams.get("fields"))));
       }
       case "playlists": {
+        const nextUrl = str(url.searchParams.get("nextUrl")) || str(url.searchParams.get("next")) || null;
         if (mode === "lookup") return NextResponse.json(await v2GetPlaylist(id, str(url.searchParams.get("fields"))));
-        if (mode === "videos") return NextResponse.json(await v2PlaylistVideos(id, page ?? 1, pageSize ?? 50, str(url.searchParams.get("fields"))));
-        return NextResponse.json(await v2ProfilePlaylists(profileId, page ?? 1, pageSize ?? 50, str(url.searchParams.get("fields"))));
+        if (mode === "videos") return NextResponse.json(await v2PlaylistVideos(id, page ?? 1, pageSize ?? 100, str(url.searchParams.get("fields")), nextUrl));
+        return NextResponse.json(await v2ProfilePlaylists(profileId, page ?? 1, pageSize ?? 100, str(url.searchParams.get("fields"))));
       }
       case "users": {
         if (mode === "me") {

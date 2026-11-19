@@ -90,7 +90,16 @@ async function v2FetchRaw(path: string, params: Record<string, string>, options:
     };
   }
   const token = tokenResult.value.token;
-  const url = new URL(`${profile.baseUrl}/${path.replace(/^\/+/, "")}`);
+  let url: URL;
+  if (/^https?:\/\//i.test(path)) {
+    url = new URL(path);
+    // Security check: validate host belongs strictly to api.dailymotion.com
+    if (url.hostname !== "api.dailymotion.com") {
+      throw new Error(`Untrusted V2 API pagination host: ${url.hostname}`);
+    }
+  } else {
+    url = new URL(`${profile.baseUrl}/${path.replace(/^\/+/, "")}`);
+  }
   for (const [key, value] of Object.entries(params)) {
     if (value !== "") url.searchParams.set(key, value);
   }

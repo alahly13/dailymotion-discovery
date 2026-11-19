@@ -59,16 +59,23 @@ function requireProfileId(profileId: string, resource: DiscoveryResource, endpoi
 }
 
 /** Profile video listing: GET /profiles/{id}/videos. */
-export async function v2ProfileVideos(profileId: string, input: Omit<V2ProfileVideoQuery, "profileId"> = {}, resource: DiscoveryResource = "videos"): Promise<DiscoveryOutcome> {
+export async function v2ProfileVideos(
+  profileId: string,
+  input: Omit<V2ProfileVideoQuery, "profileId"> & { nextUrl?: string | null } = {},
+  resource: DiscoveryResource = "videos"
+): Promise<DiscoveryOutcome> {
   const endpoint = "GET /profiles/{profile_id}/videos";
   const missing = requireProfileId(profileId, resource, endpoint);
   if (missing) return missing;
-  const params = buildV2ProfileVideoParams({ ...input, profileId: profileId.trim() });
-  const outcome = await v2List<V2RawVideo>(`/profiles/${encodeURIComponent(profileId.trim())}/videos`, params);
+  const path = input.nextUrl?.trim() || `/profiles/${encodeURIComponent(profileId.trim())}/videos`;
+  const params = input.nextUrl?.trim()
+    ? {}
+    : buildV2ProfileVideoParams({ ...input, pageSize: input.pageSize ?? 100, profileId: profileId.trim() });
+  const outcome = await v2List<V2RawVideo>(path, params);
   if (!outcome.ok) return withRemedy(outcome.failure, resource, endpoint);
   const pagination = outcome.data.pagination ?? {};
-  const page = pagination.page ?? clampPage(Number(params.page));
-  const pageSize = pagination.page_size ?? clampLimit(Number(params.page_size));
+  const page = pagination.page ?? clampPage(Number(params.page || input.page || 1));
+  const pageSize = pagination.page_size ?? clampLimit(Number(params.page_size || input.pageSize || 100));
   return collectionResult(resource, endpoint, normalizeV2Videos(outcome.data.data ?? []), page, pageSize, pagination.total ?? null, pagination.next ?? null);
 }
 
@@ -118,7 +125,7 @@ export async function v2GetUser(id: string): Promise<DiscoveryOutcome> {
 }
 
 /** Profile playlist listing: GET /profiles/{id}/playlists. */
-export async function v2ProfilePlaylists(profileId: string, page = 1, pageSize = 50, fields?: string): Promise<DiscoveryOutcome> {
+export async function v2ProfilePlaylists(profileId: string, page = 1, pageSize = 100, fields?: string): Promise<DiscoveryOutcome> {
   const endpoint = "GET /profiles/{profile_id}/playlists";
   const missing = requireProfileId(profileId, "playlists", endpoint);
   if (missing) return missing;
@@ -142,12 +149,14 @@ export async function v2GetPlaylist(id: string, fields?: string): Promise<Discov
 }
 
 /** Playlist contents: GET /playlists/{id}/videos. */
-export async function v2PlaylistVideos(id: string, page = 1, pageSize = 50, fields?: string): Promise<DiscoveryOutcome> {
+export async function v2PlaylistVideos(id: string, page = 1, pageSize = 100, fields?: string, nextUrl?: string | null): Promise<DiscoveryOutcome> {
   const endpoint = "GET /playlists/{playlist_id}/videos";
   if (!id.trim()) return { ok: false, error: "Enter a playlist ID.", reason: "user_input_error", status: 400, apiVersion: "v2", resource: "playlists", endpoint, remedy: null, retryable: false };
-  const outcome = await v2List<V2RawVideo>(`/playlists/${encodeURIComponent(id.trim())}/videos`, {
+  const path = nextUrl?.trim() || `/playlists/${encodeURIComponent(id.trim())}/videos`;
+  const params: Record<string, string> = nextUrl?.trim() ? {} : {
     page: String(clampPage(page)), page_size: String(clampLimit(pageSize)), fields: fields?.trim() || V2_VIDEO_FIELDS,
-  });
+  };
+  const outcome = await v2List<V2RawVideo>(path, params);
   if (!outcome.ok) return withRemedy(outcome.failure, "playlists", endpoint);
   const pagination = outcome.data.pagination ?? {};
   return collectionResult("playlists", endpoint, normalizeV2Videos(outcome.data.data ?? []), pagination.page ?? clampPage(page), pagination.page_size ?? clampLimit(pageSize), pagination.total ?? null, pagination.next ?? null);

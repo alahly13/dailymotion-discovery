@@ -174,7 +174,7 @@ export async function v1GetPlaylist(id: string, fields?: string): Promise<Discov
 }
 
 /** Playlist contents: GET /playlist/{id}/videos. */
-export async function v1PlaylistVideos(id: string, page = 1, limit = 50, fields?: string): Promise<DiscoveryOutcome> {
+export async function v1PlaylistVideos(id: string, page = 1, limit = 100, fields?: string): Promise<DiscoveryOutcome> {
   const trimmed = id.trim();
   if (!trimmed) return failure("playlists", "GET /playlist/{id}/videos", "Enter a playlist ID.", "user_input_error", 400, false);
   const endpoint = "GET /playlist/{id}/videos";

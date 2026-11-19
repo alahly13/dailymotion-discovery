@@ -1,8 +1,8 @@
 # Dailymotion Discovery Platform Ledger
 
-Updated: 2026-11-14
+Updated: 2026-11-19
 Repo path: `E:\discovery\dailymotion-discovery`
-Scope: Project source-of-truth ledger, updated after Search Architecture Consolidation (Global Search + Link Explorer), universal Dailymotion URL/ID analyzer, retired route redirections, and 100% Vitest / TypeScript verification.
+Scope: Project source-of-truth ledger, updated after Link Explorer Correct Resource Resolution, Maximum Catalog Retrieval & Append-Only Pagination implementation, 100% Vitest / TypeScript verification.
 
 ## Table of Contents
 
@@ -23,6 +23,73 @@ Scope: Project source-of-truth ledger, updated after Search Architecture Consoli
 - [Known Limitations](#known-limitations)
 - [Future Roadmap](#future-roadmap)
 - [Agent Instructions](#agent-instructions)
+
+## 2026-11-19 Link Explorer: Correct Resource Resolution, Maximum Catalog Retrieval & Append-Only Pagination (2026)
+
+**User intent addressed**
+- Resolved all Link Explorer resource resolution and pagination defects across both Dailymotion API V1 (Legacy) and API V2 (Modern REST).
+- Fixed the critical routing bug where `/api/discovery/v2/channels?mode=videos...` fell through to single profile lookups instead of invoking `v2ProfileVideos`.
+- Upgraded the default retrieval page size to the documented maximum (`pageSize=100` for V2, `limit=100` for V1) across all services and route handlers.
+- Established strict API separation between V1 and V2: no endpoint crossover, no fallback between versions, version provenance preserved on every item, and explicit version-specific guidance on failure.
+- Implemented robust continuation state and append-only pagination: clicking "Load More" requests the next page via authoritative cursors/page numbers, deduplicates items against existing records, appends them without replacing previously loaded items, persists updates to IndexedDB `search_snapshot_pages`, and displays accurate retrieval counts.
+- Solved the critical V2 playlist edge case: deleted or unavailable videos in Dailymotion playlists are omitted by the provider, which can result in pages with `< pageSize` or even `0` items while a valid `next` URL and `hasMore` exist. The playlist pagination loop now continues resiliently until the provider confirms no further pages remain, and calculates `omittedOrUnavailableReferences` accurately.
+- Added loop prevention tracking (`visitedPages`, `visitedCursors`) and recursive date-window partitioning (Year -> Month) for catalogs exceeding the 1,000-item query window in deep scan mode.
+- Provided local IndexedDB session restoration on page mount with zero network calls and clear status indication.
+
+**Architecture & Implementation Details**
+
+1. **V2 Channel Video Route Handler Fix (`src/app/api/discovery/v2/[resource]/route.ts`)**:
+   - Added missing `if (mode === "videos")` branch under `case "channels"`, properly routing requests to `v2ProfileVideos(profileId || id, { ... })`.
+   - Forwarded `nextUrl` pagination query parameters across channels, videos, and playlists.
+   - Defaulted `pageSize` to 100 across all V2 collection endpoints.
+
+2. **V1 Route Handler Alignment (`src/app/api/discovery/v1/[resource]/route.ts`)**:
+   - Defaulted `pageSize` / `limit` to 100 for `channels`, `playlists`, and `users`.
+   - Maintained strict Legacy parameter conventions (`page`, `limit`).
+
+3. **URL Analyzer & Endpoint Mapping (`src/lib/platforms/dailymotion/dailymotion-url-analyzer.ts`)**:
+   - Updated playlist `apiPathV2` to `/v2/playlists/${cleanId}/videos`.
+   - Updated channel `apiPathV1` to `/user/${cleanId}/videos`.
+
+4. **V2 Client Host Validation (`src/lib/discovery/v2-client.ts`)**:
+   - Hardened `v2FetchRaw` to accept full URLs when an authoritative `next` pagination URL is supplied, strictly verifying host equals `api.dailymotion.com`.
+
+5. **Search Services Upgrades (`src/lib/discovery/v2-search-service.ts` & `v1-search-service.ts`)**:
+   - `v2ProfileVideos` and `v2PlaylistVideos` support `nextUrl` and default `pageSize=100`.
+   - `v1PlaylistVideos` defaults `limit=100`.
+   - Strongly typed `params: Record<string, string>` in `v2PlaylistVideos` to ensure clean TypeScript compilation.
+
+6. **Intelligence & Continuation Schema (`src/lib/link-explorer/link-explorer-types.ts`)**:
+   - Added `ContinuationState` interface for multi-turn pagination (`startPage`, `nextCursor`, `existingItems`, `visitedPages`, `visitedCursors`, `providerReportedTotal`, `omittedOrUnavailableReferences`).
+   - Extended `LinkExplorerResolution` with `checkpoint`, `nextCursor`, `omittedOrUnavailableReferences`, and `duplicatesSkipped`.
+   - Extended `computeResourceIntelligence` to accept `extraStats` and populate `statistics.omittedOrUnavailableReferences`, `statistics.duplicatesSkipped`, `statistics.pagesRetrieved`, and `statistics.providerReportedVideos`.
+   - Defaulted `ScanBudgetConfig.pageSize` to 100.
+
+7. **Universal Resolver & Multi-Page Engine (`src/lib/link-explorer/link-explorer-service.ts`)**:
+   - Updated `DEFAULT_SCAN_CONFIG.pageSize = 100`.
+   - `resolveLinkExplorerInput` accepts `continuationState?: ContinuationState`.
+   - For V2 channels, if lookup fails, attempts `/api/discovery/v2/channels?mode=me` resolution; if unresolved, returns an explicit V2 error rather than falling back to V1.
+   - Implemented loop prevention with `visitedPages` and `visitedCursors` sets.
+   - For playlists: never stops pagination on `pageItems.length === 0` if `hasMore` or `currentNextCursor` is true. Employs a consecutive empty pages circuit breaker (5 empty pages) to guard against broken provider cursors.
+   - Deep scan partitioning: recursive Year -> Month window splitting when a year hits Dailymotion's 1,000-item query cap.
+   - Generates resumption checkpoint containing `nextPage`, `nextCursor`, and visited token sets.
+
+8. **Link Explorer Workspace UI & Persistence (`src/components/link-explorer/link-explorer-workspace.tsx`)**:
+   - Rewrote `handleLoadMore` to call `resolveLinkExplorerInput` with `continuationState`, incrementing page indices, following cursors, and appending new items to the existing collection.
+   - On load more failure: preserves all already loaded items and renders an inline alert with a retry button for that specific page.
+   - On load more success: appends new page records to IndexedDB using `appendSearchSnapshotPage` and flashes a confirmation toast (`{addedCount} additional records loaded`).
+   - Restores latest `link_explorer` snapshot from IndexedDB on initial mount when no URL param is given, displaying a `Restored from local search history · Zero API Calls` badge.
+   - Displays clear pagination status: `Showing {visibleItems.length} of {total} available references`. When complete, renders `All available pages have been retrieved ({count} records loaded)`.
+
+9. **Resource Intelligence Overview UI (`src/components/link-explorer/resource-intelligence-overview.tsx`)**:
+   - Displays provider-reported total, locally retrieved count, catalog coverage percent, omitted/unavailable reference count, and duplicates skipped count.
+
+10. **Automated Unit Tests (`src/lib/link-explorer/__tests__/link-explorer-intelligence.test.ts`)**:
+    - Added tests for statistics computation with `extraStats` (omitted references, duplicates skipped), and continuation state deduplication without mutating original lists. All 6 tests passing.
+
+**Verification Results**
+- `node ./node_modules/vitest/vitest.mjs run src/lib/link-explorer/__tests__/link-explorer-intelligence.test.ts`: 6/6 tests passing (100%).
+- `npx tsc --noEmit`: 0 TypeScript errors across the entire codebase.
 
 ## 2026-11-14 Advanced Link Explorer, Complete Channel Catalog Discovery & Resource Intelligence Workspace
 
