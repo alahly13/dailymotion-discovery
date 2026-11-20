@@ -15,6 +15,10 @@ import {
   LOCAL_STORES,
 } from "@/lib/local-first/indexeddb-store";
 import type {
+  CatalogPartitionLedger,
+  RetrievalDirection,
+  RetrievalPeriod,
+  RetrievalStrategy,
   RetrievalWindowRecord,
   ScanCompletenessStatus,
   ScanStrategy,
@@ -54,6 +58,11 @@ export interface CompletedExplorationManifest {
     totalPagesFetched: number;
     windowsRetrieved: RetrievalWindowRecord[];
   };
+  retrievalLedger?: CatalogPartitionLedger;
+  retrievalStrategy?: RetrievalStrategy;
+  retrievalDirection?: RetrievalDirection;
+  totalRawObserved?: number;
+  totalDuplicatesDetected?: number;
   sha256Checksum: string;
   status: ScanCompletenessStatus;
 }

@@ -14,6 +14,10 @@ import {
   LOCAL_STORES,
 } from "@/lib/local-first/indexeddb-store";
 import type {
+  CatalogPartitionLedger,
+  RetrievalDirection,
+  RetrievalPeriod,
+  RetrievalStrategy,
   RetrievalWindowRecord,
   ScanBudgetConfig,
   ScanCompletenessStatus,
@@ -49,6 +53,13 @@ export interface ScanCheckpointRecord {
     dateFrom: string | null;
     dateTo: string | null;
   }>;
+  retrievalLedger?: CatalogPartitionLedger;
+  retrievalStrategy?: RetrievalStrategy;
+  retrievalDirection?: RetrievalDirection;
+  currentPeriodId?: string | null;
+  totalRawObserved?: number;
+  totalUniqueRetained?: number;
+  totalDuplicatesDetected?: number;
   updatedAt: string;
   canResume: boolean;
 }

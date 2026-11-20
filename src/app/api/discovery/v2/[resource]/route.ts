@@ -48,7 +48,13 @@ function bool(value: string | null): boolean | undefined {
 
 function iso(value: string | null, endOfDay: boolean): string | null {
   if (!value) return null;
-  const normalized = value.length <= 10 ? `${value}T${endOfDay ? "23:59:59" : "00:00:00"}Z` : value;
+  const trimmed = value.trim();
+  if (/^\d+$/.test(trimmed)) {
+    const numVal = Number(trimmed);
+    const ms = numVal < 2e10 ? numVal * 1000 : numVal;
+    return new Date(ms).toISOString();
+  }
+  const normalized = trimmed.length <= 10 ? `${trimmed}T${endOfDay ? "23:59:59" : "00:00:00"}Z` : trimmed;
   return toV2IsoDate(normalized);
 }
 

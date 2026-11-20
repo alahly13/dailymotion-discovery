@@ -51,12 +51,22 @@ import {
 } from "@/lib/link-explorer/link-explorer-service";
 import {
   computeResourceIntelligence,
+  type CustomDateRangeConfig,
   type LinkExplorerManifest,
   type LinkExplorerResolution,
+  type RetrievalDirection,
+  type RetrievalPeriod,
+  type RetrievalStrategy,
   type ScanBudgetConfig,
   type ScanProgressState,
   type TargetIdentity,
 } from "@/lib/link-explorer/link-explorer-types";
+import {
+  getNextPendingPeriod,
+  isLedgerFullyCompleted,
+} from "@/lib/link-explorer/catalog-partition-engine";
+import { CatalogDeduplicator } from "@/lib/link-explorer/deduplication-service";
+import { CatalogRetrievalStrategyPanel } from "./catalog-retrieval-strategy-panel";
 import { ResourceIntelligenceOverview } from "./resource-intelligence-overview";
 import { AdvancedFetchSettingsPanel } from "./advanced-fetch-settings-panel";
 import { ScanProgressBar } from "./scan-progress-bar";
@@ -118,6 +128,15 @@ export function LinkExplorerWorkspace() {
   const [scanProgress, setScanProgress] = useState<ScanProgressState | null>(null);
   const [isPaused, setIsPaused] = useState(false);
   const abortControllerRef = useRef<AbortController | null>(null);
+
+  // Time-Partitioned Catalog Retrieval Strategy State (2026)
+  const [retrievalStrategy, setRetrievalStrategy] = useState<RetrievalStrategy>("automatic_maximum_coverage");
+  const [retrievalDirection, setRetrievalDirection] = useState<RetrievalDirection>("newest_to_oldest");
+  const [customRangeConfig, setCustomRangeConfig] = useState<CustomDateRangeConfig>({
+    startDate: "2005-01-01",
+    endDate: new Date().toISOString().substring(0, 10),
+    granularity: "month",
+  });
 
   // Core Resolution State
   const [loading, setLoading] = useState(false);
@@ -241,6 +260,9 @@ export function LinkExplorerWorkspace() {
 
     const effectiveBudgetConfig: ScanBudgetConfig = {
       ...scanConfig,
+      retrievalStrategy,
+      retrievalDirection,
+      customRangeConfig: retrievalStrategy === "custom_range" ? customRangeConfig : undefined,
       ...overrideConfig,
     };
 
@@ -260,8 +282,11 @@ export function LinkExplorerWorkspace() {
         setScanProgress(res.scanProgress);
       }
 
-      // Capture snapshot ID for appendSearchSnapshotPage
+      // Persist checkpoint to IndexedDB immediately upon successful resolution
       if (res.ok && res.items.length > 0) {
+        void saveCheckpointFromResolution(res);
+
+        // Capture snapshot ID for appendSearchSnapshotPage
         captureSearchSnapshot({
           workspace: "link_explorer",
           query: clean,
@@ -292,12 +317,69 @@ export function LinkExplorerWorkspace() {
     }
   }
 
-  // Save Completed Exploration Manifest
-  async function handleSaveCompletedExploration() {
-    if (!resolution || !resolution.ok || resolution.items.length === 0) return;
-    setIsSavingManifest(true);
+  // Persists a scan checkpoint durably in IndexedDB
+  async function saveCheckpointFromResolution(res: LinkExplorerResolution) {
+    if (!res.ok) return;
     try {
       const owner = await getClientOwnerId();
+      await saveScanCheckpoint({
+        id: buildCheckpointKey(owner, version, res.effectiveKind, res.analyzed.identifier),
+        ownerId: owner,
+        scanId: res.manifest?.scanId || `scan-${Date.now()}`,
+        apiVersion: version,
+        resourceType: res.effectiveKind,
+        resourceId: res.analyzed.identifier,
+        canonicalUrl: res.analyzed.canonicalUrl || "",
+        targetIdentity: res.targetIdentity,
+        scanConfig: {
+          ...scanConfig,
+          retrievalStrategy,
+          retrievalDirection,
+          customRangeConfig,
+        },
+        currentPage: res.page || 1,
+        nextCursor: res.nextCursor,
+        visitedPages: res.checkpoint?.visitedPages || [],
+        visitedCursors: res.checkpoint?.visitedCursors || [],
+        completedPages: res.page || 1,
+        itemsRetrieved: res.items.length,
+        lifetimeTotal: res.lifetimeTotal ?? null,
+        queryTotal: res.total ?? null,
+        oldestItemDate: res.intelligence?.chronology.oldestVideo?.date || null,
+        newestItemDate: res.intelligence?.chronology.newestVideo?.date || null,
+        status: res.hasMore
+          ? "fetching_pages"
+          : res.hasRemainingCatalog
+          ? "more_results_available"
+          : "completed",
+        completedWindows: res.diagnostics?.windows || [],
+        retrievalLedger: res.retrievalLedger,
+        retrievalStrategy,
+        retrievalDirection,
+        currentPeriodId: res.currentPeriod?.periodId || null,
+        totalRawObserved: res.totalRawObserved || res.items.length,
+        totalUniqueRetained: res.items.length,
+        totalDuplicatesDetected: res.totalDuplicatesDetected || res.duplicatesSkipped || 0,
+        updatedAt: new Date().toISOString(),
+        canResume: true,
+      });
+    } catch {
+      // Non-blocking checkpoint save
+    }
+  }
+
+  // Finalize Catalog: Reconcile, Deduplicate, Compute Checksum, and Commit Final Manifest
+  async function handleFinalizeCatalog() {
+    if (!resolution || !resolution.ok || resolution.items.length === 0) return;
+    setIsSavingManifest(true);
+    setLoadMoreError(null);
+    try {
+      const owner = await getClientOwnerId();
+      // 1. Run final canonical deduplication and checksum verification
+      const deduplicator = new CatalogDeduplicator(resolution.items);
+      const reconciled = await deduplicator.reconcileFinalCatalog(resolution.analyzed.identifier);
+
+      // 2. Commit final consolidated manifest into Completed Explorations
       await saveCompletedExplorationManifest({
         manifestId: `manifest-${Date.now()}-${resolution.analyzed.identifier}`,
         ownerId: owner,
@@ -312,197 +394,251 @@ export function LinkExplorerWorkspace() {
         targetIdentity: resolution.targetIdentity,
         scanId: resolution.manifest?.scanId || `scan-${Date.now()}`,
         scanStrategy: scanConfig.strategy,
+        retrievalStrategy: scanConfig.retrievalStrategy || resolution.retrievalLedger?.strategy || retrievalStrategy,
+        retrievalDirection: scanConfig.retrievalDirection || resolution.retrievalLedger?.direction || retrievalDirection,
         createdAt: resolution.manifest?.createdAt || new Date().toISOString(),
         completedAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
-        totalUniqueItems: resolution.items.length,
+        totalUniqueItems: reconciled.canonicalItems.length,
         providerReportedLifetimeTotal: resolution.lifetimeTotal ?? null,
         providerReportedQueryTotal: resolution.total ?? null,
-        duplicatesSkipped: resolution.duplicatesSkipped ?? 0,
+        duplicatesSkipped: reconciled.summary.totalDuplicatesDetected,
         omittedOrUnavailableReferences: resolution.omittedOrUnavailableReferences ?? 0,
-        oldestItemDate: resolution.intelligence?.chronology.oldestVideo?.date || null,
-        newestItemDate: resolution.intelligence?.chronology.newestVideo?.date || null,
-        items: resolution.items,
+        totalRawObserved: reconciled.summary.totalRawObserved,
+        totalDuplicatesDetected: reconciled.summary.totalDuplicatesDetected,
+        oldestItemDate: reconciled.oldestItemDate,
+        newestItemDate: reconciled.newestItemDate,
+        items: reconciled.canonicalItems,
+        retrievalLedger: resolution.retrievalLedger,
         paginationMetadata: {
           totalPagesFetched: resolution.page || 1,
           windowsRetrieved: resolution.diagnostics?.windows || [],
         },
+        sha256Checksum: reconciled.sha256Checksum,
         status: resolution.items.length >= (resolution.lifetimeTotal ?? resolution.items.length)
           ? "complete_within_verified_scope"
           : "completed_with_known_limitations",
       });
-      setSavedManifestNotice("Catalog successfully saved to Completed Explorations!");
+
+      // 3. Remove in-progress checkpoint once finalized
+      await deleteScanCheckpoint(owner, version, resolution.effectiveKind, resolution.analyzed.identifier);
+
+      setSavedManifestNotice("Catalog successfully finalized & saved to Completed Explorations!");
       setTimeout(() => setSavedManifestNotice(null), 4000);
     } catch (err) {
-      setLoadMoreError(err instanceof Error ? err.message : "Failed to save completed exploration.");
+      setLoadMoreError(err instanceof Error ? err.message : "Failed to finalize catalog.");
     } finally {
       setIsSavingManifest(false);
     }
   }
 
-  // Continue Retrieval Action (supports single next page, date partitioning, and deep scan)
-  async function handleContinueRetrieval(strategy: "next_page" | "date_partition" | "deep_scan" = "next_page") {
+  // Continue Retrieval Action (Supports: next_page within period, next_period, all_remaining, or retry_failed)
+  async function handleContinueRetrieval(
+    mode: "next_page" | "next_period" | "all_remaining" | "retry_failed" = "next_page"
+  ) {
     if (!resolution?.analyzed || loadingMore || !resolution.ok) return;
     setLoadingMore(true);
     setLoadMoreError(null);
-    if (strategy === "deep_scan") setIsContinuingDeep(true);
+    if (mode === "all_remaining") setIsContinuingDeep(true);
 
     try {
       const selectedKind = overrideKind === "auto" ? undefined : overrideKind;
       let currentRes = resolution;
-      let keepLooping = true;
-      let loopCount = 0;
-      const maxLoops = strategy === "deep_scan" ? 25 : 1;
+      const ledger = currentRes.retrievalLedger;
 
-      while (keepLooping && loopCount < maxLoops) {
-        if (abortControllerRef.current?.signal.aborted) break;
-        loopCount++;
-
-        const isCurrentlyInCurrentWindow = Boolean(currentRes.hasMore && strategy !== "date_partition");
-        let dateBeforeParam: string | null = null;
-        let dateWindowLabel: string | null = null;
-
-        if (!isCurrentlyInCurrentWindow) {
-          // Find the oldest video created date in currentRes.items to partition backward
-          let oldestIso: string | null = null;
-          for (const it of currentRes.items) {
-            if (it.createdAt) {
-              if (!oldestIso || new Date(it.createdAt).getTime() < new Date(oldestIso).getTime()) {
-                oldestIso = it.createdAt;
-              }
-            }
-          }
-          if (oldestIso) {
-            const oldestMs = new Date(oldestIso).getTime();
-            dateBeforeParam = new Date(Math.max(0, oldestMs - 1000)).toISOString();
-            dateWindowLabel = `Partition Before ${oldestIso.substring(0, 10)}`;
-          }
-        }
-
-        const nextPage = isCurrentlyInCurrentWindow
-          ? (currentRes.checkpoint?.nextPage ?? currentPage) + 1
-          : 1;
+      // ============================================================
+      // A. LOAD NEXT PAGE (Within the current date window / period)
+      // ============================================================
+      if (mode === "next_page") {
+        const activePeriod =
+          currentRes.currentPeriod ||
+          (ledger?.activePeriodId ? ledger.periods.find((p) => p.periodId === ledger.activePeriodId) : null);
+        const nextPage = (activePeriod?.nextPage || currentPage) + 1;
+        const nextCursor = activePeriod?.nextCursor || currentRes.nextCursor || null;
 
         const res = await resolveLinkExplorerInput(
           input.trim(),
           version,
           selectedKind,
-          { ...scanConfig, maxPages: strategy === "deep_scan" ? 2 : 1 },
+          { ...scanConfig, maxPages: 1 },
           (progress) => setScanProgress(progress),
           abortControllerRef.current?.signal,
           {
             startPage: nextPage,
-            nextCursor: isCurrentlyInCurrentWindow ? (currentRes.nextCursor ?? currentRes.checkpoint?.nextCursor ?? null) : null,
+            nextCursor,
             existingItems: currentRes.items,
-            existingDuplicates: currentRes.duplicatesSkipped ?? 0,
-            visitedPages: isCurrentlyInCurrentWindow ? (currentRes.checkpoint?.visitedPages ?? []) : [],
-            visitedCursors: isCurrentlyInCurrentWindow ? (currentRes.checkpoint?.visitedCursors ?? []) : [],
+            existingDuplicates: currentRes.totalDuplicatesDetected ?? currentRes.duplicatesSkipped ?? 0,
+            visitedPages: currentRes.checkpoint?.visitedPages || [],
+            visitedCursors: currentRes.checkpoint?.visitedCursors || [],
             providerReportedTotal: currentRes.total,
             providerReportedLifetimeTotal: currentRes.lifetimeTotal,
             omittedOrUnavailableReferences: currentRes.omittedOrUnavailableReferences ?? 0,
             diagnostics: currentRes.diagnostics,
-            dateBefore: dateBeforeParam,
-            dateWindowLabel,
+            retrievalLedger: ledger,
+            currentPeriod: activePeriod || undefined,
+            targetPeriodId: activePeriod?.periodId,
           }
         );
 
         if (!res.ok) {
-          setLoadMoreError(res.error || "Failed to continue catalog retrieval.");
-          break;
+          setLoadMoreError(res.error || "Failed to load next page.");
+          return;
         }
 
         const addedCount = res.items.length - currentRes.items.length;
-        currentRes = res;
         setResolution(res);
-        setCurrentPage(res.page ?? nextPage);
+        setCurrentPage(nextPage);
+        if (res.scanProgress) setScanProgress(res.scanProgress);
+        setLastAppendedToast(`${addedCount} additional records loaded on page ${nextPage} (${res.items.length} total)`);
+        await saveCheckpointFromResolution(res);
+      }
 
-        if (res.scanProgress) {
-          setScanProgress(res.scanProgress);
+      // ============================================================
+      // B. LOAD NEXT PERIOD (Month, Year, or Custom Interval)
+      // ============================================================
+      else if (mode === "next_period") {
+        if (!ledger) {
+          setLoadMoreError("No active retrieval ledger found.");
+          return;
+        }
+        const nextPeriod = getNextPendingPeriod(ledger);
+        if (!nextPeriod) {
+          setLastAppendedToast("All periods in the selected scope are already completed!");
+          return;
         }
 
-        if (latestSnapshotIdRef.current && addedCount > 0) {
-          const newlyAdded = res.items.slice(resolution.items.length);
-          void appendSearchSnapshotPage(
-            latestSnapshotIdRef.current,
-            nextPage,
-            { page: nextPage, addedCount },
-            newlyAdded,
-            { hasMore: res.hasMore, nextCursor: res.nextCursor }
-          );
-        }
+        ledger.activePeriodId = nextPeriod.periodId;
+        nextPeriod.status = "in_progress";
 
-        setLastAppendedToast(`${addedCount} additional records loaded (${res.items.length} total)`);
-
-        // Checkpoint saving to IndexedDB
-        const owner = await getClientOwnerId();
-        await saveScanCheckpoint({
-          id: buildCheckpointKey(owner, version, res.effectiveKind, res.analyzed.identifier),
-          ownerId: owner,
-          scanId: res.manifest?.scanId || `scan-${Date.now()}`,
-          apiVersion: version,
-          resourceType: res.effectiveKind,
-          resourceId: res.analyzed.identifier,
-          canonicalUrl: res.analyzed.canonicalUrl || "",
-          targetIdentity: res.targetIdentity,
-          scanConfig,
-          currentPage: res.page ?? nextPage,
-          nextCursor: res.nextCursor,
-          visitedPages: res.checkpoint?.visitedPages || [],
-          visitedCursors: res.checkpoint?.visitedCursors || [],
-          completedPages: res.page ?? nextPage,
-          itemsRetrieved: res.items.length,
-          lifetimeTotal: res.lifetimeTotal ?? null,
-          queryTotal: res.total ?? null,
-          oldestItemDate: res.intelligence?.chronology.oldestVideo?.date || null,
-          newestItemDate: res.intelligence?.chronology.newestVideo?.date || null,
-          status: res.hasMore ? "fetching_pages" : (res.hasRemainingCatalog ? "more_results_available" : "completed"),
-          completedWindows: res.diagnostics?.windows || [],
-          updatedAt: new Date().toISOString(),
-          canResume: true,
-        });
-
-        // Check exit condition
-        const lifetime = res.lifetimeTotal;
-        const isComplete = lifetime ? res.items.length >= lifetime : !res.hasMore;
-        if (isComplete || addedCount === 0 || strategy !== "deep_scan") {
-          keepLooping = false;
-          if (isComplete && lifetime) {
-            await saveCompletedExplorationManifest({
-              manifestId: `manifest-${Date.now()}-${res.analyzed.identifier}`,
-              ownerId: owner,
-              provider: "dailymotion",
-              apiVersion: version,
-              resourceKind: res.effectiveKind,
-              resourceId: res.analyzed.identifier,
-              canonicalSourceUrl: res.analyzed.canonicalUrl || "",
-              resourceTitle: res.item?.title || res.analyzed.displayLabel || res.analyzed.identifier,
-              resourceDescription: res.item?.description || null,
-              resourceThumbnail: res.item?.thumbnail || null,
-              targetIdentity: res.targetIdentity,
-              scanId: res.manifest?.scanId || `scan-${Date.now()}`,
-              scanStrategy: scanConfig.strategy,
-              createdAt: res.manifest?.createdAt || new Date().toISOString(),
-              completedAt: new Date().toISOString(),
-              updatedAt: new Date().toISOString(),
-              totalUniqueItems: res.items.length,
-              providerReportedLifetimeTotal: res.lifetimeTotal ?? null,
-              providerReportedQueryTotal: res.total ?? null,
-              duplicatesSkipped: res.duplicatesSkipped ?? 0,
-              omittedOrUnavailableReferences: res.omittedOrUnavailableReferences ?? 0,
-              oldestItemDate: res.intelligence?.chronology.oldestVideo?.date || null,
-              newestItemDate: res.intelligence?.chronology.newestVideo?.date || null,
-              items: res.items,
-              paginationMetadata: {
-                totalPagesFetched: res.page || 1,
-                windowsRetrieved: res.diagnostics?.windows || [],
-              },
-              status: "complete_within_verified_scope",
-            });
-            await deleteScanCheckpoint(owner, version, res.effectiveKind, res.analyzed.identifier);
-            setSavedManifestNotice("Catalog 100% complete — saved to Completed Explorations!");
+        const res = await resolveLinkExplorerInput(
+          input.trim(),
+          version,
+          selectedKind,
+          { ...scanConfig, maxPages: 1 },
+          (progress) => setScanProgress(progress),
+          abortControllerRef.current?.signal,
+          {
+            startPage: 1,
+            nextCursor: null,
+            existingItems: currentRes.items,
+            existingDuplicates: currentRes.totalDuplicatesDetected ?? currentRes.duplicatesSkipped ?? 0,
+            providerReportedTotal: currentRes.total,
+            providerReportedLifetimeTotal: currentRes.lifetimeTotal,
+            omittedOrUnavailableReferences: currentRes.omittedOrUnavailableReferences ?? 0,
+            diagnostics: currentRes.diagnostics,
+            retrievalLedger: ledger,
+            currentPeriod: nextPeriod,
+            targetPeriodId: nextPeriod.periodId,
           }
-        } else if (scanConfig.throttleMs > 0) {
-          await new Promise((r) => setTimeout(r, scanConfig.throttleMs));
+        );
+
+        if (!res.ok) {
+          setLoadMoreError(res.error || `Failed to fetch period ${nextPeriod.label}.`);
+          return;
+        }
+
+        const addedCount = res.items.length - currentRes.items.length;
+        setResolution(res);
+        setCurrentPage(1);
+        if (res.scanProgress) setScanProgress(res.scanProgress);
+        setLastAppendedToast(`Loaded period ${nextPeriod.label} (+${addedCount} items, ${res.items.length} total)`);
+        await saveCheckpointFromResolution(res);
+      }
+
+      // ============================================================
+      // C. RETRY FAILED PERIODS
+      // ============================================================
+      else if (mode === "retry_failed") {
+        if (!ledger) return;
+        const failedPeriod = ledger.periods.find((p) => p.status === "failed");
+        if (!failedPeriod) {
+          setLastAppendedToast("No failed periods found.");
+          return;
+        }
+        failedPeriod.status = "pending";
+        failedPeriod.error = null;
+        ledger.activePeriodId = failedPeriod.periodId;
+        await handleContinueRetrieval("next_period");
+      }
+
+      // ============================================================
+      // D. FETCH ALL REMAINING PERIODS (Automated Loop with Pause/Resume)
+      // ============================================================
+      else if (mode === "all_remaining") {
+        let keepRunning = true;
+        let batchCount = 0;
+        const maxBatches = 60; // Safe bounded circuit breaker
+
+        while (keepRunning && batchCount < maxBatches) {
+          if (abortControllerRef.current?.signal.aborted) break;
+          batchCount++;
+
+          const curLedger = currentRes.retrievalLedger;
+          if (!curLedger) break;
+
+          let targetP = currentRes.currentPeriod;
+          let targetPage = 1;
+          let targetCursor: string | null = null;
+
+          if (targetP && (targetP.status === "in_progress" || targetP.status === "pending") && targetP.hasMore) {
+            targetPage = (targetP.nextPage || 1);
+            targetCursor = targetP.nextCursor || null;
+          } else {
+            const nextP = getNextPendingPeriod(curLedger);
+            if (!nextP || isLedgerFullyCompleted(curLedger)) {
+              keepRunning = false;
+              break;
+            }
+            curLedger.activePeriodId = nextP.periodId;
+            nextP.status = "in_progress";
+            targetP = nextP;
+            targetPage = 1;
+            targetCursor = null;
+          }
+
+          const res = await resolveLinkExplorerInput(
+            input.trim(),
+            version,
+            selectedKind,
+            { ...scanConfig, maxPages: 1 },
+            (progress) => setScanProgress(progress),
+            abortControllerRef.current?.signal,
+            {
+              startPage: targetPage,
+              nextCursor: targetCursor,
+              existingItems: currentRes.items,
+              existingDuplicates: currentRes.totalDuplicatesDetected ?? currentRes.duplicatesSkipped ?? 0,
+              providerReportedTotal: currentRes.total,
+              providerReportedLifetimeTotal: currentRes.lifetimeTotal,
+              omittedOrUnavailableReferences: currentRes.omittedOrUnavailableReferences ?? 0,
+              diagnostics: currentRes.diagnostics,
+              retrievalLedger: curLedger,
+              currentPeriod: targetP,
+              targetPeriodId: targetP.periodId,
+            }
+          );
+
+          if (!res.ok) {
+            setLoadMoreError(res.error || "Error during automated retrieval.");
+            break;
+          }
+
+          currentRes = res;
+          setResolution(res);
+          setCurrentPage(targetPage);
+          if (res.scanProgress) setScanProgress(res.scanProgress);
+          await saveCheckpointFromResolution(res);
+
+          // Check if entire ledger completed
+          if (isLedgerFullyCompleted(res.retrievalLedger || curLedger)) {
+            keepRunning = false;
+            await handleFinalizeCatalog();
+            break;
+          }
+
+          if (scanConfig.throttleMs > 0) {
+            await new Promise((r) => setTimeout(r, scanConfig.throttleMs));
+          }
         }
       }
     } catch (err) {
@@ -870,6 +1006,26 @@ export function LinkExplorerWorkspace() {
         </div>
       </div>
 
+      {/* 1. Catalog Retrieval Strategy Panel (User-Controlled Periods & Direction) */}
+      <CatalogRetrievalStrategyPanel
+        strategy={retrievalStrategy}
+        direction={retrievalDirection}
+        customRangeConfig={customRangeConfig}
+        onChangeStrategy={(nextStrat) => {
+          setRetrievalStrategy(nextStrat);
+          setScanConfig((prev) => ({ ...prev, retrievalStrategy: nextStrat }));
+        }}
+        onChangeDirection={(nextDir) => {
+          setRetrievalDirection(nextDir);
+          setScanConfig((prev) => ({ ...prev, retrievalDirection: nextDir }));
+        }}
+        onChangeCustomRange={(nextRange) => {
+          setCustomRangeConfig(nextRange);
+          setScanConfig((prev) => ({ ...prev, customRangeConfig: nextRange }));
+        }}
+        disabled={loading || loadingMore}
+      />
+
       {/* Advanced Fetch Settings Panel (Expandable directly beneath search input) */}
       <AdvancedFetchSettingsPanel
         version={version}
@@ -1164,14 +1320,46 @@ export function LinkExplorerWorkspace() {
                       ? Math.min(100, Math.round((resolution.items.length / lifetimeTotal) * 1000) / 10)
                       : null;
 
+                  const ledger = resolution.retrievalLedger;
+                  const activePeriod =
+                    resolution.currentPeriod ||
+                    (ledger?.activePeriodId ? ledger.periods.find((p) => p.periodId === ledger.activePeriodId) : null) ||
+                    ledger?.periods[0] ||
+                    null;
+                  const nextPeriod = ledger ? getNextPendingPeriod(ledger) : null;
+                  const completedPeriodsCount = ledger ? ledger.periods.filter((p) => p.status === "completed").length : 0;
+                  const pendingPeriodsCount = ledger ? ledger.periods.filter((p) => p.status === "pending" || p.status === "in_progress").length : 0;
+                  const failedPeriodsCount = ledger ? ledger.periods.filter((p) => p.status === "failed").length : 0;
+                  const isFullyCompleted = ledger ? isLedgerFullyCompleted(ledger) : !resolution.hasMore;
+
+                  // Strategy label
+                  const stratLabel =
+                    retrievalStrategy === "month_by_month"
+                      ? "Month by Month"
+                      : retrievalStrategy === "year_by_year"
+                      ? "Year by Year"
+                      : retrievalStrategy === "custom_range"
+                      ? "Custom Date Range"
+                      : "Automatic Maximum Coverage (Default)";
+
+                  const periodAdvanceButtonLabel =
+                    retrievalStrategy === "month_by_month"
+                      ? `Load Next Month${nextPeriod ? ` (${nextPeriod.label})` : ""}`
+                      : retrievalStrategy === "year_by_year"
+                      ? `Load Next Year${nextPeriod ? ` (${nextPeriod.label})` : ""}`
+                      : `Load Next Period${nextPeriod ? ` (${nextPeriod.label})` : ""}`;
+
                   return (
-                    <div className="w-full max-w-2xl rounded-2xl border border-border/80 bg-card/90 p-5 shadow-sm space-y-4 text-center">
-                      {/* Header */}
-                      <div className="flex items-center justify-between border-b border-border/60 pb-2.5">
+                    <div className="w-full max-w-3xl rounded-2xl border border-border/80 bg-card/95 p-6 shadow-md space-y-5 text-center">
+                      {/* Top Header */}
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-border/60 pb-3">
                         <div className="flex items-center gap-2">
                           <Compass className="h-4 w-4 text-primary" />
                           <span className="text-xs font-black uppercase tracking-wider text-foreground">
                             Catalog Retrieval Progress
+                          </span>
+                          <span className="rounded-md bg-primary/10 border border-primary/20 px-2 py-0.5 text-[10px] font-black text-primary uppercase">
+                            {stratLabel}
                           </span>
                         </div>
                         {coverageRatio !== null && (
@@ -1181,9 +1369,9 @@ export function LinkExplorerWorkspace() {
                         )}
                       </div>
 
-                      {/* Numbers */}
+                      {/* Cumulative Numbers */}
                       <div className="space-y-1">
-                        <div className="text-xl sm:text-2xl font-black tracking-tight text-foreground">
+                        <div className="text-2xl sm:text-3xl font-black tracking-tight text-foreground">
                           {resolution.items.length.toLocaleString()}{" "}
                           <span className="text-muted-foreground text-sm font-bold">/</span>{" "}
                           {lifetimeTotal ? `${lifetimeTotal.toLocaleString()} references retrieved` : "references retrieved"}
@@ -1201,12 +1389,12 @@ export function LinkExplorerWorkspace() {
                         </p>
                       </div>
 
-                      {/* Progress Bar */}
+                      {/* Overall Progress Bar */}
                       {coverageRatio !== null && (
-                        <div className="w-full bg-secondary/80 rounded-full h-2 overflow-hidden">
+                        <div className="w-full bg-secondary/80 rounded-full h-2.5 overflow-hidden">
                           <div
                             className={cn(
-                              "h-2 rounded-full transition-all duration-300",
+                              "h-2.5 rounded-full transition-all duration-300",
                               coverageRatio >= 100 ? "bg-emerald-500" : "bg-primary"
                             )}
                             style={{ width: `${Math.min(100, Math.max(2, coverageRatio))}%` }}
@@ -1214,27 +1402,122 @@ export function LinkExplorerWorkspace() {
                         </div>
                       )}
 
-                      {/* Multi-Window / Continuation Status Notice */}
-                      {!resolution.hasMore && hasRemainingCatalog && (
-                        <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-600 dark:text-amber-400 font-semibold space-y-1">
-                          <p>Current retrieval window completed ({resolution.items.length.toLocaleString()} records loaded).</p>
-                          <p className="text-[11px] opacity-90">
-                            Dailymotion caps single query windows at 1,000 items. To retrieve the remaining {remainingCount.toLocaleString()} records, continue using date partitioning.
+                      {/* Active Period & Time-Partitioning Monitor Card */}
+                      <div className="rounded-xl border border-border/70 bg-surface/80 p-4 text-left space-y-3">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-border/40 pb-2">
+                          <div className="space-y-0.5">
+                            <div className="flex items-center gap-2">
+                              <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                                Active Period:
+                              </span>
+                              <span className="text-xs font-black text-foreground">
+                                {activePeriod?.label || "Primary Discovery Window"}
+                              </span>
+                              {activePeriod?.status && (
+                                <span
+                                  className={cn(
+                                    "rounded-md px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider",
+                                    activePeriod.status === "completed" && "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20",
+                                    activePeriod.status === "in_progress" && "bg-blue-500/15 text-blue-600 dark:text-blue-400 border border-blue-500/20",
+                                    activePeriod.status === "capped" && "bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/20",
+                                    activePeriod.status === "failed" && "bg-destructive/15 text-destructive border border-destructive/20",
+                                    activePeriod.status === "pending" && "bg-surface-muted text-muted-foreground border border-border"
+                                  )}
+                                >
+                                  {activePeriod.status}
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-[11px] text-muted-foreground font-mono">
+                              Range: {activePeriod?.startIso ? activePeriod.startIso.substring(0, 10) : "Start"} &rarr; {activePeriod?.endIso ? activePeriod.endIso.substring(0, 10) : "End"} (UTC)
+                            </p>
+                          </div>
+
+                          <div className="text-right space-y-0.5">
+                            <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground block">
+                              Next Period:
+                            </span>
+                            <span className="text-xs font-bold text-foreground">
+                              {nextPeriod ? nextPeriod.label : isFullyCompleted ? "All Periods Completed" : "Pending Evaluation"}
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Dual Metrics Grid: Current Period vs Total Catalog */}
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center text-xs pt-1">
+                          <div className="rounded-lg bg-surface-muted/60 p-2 border border-border/50">
+                            <span className="text-[10px] font-bold text-muted-foreground uppercase block">
+                              Period Pages
+                            </span>
+                            <span className="text-sm font-black text-foreground">
+                              {activePeriod?.pagesFetched ?? currentPage}
+                            </span>
+                          </div>
+                          <div className="rounded-lg bg-surface-muted/60 p-2 border border-border/50">
+                            <span className="text-[10px] font-bold text-muted-foreground uppercase block">
+                              Raw Items
+                            </span>
+                            <span className="text-sm font-black text-foreground">
+                              {resolution.totalRawObserved || resolution.items.length}
+                            </span>
+                          </div>
+                          <div className="rounded-lg bg-surface-muted/60 p-2 border border-border/50">
+                            <span className="text-[10px] font-bold text-muted-foreground uppercase block">
+                              Unique Items
+                            </span>
+                            <span className="text-sm font-black text-emerald-600 dark:text-emerald-400">
+                              {resolution.items.length}
+                            </span>
+                          </div>
+                          <div className="rounded-lg bg-surface-muted/60 p-2 border border-border/50">
+                            <span className="text-[10px] font-bold text-muted-foreground uppercase block">
+                              Duplicates Filtered
+                            </span>
+                            <span className="text-sm font-black text-amber-500">
+                              {resolution.totalDuplicatesDetected || resolution.duplicatesSkipped || 0}
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Period Ledger Summary Bar */}
+                        {ledger && ledger.periods.length > 1 && (
+                          <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-border/40 text-[11px] text-muted-foreground">
+                            <span>
+                              Periods Progress: <strong className="text-foreground">{completedPeriodsCount}</strong> completed / <strong className="text-foreground">{ledger.periods.length}</strong> total
+                            </span>
+                            <span>
+                              Pending: <strong className="text-foreground">{pendingPeriodsCount}</strong> · Direction: <strong className="text-primary">{retrievalDirection.replace(/_/g, " ")}</strong>
+                            </span>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Capped Period Notice */}
+                      {activePeriod?.isCapped && (
+                        <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-600 dark:text-amber-400 font-semibold text-left space-y-1">
+                          <p className="flex items-center gap-1.5">
+                            <AlertCircle className="h-4 w-4 shrink-0" />
+                            <strong>Window Saturation Detected:</strong> {activePeriod.label} reached the provider 1,000-item query window limit.
+                          </p>
+                          <p className="text-[11px] opacity-90 pl-5">
+                            Adaptive subdivision automatically partitioned this window into smaller child periods to guarantee 100% video discovery without dropping earlier records.
                           </p>
                         </div>
                       )}
 
                       {/* Continuation Actions Button Cluster */}
-                      <div className="flex flex-wrap items-center justify-center gap-2 pt-2">
-                        {resolution.hasMore && (
+                      <div className="flex flex-wrap items-center justify-center gap-2.5 pt-2">
+                        {/* 1. LOAD NEXT PAGE (Within Current Date Window) */}
+                        {(activePeriod?.hasMore ?? resolution.hasMore) && (
                           <button
                             type="button"
                             disabled={loadingMore}
                             onClick={() => void handleContinueRetrieval("next_page")}
-                            className="inline-flex min-h-10 items-center gap-2 rounded-xl bg-primary px-5 text-xs font-black text-primary-foreground hover:opacity-95 disabled:opacity-50 transition cursor-pointer shadow-xs"
+                            className="inline-flex min-h-10 items-center gap-2 rounded-xl bg-primary px-4 text-xs font-black text-primary-foreground hover:opacity-95 disabled:opacity-50 transition cursor-pointer shadow-xs"
+                            title="Retrieve the next page within the current date window without moving to the next month or year"
                           >
                             {loadingMore && !isContinuingDeep ? (
-                              <Loader2 className="h-4 w-4 animate-spin" />
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
                             ) : (
                               <RefreshCw className="h-3.5 w-3.5" />
                             )}
@@ -1242,45 +1525,79 @@ export function LinkExplorerWorkspace() {
                           </button>
                         )}
 
-                        {hasRemainingCatalog && (
+                        {/* 2. LOAD NEXT PERIOD (Contextual: Load Next Month / Year / Period) */}
+                        {nextPeriod && (
                           <button
                             type="button"
                             disabled={loadingMore}
-                            onClick={() => void handleContinueRetrieval("date_partition")}
-                            className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-amber-500/50 bg-amber-500/15 px-5 text-xs font-black text-amber-600 dark:text-amber-400 hover:bg-amber-500/25 disabled:opacity-50 transition cursor-pointer shadow-xs"
+                            onClick={() => void handleContinueRetrieval("next_period")}
+                            className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-amber-500/50 bg-amber-500/15 px-4 text-xs font-black text-amber-600 dark:text-amber-400 hover:bg-amber-500/25 disabled:opacity-50 transition cursor-pointer shadow-xs"
+                            title={`Step to the next time period according to the ${retrievalDirection} direction`}
                           >
                             {loadingMore && !isContinuingDeep ? (
-                              <Loader2 className="h-4 w-4 animate-spin" />
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
                             ) : (
                               <ArrowRight className="h-3.5 w-3.5" />
                             )}
-                            Continue Fetching (Date Partitioning)
+                            {periodAdvanceButtonLabel}
                           </button>
                         )}
 
-                        {hasRemainingCatalog && (
+                        {/* 3. FETCH ALL REMAINING PERIODS */}
+                        {(nextPeriod || (activePeriod?.hasMore ?? resolution.hasMore)) && (
+                          <button
+                            type="button"
+                            disabled={loadingMore && !isContinuingDeep}
+                            onClick={() => {
+                              if (isContinuingDeep) {
+                                if (abortControllerRef.current) abortControllerRef.current.abort();
+                                setIsContinuingDeep(false);
+                              } else {
+                                void handleContinueRetrieval("all_remaining");
+                              }
+                            }}
+                            className={cn(
+                              "inline-flex min-h-10 items-center gap-2 rounded-xl px-4 text-xs font-black transition cursor-pointer shadow-xs",
+                              isContinuingDeep
+                                ? "bg-amber-600 text-white hover:bg-amber-700"
+                                : "border border-primary/50 bg-primary/10 text-primary hover:bg-primary/20"
+                            )}
+                            title="Automatically traverse and retrieve all remaining time partitions in the selected scope"
+                          >
+                            {isContinuingDeep ? (
+                              <>
+                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                Pause Retrieval
+                              </>
+                            ) : (
+                              <>
+                                <Sparkles className="h-3.5 w-3.5" />
+                                Fetch All Remaining Periods
+                              </>
+                            )}
+                          </button>
+                        )}
+
+                        {/* 4. RETRY FAILED PERIODS */}
+                        {failedPeriodsCount > 0 && (
                           <button
                             type="button"
                             disabled={loadingMore}
-                            onClick={() => void handleContinueRetrieval("deep_scan")}
-                            className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-primary/50 bg-primary/10 px-5 text-xs font-black text-primary hover:bg-primary/20 disabled:opacity-50 transition cursor-pointer shadow-xs"
+                            onClick={() => void handleContinueRetrieval("retry_failed")}
+                            className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-destructive/50 bg-destructive/15 px-4 text-xs font-black text-destructive hover:bg-destructive/25 transition cursor-pointer shadow-xs"
                           >
-                            {isContinuingDeep ? (
-                              <Loader2 className="h-4 w-4 animate-spin" />
-                            ) : (
-                              <Sparkles className="h-3.5 w-3.5" />
-                            )}
-                            Resume Deep Scan
+                            <AlertCircle className="h-3.5 w-3.5" />
+                            Retry Failed Periods ({failedPeriodsCount})
                           </button>
                         )}
 
-                        {/* Save to Completed Explorations Button */}
+                        {/* 5. FINALIZE CATALOG & COMMIT TO COMPLETED EXPLORATIONS */}
                         <button
                           type="button"
-                          disabled={isSavingManifest}
-                          onClick={() => void handleSaveCompletedExploration()}
+                          disabled={isSavingManifest || resolution.items.length === 0}
+                          onClick={() => void handleFinalizeCatalog()}
                           className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-border bg-secondary/80 px-4 text-xs font-black text-foreground hover:bg-secondary disabled:opacity-50 transition cursor-pointer"
-                          title="Save this catalog snapshot permanently into Completed Explorations"
+                          title="Run final canonical deduplication, compute SHA-256 checksum, and save consolidated manifest into Completed Explorations"
                         >
                           {isSavingManifest ? (
                             <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -1289,7 +1606,7 @@ export function LinkExplorerWorkspace() {
                           ) : (
                             <BookmarkCheck className="h-3.5 w-3.5 text-primary" />
                           )}
-                          {savedManifestNotice ? "Saved to Completed Explorations!" : "Save to Completed Explorations"}
+                          {savedManifestNotice ? "Saved to Completed Explorations!" : "Finalize Catalog"}
                         </button>
                       </div>
 
@@ -1300,7 +1617,7 @@ export function LinkExplorerWorkspace() {
                           <span>{loadMoreError}</span>
                           <button
                             type="button"
-                            onClick={() => void handleContinueRetrieval("date_partition")}
+                            onClick={() => void handleContinueRetrieval("next_page")}
                             className="ml-2 font-bold underline hover:opacity-80 cursor-pointer"
                           >
                             Retry

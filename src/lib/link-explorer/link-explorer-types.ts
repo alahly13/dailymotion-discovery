@@ -8,6 +8,23 @@
 import type { ApiVersion, DiscoveryItem } from "@/lib/discovery/types";
 import type { DailymotionAnalyzedLink, DailymotionResourceKind } from "@/lib/platforms/dailymotion/dailymotion-url-analyzer";
 import type { DailymotionNormalizedError } from "@/lib/dailymotion/errors";
+import type {
+  CatalogPartitionLedger,
+  CustomDateRangeConfig,
+  PeriodGranularity,
+  RetrievalDirection,
+  RetrievalPeriod,
+  RetrievalStrategy,
+} from "./catalog-partition-engine";
+
+export type {
+  CatalogPartitionLedger,
+  CustomDateRangeConfig,
+  PeriodGranularity,
+  RetrievalDirection,
+  RetrievalPeriod,
+  RetrievalStrategy,
+};
 
 export type ScanStrategy = "quick" | "standard" | "deep" | "resume" | "custom";
 
@@ -42,6 +59,9 @@ export interface ScanBudgetConfig {
   fieldsProfile: FieldSelectionProfile;
   customFields?: string;
   serverSort?: string; // v1: recent, old, visited, trending | v2: created_at, -created_at
+  retrievalStrategy?: RetrievalStrategy;
+  retrievalDirection?: RetrievalDirection;
+  customRangeConfig?: CustomDateRangeConfig;
 }
 
 export interface VideoChronologyRef {
@@ -198,6 +218,11 @@ export interface LinkExplorerManifest {
   items: DiscoveryItem[];
   scanConfig: ScanBudgetConfig;
   status: ScanCompletenessStatus;
+  retrievalLedger?: CatalogPartitionLedger;
+  retrievalStrategy?: RetrievalStrategy;
+  retrievalDirection?: RetrievalDirection;
+  totalRawObserved?: number;
+  totalDuplicatesDetected?: number;
 }
 
 export interface ContinuationState {
@@ -215,6 +240,10 @@ export interface ContinuationState {
   dateBefore?: string | null;
   dateAfter?: string | null;
   dateWindowLabel?: string | null;
+  retrievalLedger?: CatalogPartitionLedger;
+  currentPeriod?: RetrievalPeriod;
+  targetPeriodId?: string;
+  totalRawObserved?: number;
 }
 
 export interface LinkExplorerResolution {
@@ -243,6 +272,11 @@ export interface LinkExplorerResolution {
   manifest?: LinkExplorerManifest | null;
   diagnostics?: RetrievalDiagnostics;
   metrics?: CatalogRetrievalMetrics;
+  retrievalLedger?: CatalogPartitionLedger;
+  currentPeriod?: RetrievalPeriod;
+  totalRawObserved?: number;
+  totalUniqueRetained?: number;
+  totalDuplicatesDetected?: number;
   checkpoint?: {
     nextPage: number;
     nextCursor: string | null;

@@ -35,10 +35,16 @@ function num(value: string | null): number | undefined {
   return Number.isFinite(parsed) ? parsed : undefined;
 }
 
-/** UI date (YYYY-MM-DD[THH:mm]) → unix seconds; start-of-day vs end-of-day. */
+/** UI date (YYYY-MM-DD[THH:mm:ssZ] or unix seconds) → unix seconds; start-of-day vs end-of-day. */
 function dateToUnix(value: string | null, endOfDay: boolean): number | null {
   if (!value) return null;
-  const date = new Date(value.length <= 10 ? `${value}T${endOfDay ? "23:59:59" : "00:00:00"}Z` : value);
+  const trimmed = value.trim();
+  // Support numeric Unix timestamp directly (seconds or ms)
+  if (/^\d+$/.test(trimmed)) {
+    const numVal = Number(trimmed);
+    return numVal > 2e10 ? Math.floor(numVal / 1000) : Math.floor(numVal);
+  }
+  const date = new Date(trimmed.length <= 10 ? `${trimmed}T${endOfDay ? "23:59:59" : "00:00:00"}Z` : trimmed);
   const time = date.getTime();
   return Number.isNaN(time) ? null : Math.floor(time / 1000);
 }

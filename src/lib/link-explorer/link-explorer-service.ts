@@ -22,12 +22,18 @@ import {
 import { discoveryCompositeKey } from "@/lib/resources/dailymotion-resource-taxonomy";
 import {
   computeResourceIntelligence,
+  type CatalogPartitionLedger,
   type CatalogRetrievalMetrics,
   type ContinuationState,
+  type CustomDateRangeConfig,
   type LinkExplorerManifest,
   type LinkExplorerResolution,
+  type PeriodGranularity,
   type ResourceIntelligenceData,
   type RetrievalDiagnostics,
+  type RetrievalDirection,
+  type RetrievalPeriod,
+  type RetrievalStrategy,
   type RetrievalWindowRecord,
   type ScanBudgetConfig,
   type ScanCompletenessStatus,
@@ -35,6 +41,13 @@ import {
   type ScanStrategy,
   type TargetIdentity,
 } from "./link-explorer-types";
+import {
+  createPartitionLedger,
+  getNextPendingPeriod,
+  subdivideSaturatedPeriod,
+  isLedgerFullyCompleted,
+} from "./catalog-partition-engine";
+import { CatalogDeduplicator } from "./deduplication-service";
 
 export interface DiscoveryApiResponse {
   ok: boolean;
@@ -55,6 +68,8 @@ export const DEFAULT_SCAN_CONFIG: ScanBudgetConfig = {
   maxPages: 5,
   throttleMs: 150,
   fieldsProfile: "standard",
+  retrievalStrategy: "automatic_maximum_coverage",
+  retrievalDirection: "newest_to_oldest",
 };
 
 /**
@@ -214,16 +229,49 @@ export async function resolveLinkExplorerInput(
   }
 
   const isContinuation = Boolean(continuationState);
-  const items: DiscoveryItem[] = continuationState?.existingItems ? [...continuationState.existingItems] : [];
-  const seenCompositeKeys = new Set<string>(
-    items.map((it) => discoveryCompositeKey(it.apiVersion, it.kind, it.id))
-  );
+  // Centralized deduplication engine instance across all pages and partitions
+  const deduplicator = new CatalogDeduplicator(continuationState?.existingItems ?? []);
   let duplicateCount = continuationState?.existingDuplicates ?? 0;
   let providerReportedQueryTotal: number | null = continuationState?.providerReportedTotal ?? null;
   let providerReportedLifetimeTotal: number | null = continuationState?.providerReportedLifetimeTotal ?? null;
   let omittedOrUnavailableReferences = continuationState?.omittedOrUnavailableReferences ?? 0;
 
-  const isDatePartition = Boolean(continuationState?.dateBefore);
+  const scanId = `scan-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+
+  // 1. Initialize or resume CatalogPartitionLedger
+  const ledger: CatalogPartitionLedger =
+    continuationState?.retrievalLedger ||
+    createPartitionLedger({
+      scanId,
+      apiVersion: version,
+      resourceType: effectiveKind,
+      resourceId: analyzed.identifier,
+      canonicalUrl: analyzed.canonicalUrl || "",
+      strategy: config.retrievalStrategy || "automatic_maximum_coverage",
+      direction: config.retrievalDirection || "newest_to_oldest",
+      customConfig: config.customRangeConfig,
+    });
+
+  // 2. Identify target active period
+  const activePeriod: RetrievalPeriod | null =
+    continuationState?.currentPeriod ||
+    (continuationState?.targetPeriodId
+      ? ledger.periods.find((p) => p.periodId === continuationState.targetPeriodId) || null
+      : ledger.activePeriodId
+      ? ledger.periods.find((p) => p.periodId === ledger.activePeriodId) || null
+      : getNextPendingPeriod(ledger));
+
+  if (activePeriod) {
+    ledger.activePeriodId = activePeriod.periodId;
+    if (activePeriod.status === "pending") {
+      activePeriod.status = "in_progress";
+    }
+    // Set date boundaries from the active period
+    config.dateFrom = activePeriod.startIso;
+    config.dateTo = activePeriod.endIso;
+  }
+
+  const isDatePartition = Boolean(continuationState?.dateBefore || activePeriod);
   if (continuationState?.dateBefore) {
     config.dateTo = continuationState.dateBefore;
   }
@@ -233,19 +281,22 @@ export async function resolveLinkExplorerInput(
 
   const visitedPages = new Set<number>(isDatePartition ? [] : (continuationState?.visitedPages ?? []));
   const visitedCursors = new Set<string>(isDatePartition ? [] : (continuationState?.visitedCursors ?? []));
-  const startPage = isDatePartition ? 1 : (continuationState?.startPage ?? 1);
-  let currentNextCursor: string | null = isDatePartition ? null : (continuationState?.nextCursor ?? null);
+  const startPage = isDatePartition ? (activePeriod?.nextPage || 1) : (continuationState?.startPage ?? 1);
+  let currentNextCursor: string | null = isDatePartition ? (activePeriod?.nextCursor || null) : (continuationState?.nextCursor ?? null);
 
-  const currentWindowId = continuationState?.dateBefore
+  const currentWindowId = activePeriod?.periodId
+    ? activePeriod.periodId
+    : continuationState?.dateBefore
     ? `window-before-${continuationState.dateBefore.replace(/[^a-zA-Z0-9]/g, "-")}`
     : isContinuation
     ? "window-continuation"
     : "window-initial";
 
-  const scanId = `scan-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
   const windowRecords: RetrievalWindowRecord[] = continuationState?.diagnostics?.windows
     ? [...continuationState.diagnostics.windows]
     : [];
+
+  const items = deduplicator.getCanonicalItems();
 
   const progressState: ScanProgressState = {
     status: isContinuation ? "fetching_pages" : "discovering",
@@ -255,8 +306,8 @@ export async function resolveLinkExplorerInput(
     itemsDiscovered: items.length + duplicateCount,
     uniqueItemsAdded: items.length,
     duplicateCount,
-    activeWindowLabel: null,
-    activeWindowDepth: 0,
+    activeWindowLabel: activePeriod?.label || null,
+    activeWindowDepth: activePeriod?.granularity === "ten_day" ? 2 : activePeriod?.granularity === "day" ? 3 : 1,
     currentRateThrottleMs: config.throttleMs,
     error: null,
     canResume: true,
@@ -332,14 +383,13 @@ export async function resolveLinkExplorerInput(
           ownerId: mainItem.ownerId || null,
           schemaVersion: 1,
         };
-        items.push(mainItem);
-        seenCompositeKeys.add(discoveryCompositeKey(mainItem.apiVersion, mainItem.kind, mainItem.id));
+        deduplicator.ingestBatch([mainItem], "direct-lookup", 1);
       }
       updateProgress({
         status: "completed",
         pagesFetched: 1,
-        itemsDiscovered: items.length,
-        uniqueItemsAdded: items.length,
+        itemsDiscovered: deduplicator.getCanonicalItems().length,
+        uniqueItemsAdded: deduplicator.getCanonicalItems().length,
       });
     }
 
@@ -396,14 +446,13 @@ export async function resolveLinkExplorerInput(
           ownerId: mainItem.ownerId || null,
           schemaVersion: 1,
         };
-        items.push(mainItem);
-        seenCompositeKeys.add(discoveryCompositeKey(mainItem.apiVersion, mainItem.kind, mainItem.id));
+        deduplicator.ingestBatch([mainItem], "direct-lookup", 1);
       }
       updateProgress({
         status: "completed",
         pagesFetched: 1,
-        itemsDiscovered: items.length,
-        uniqueItemsAdded: items.length,
+        itemsDiscovered: deduplicator.getCanonicalItems().length,
+        uniqueItemsAdded: deduplicator.getCanonicalItems().length,
       });
     }
 
@@ -613,33 +662,42 @@ export async function resolveLinkExplorerInput(
           providerReportedQueryTotal = videosData.total;
         }
 
-        let duplicatesInPage = 0;
+        // Tag provenance on raw incoming items
         for (const item of pageItems) {
-          const cKey = discoveryCompositeKey(item.apiVersion, item.kind, item.id);
-          if (seenCompositeKeys.has(cKey)) {
-            duplicatesInPage += 1;
-          } else {
-            seenCompositeKeys.add(cKey);
-            item.provenance = {
-              provider: "dailymotion",
-              apiVersion: version,
-              resourceType: item.kind,
-              resourceId: item.id,
-              fetchedAt: new Date().toISOString(),
-              scanId,
-              dateWindowId: currentWindowId,
-              page,
-              ownerId: analyzed.identifier,
-              schemaVersion: 1,
-            };
-            items.push(item);
-          }
+          item.provenance = {
+            provider: "dailymotion",
+            apiVersion: version,
+            resourceType: item.kind,
+            resourceId: item.id,
+            fetchedAt: new Date().toISOString(),
+            scanId,
+            dateWindowId: currentWindowId,
+            page,
+            ownerId: analyzed.identifier,
+            schemaVersion: 1,
+          };
         }
+
+        // Ingest into canonical deduplicator with multi-period observation tracking & metadata merging
+        const { addedCount: uniqueAddedInPage, duplicateCount: duplicatesInPage } =
+          deduplicator.ingestBatch(pageItems, currentWindowId, page);
         duplicateCount += duplicatesInPage;
 
+        const currentCanonicalItems = deduplicator.getCanonicalItems();
+
+        if (activePeriod) {
+          activePeriod.pagesFetched += 1;
+          activePeriod.rawItemsReceived += pageItems.length;
+          activePeriod.uniqueItemsRetained += uniqueAddedInPage;
+          activePeriod.duplicatesDetected += duplicatesInPage;
+          activePeriod.nextPage = page + 1;
+          activePeriod.nextCursor = currentNextCursor;
+          activePeriod.hasMore = hasMore;
+        }
+
         updateProgress({
-          itemsDiscovered: items.length + duplicateCount,
-          uniqueItemsAdded: items.length,
+          itemsDiscovered: deduplicator.getSummary().totalRawObserved,
+          uniqueItemsAdded: currentCanonicalItems.length,
           duplicateCount,
         });
 
@@ -647,7 +705,7 @@ export async function resolveLinkExplorerInput(
         const totalConsumed = page * config.pageSize;
         if (
           (totalConsumed >= 1000 || (version === "v1" && page >= 10)) &&
-          (hasMore || (providerReportedLifetimeTotal !== null && items.length < providerReportedLifetimeTotal))
+          (hasMore || (providerReportedLifetimeTotal !== null && currentCanonicalItems.length < providerReportedLifetimeTotal))
         ) {
           reachedWindowCap = true;
         }
@@ -670,10 +728,54 @@ export async function resolveLinkExplorerInput(
         }
       }
 
+      // Update active period status in ledger upon completing current fetch run
+      if (activePeriod) {
+        if (reachedWindowCap) {
+          activePeriod.isCapped = true;
+          activePeriod.status = "capped";
+
+          // Adaptive Subdivision: split saturated Year -> Months or Month -> 10-day intervals
+          if (
+            ledger.strategy === "automatic_maximum_coverage" ||
+            ledger.strategy === "year_by_year"
+          ) {
+            const childPeriods = subdivideSaturatedPeriod(activePeriod, ledger.direction);
+            if (childPeriods.length > 0) {
+              activePeriod.childPeriodIds = childPeriods.map((c) => c.periodId);
+              const pIdx = ledger.periods.findIndex((p) => p.periodId === activePeriod!.periodId);
+              if (pIdx !== -1) {
+                ledger.periods.splice(pIdx + 1, 0, ...childPeriods);
+              } else {
+                ledger.periods.push(...childPeriods);
+              }
+              ledger.activePeriodId = childPeriods[0].periodId;
+            }
+          }
+        } else if (!hasMore || (pageItems && pageItems.length === 0)) {
+          activePeriod.status = "completed";
+          activePeriod.hasMore = false;
+          activePeriod.completedAt = new Date().toISOString();
+          const nextPending = getNextPendingPeriod(ledger);
+          ledger.activePeriodId = nextPending?.periodId || null;
+        } else {
+          activePeriod.status = "in_progress";
+          activePeriod.nextPage = page + 1;
+          activePeriod.nextCursor = currentNextCursor;
+        }
+      }
+
+      // Synchronize ledger totals
+      const dedupeSummary = deduplicator.getSummary();
+      ledger.totalRawObserved = dedupeSummary.totalRawObserved;
+      ledger.totalUniqueRetained = dedupeSummary.totalUniqueRetained;
+      ledger.totalDuplicatesDetected = dedupeSummary.totalDuplicatesDetected;
+      ledger.updatedAt = new Date().toISOString();
+
       // Record retrieval window
       windowRecords.push({
         windowId: currentWindowId,
         label:
+          activePeriod?.label ||
           continuationState?.dateWindowLabel ||
           (continuationState?.dateBefore
             ? `Partition Before ${continuationState.dateBefore}`
@@ -683,7 +785,7 @@ export async function resolveLinkExplorerInput(
         dateFrom: config.dateFrom || null,
         dateTo: config.dateTo || null,
         pageCount: pagesFetchedThisRun,
-        uniqueCount: items.length - initialWindowUniqueStart,
+        uniqueCount: deduplicator.getCanonicalItems().length - initialWindowUniqueStart,
         duplicateCount,
         providerTotal: providerReportedQueryTotal,
         isCapped: reachedWindowCap,
@@ -1073,33 +1175,28 @@ export async function resolveLinkExplorerInput(
           providerReportedQueryTotal = videosData.total;
         }
 
-        let dupes = 0;
         for (const item of pageItems) {
-          const cKey = discoveryCompositeKey(item.apiVersion, item.kind, item.id);
-          if (seenCompositeKeys.has(cKey)) {
-            dupes += 1;
-          } else {
-            seenCompositeKeys.add(cKey);
-            item.provenance = {
-              provider: "dailymotion",
-              apiVersion: version,
-              resourceType: item.kind,
-              resourceId: item.id,
-              fetchedAt: new Date().toISOString(),
-              scanId,
-              dateWindowId: "playlist-catalog",
-              page,
-              ownerId: analyzed.identifier,
-              schemaVersion: 1,
-            };
-            items.push(item);
-          }
+          item.provenance = {
+            provider: "dailymotion",
+            apiVersion: version,
+            resourceType: item.kind,
+            resourceId: item.id,
+            fetchedAt: new Date().toISOString(),
+            scanId,
+            dateWindowId: "playlist-catalog",
+            page,
+            ownerId: analyzed.identifier,
+            schemaVersion: 1,
+          };
         }
+
+        const { duplicateCount: dupes } = deduplicator.ingestBatch(pageItems, "playlist-catalog", page);
         duplicateCount += dupes;
+        const playlistCanonical = deduplicator.getCanonicalItems();
 
         updateProgress({
-          itemsDiscovered: items.length + duplicateCount,
-          uniqueItemsAdded: items.length,
+          itemsDiscovered: deduplicator.getSummary().totalRawObserved,
+          uniqueItemsAdded: playlistCanonical.length,
           duplicateCount,
         });
 
@@ -1148,6 +1245,9 @@ export async function resolveLinkExplorerInput(
     // ==========================================
     // DIAGNOSTICS & METRICS COMPILATION
     // ==========================================
+    const finalCanonicalItems = deduplicator.getCanonicalItems();
+    const dedupeSummary = deduplicator.getSummary();
+
     const diagnostics: RetrievalDiagnostics = {
       scanId,
       scanStrategy: config.strategy,
@@ -1165,8 +1265,9 @@ export async function resolveLinkExplorerInput(
           ? `Lifetime reported total: ${providerReportedLifetimeTotal.toLocaleString()} items`
           : "Global lifetime total not exposed by endpoint",
         `Total pages fetched: ${progressState.pagesFetched}`,
-        `Total unique records retrieved: ${items.length}`,
-        `Duplicates skipped: ${duplicateCount}`,
+        `Total unique records retrieved: ${finalCanonicalItems.length}`,
+        `Duplicates skipped: ${dedupeSummary.totalDuplicatesDetected}`,
+        `Retrieval Strategy: ${ledger.strategy} (${ledger.direction})`,
       ],
     };
 
@@ -1174,35 +1275,35 @@ export async function resolveLinkExplorerInput(
       providerReportedTotalPerQuery: providerReportedQueryTotal,
       providerReportedTotalLifetime: providerReportedLifetimeTotal,
       pagesFetched: progressState.pagesFetched,
-      uniqueRecordsFetched: items.length,
-      duplicateRecordsSkipped: duplicateCount,
-      uniqueRecordsPersisted: items.length,
-      dateWindowsCompleted: windowRecords.filter((w) => w.status === "completed").length,
-      dateWindowsRemaining: windowRecords.filter((w) => w.status === "unresolved" || w.status === "capped").length,
+      uniqueRecordsFetched: finalCanonicalItems.length,
+      duplicateRecordsSkipped: dedupeSummary.totalDuplicatesDetected,
+      uniqueRecordsPersisted: finalCanonicalItems.length,
+      dateWindowsCompleted: ledger.periods.filter((p) => p.status === "completed").length,
+      dateWindowsRemaining: ledger.periods.filter((p) => p.status === "pending" || p.status === "in_progress").length,
       failedRequests: 0,
-      unresolvedWindows: windowRecords.filter((w) => w.status === "unresolved" || w.status === "capped").length,
+      unresolvedWindows: ledger.periods.filter((p) => p.status === "capped" || p.status === "failed").length,
       recordsUnavailableOrInaccessible: omittedOrUnavailableReferences,
       coverageStatus: progressState.status,
       coverageEvidence:
         config.strategy === "standard" &&
-        (hasMore || (providerReportedLifetimeTotal !== null && items.length < providerReportedLifetimeTotal))
+        (hasMore || (providerReportedLifetimeTotal !== null && finalCanonicalItems.length < providerReportedLifetimeTotal))
           ? providerReportedLifetimeTotal
-            ? `Standard scan completed (${progressState.pagesFetched} pages / ${items.length} items) — additional catalog coverage has not been verified. Target reports ${providerReportedLifetimeTotal.toLocaleString()} total videos.`
-            : `Standard scan completed (${progressState.pagesFetched} pages / ${items.length} items) — additional catalog coverage has not been verified.`
-          : `Retrieved ${items.length} unique items across ${windowRecords.length} window partition(s).`,
+            ? `Standard scan completed (${progressState.pagesFetched} pages / ${finalCanonicalItems.length} items) — additional catalog coverage has not been verified. Target reports ${providerReportedLifetimeTotal.toLocaleString()} total videos.`
+            : `Standard scan completed (${progressState.pagesFetched} pages / ${finalCanonicalItems.length} items) — additional catalog coverage has not been verified.`
+          : `Retrieved ${finalCanonicalItems.length} unique items across ${ledger.periods.length} time partition(s).`,
     };
 
     // ==========================================
     // INTELLIGENCE & MANIFEST COMPUTATION
     // ==========================================
     const intelligence: ResourceIntelligenceData = computeResourceIntelligence(
-      items,
+      finalCanonicalItems,
       mainItem,
       version,
       analyzed,
       progressState.status,
       {
-        duplicatesSkipped: duplicateCount,
+        duplicatesSkipped: dedupeSummary.totalDuplicatesDetected,
         pagesRetrieved: progressState.pagesFetched,
         providerReportedTotal: providerReportedQueryTotal,
         providerReportedLifetimeTotal,
@@ -1215,7 +1316,7 @@ export async function resolveLinkExplorerInput(
       }
     );
 
-    const sha256Checksum = await computeCatalogChecksum(items, analyzed.identifier);
+    const sha256Checksum = await computeCatalogChecksum(finalCanonicalItems, analyzed.identifier);
 
     const manifest: LinkExplorerManifest = {
       manifestId: `dm-manifest-${analyzed.identifier}-${Date.now()}`,
@@ -1227,14 +1328,19 @@ export async function resolveLinkExplorerInput(
       apiVersion: version,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
-      totalItems: items.length,
+      totalItems: finalCanonicalItems.length,
       sha256Checksum,
       intelligence,
       metrics,
       diagnostics,
-      items,
+      items: finalCanonicalItems,
       scanConfig: config,
       status: progressState.status,
+      retrievalLedger: ledger,
+      retrievalStrategy: config.retrievalStrategy || ledger.strategy,
+      retrievalDirection: config.retrievalDirection || ledger.direction,
+      totalRawObserved: dedupeSummary.totalRawObserved,
+      totalDuplicatesDetected: dedupeSummary.totalDuplicatesDetected,
     };
 
     const checkpoint = {
@@ -1242,14 +1348,14 @@ export async function resolveLinkExplorerInput(
       nextCursor: currentNextCursor,
       visitedPages: Array.from(visitedPages),
       visitedCursors: Array.from(visitedCursors),
-      canResume: hasMore || Boolean(currentNextCursor),
+      canResume: hasMore || Boolean(currentNextCursor) || Boolean(getNextPendingPeriod(ledger)),
     };
 
     // Persist to search history snapshot asynchronously with 7-day durability (only for initial scans)
     if (!isContinuation) {
       const snapshotItems = [
         ...(mainItem ? [mainItem] : []),
-        ...items,
+        ...finalCanonicalItems,
       ];
 
       if (snapshotItems.length > 0) {
@@ -1279,20 +1385,25 @@ export async function resolveLinkExplorerInput(
       effectiveKind,
       version,
       item: mainItem,
-      items,
+      items: finalCanonicalItems,
       hasMore,
-      hasRemainingCatalog: Boolean(providerReportedLifetimeTotal && items.length < providerReportedLifetimeTotal),
+      hasRemainingCatalog: Boolean(providerReportedLifetimeTotal && finalCanonicalItems.length < providerReportedLifetimeTotal),
       page: progressState.pagesFetched,
-      total: providerReportedLifetimeTotal || providerReportedQueryTotal || items.length,
+      total: providerReportedLifetimeTotal || providerReportedQueryTotal || finalCanonicalItems.length,
       lifetimeTotal: providerReportedLifetimeTotal,
       nextCursor: currentNextCursor,
       omittedOrUnavailableReferences,
-      duplicatesSkipped: duplicateCount,
+      duplicatesSkipped: dedupeSummary.totalDuplicatesDetected,
       intelligence,
       scanProgress: progressState,
       manifest,
       diagnostics,
       metrics,
+      retrievalLedger: ledger,
+      currentPeriod: activePeriod || undefined,
+      totalRawObserved: dedupeSummary.totalRawObserved,
+      totalUniqueRetained: finalCanonicalItems.length,
+      totalDuplicatesDetected: dedupeSummary.totalDuplicatesDetected,
       checkpoint,
     };
   } catch (err) {

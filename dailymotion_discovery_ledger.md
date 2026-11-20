@@ -2,7 +2,7 @@
 
 Updated: 2026-11-20
 Repo path: `E:\discovery\dailymotion-discovery`
-Scope: Project source-of-truth ledger, updated after Link Explorer Catalog Completeness, Accurate Metrics, Date Windowing & In-Memory Local Title Search implementation, 100% Vitest / TypeScript verification.
+Scope: Project source-of-truth ledger, updated after Link Explorer Time-Partitioned Catalog Retrieval, User-Controlled Periods & Intelligent Deduplication (V1 + V2) implementation, 100% Vitest / TypeScript verification.
 
 ## Table of Contents
 
@@ -23,6 +23,89 @@ Scope: Project source-of-truth ledger, updated after Link Explorer Catalog Compl
 - [Known Limitations](#known-limitations)
 - [Future Roadmap](#future-roadmap)
 - [Agent Instructions](#agent-instructions)
+
+## 2026-11-20 Link Explorer: Time-Partitioned Catalog Retrieval, User-Controlled Periods & Intelligent Deduplication (V1 + V2)
+
+**User intent addressed**
+- Upgraded the Link Explorer retrieval engine into a professional, user-controlled, time-partitioned catalog collection system for channels/profiles and playlists.
+- Solved the single query window saturation problem (e.g. 1,000 items in Dailymotion V1) through intelligent time partitioning, non-destructive metadata deduplication, and consolidated manifest production.
+- Kept Dailymotion API V1 and API V2 strictly independent:
+  - **API V1 (Legacy)**: Unix timestamp seconds (`created_after`, `created_before`), `/user/{id}/videos` (or playlist items), `limit` (max 100), `page` (max 10), 1,000-item query window ceiling.
+  - **API V2 (Modern REST)**: ISO 8601 date-time strings (`created_after`, `created_before`), `/v2/profiles/{profile_id}/videos` (or `/v2/playlists/{playlist_id}/videos`), `page_size=100`, cursor-based pagination following authoritative `next` URLs.
+- Added a prominent `Catalog Retrieval Strategy` panel with 4 user-controlled options:
+  1. `Automatic Maximum Coverage` (DEFAULT): Automatically discovers content date bounds, targets ~1,000 items/window where supported, adaptively subdivides saturated windows into smaller intervals, and deduplicates before committing final manifest.
+  2. `Month by Month`: Retrieves one calendar month at a time, bidirectional traversal (`newest_to_oldest` or `oldest_to_newest`), with dynamic `Load Next Month` action.
+  3. `Year by Year`: Retrieves one full calendar year at a time with `Load Next Year` action, automatically subdividing into months upon saturation.
+  4. `Custom Date Range`: User-specified start/end dates, direction, and granularity (`entire_range`, `year`, `month`, `week`, `day`).
+- Separated intra-window page pagination from time-period pagination:
+  - `Load Next Page`: Retrieves the next page *inside* the current date window without altering the period or moving to adjacent months/years.
+  - `Load Next Month` / `Load Next Year` / `Load Next Period`: Completes the current period, marks it complete, identifies the next pending period, initializes page 1, and appends records.
+  - `Fetch All Remaining Periods`: Automated loop across all remaining periods with progress bar, pause/resume, and safe request budgets.
+  - `Finalize Catalog`: Eliminates duplicates, non-destructively merges metadata, computes deterministic SHA-256 checksum, and saves canonical manifest to Completed Explorations (`completed_explorations_manifests`).
+  - `Retry Failed Periods`: Retries any period that encountered an error without discarding already retrieved records.
+- Built durable scan checkpoints in IndexedDB (`link_explorer_scan_checkpoints`) storing `retrievalLedger`, `retrievalStrategy`, `retrievalDirection`, `currentPeriodId`, `totalRawObserved`, `totalUniqueRetained`, `totalDuplicatesDetected`, enabling seamless scan resumption across sessions and page reloads.
+
+**Architecture & Implementation Details**
+
+1. **Catalog Partition Engine (`src/lib/link-explorer/catalog-partition-engine.ts`)**:
+   - Manages `RetrievalPeriod` and `CatalogPartitionLedger`.
+   - UTC Gregorian calendar boundary calculations (`isLeapYear`, `getDaysInUtcMonth`):
+     - Leap year Feb 29 vs non-leap Feb 28.
+     - Month starts at `00:00:00.000Z` and ends at `23:59:59.999Z`.
+     - Contiguous non-gapped adjacent periods (next period starts 1ms after previous period ends).
+     - Strict isolation: V1 `startUnix`/`endUnix` (seconds) vs V2 `startIso`/`endIso` (ISO 8601).
+   - Adaptive Subdivision:
+     - Year saturation -> 12 calendar Months.
+     - Month saturation -> 3 Ten-day periods (Days 1–10, 11–20, 21–last day).
+     - Ten-day saturation -> Daily periods.
+     - `isLedgerFullyCompleted`: requires all child periods of a capped parent to complete before marking parent resolved.
+   - Chronological Traversal:
+     - `getNextPendingPeriod` prioritizes remaining pages in active period, then walks forward from `activePeriodId` index to preserve natural chronological order.
+
+2. **Intelligent Deduplication & Non-Destructive Metadata Merging (`src/lib/link-explorer/deduplication-service.ts`)**:
+   - `buildStableResourceIdentity`: Stably identifies items via `${kind}:${id}` (e.g. `video:x10001`). Never relies on title alone.
+   - `mergeMetadata`:
+     - Fills missing fields (description, tags, thumbnail, duration, views) from subsequent observations.
+     - Retains longest / most comprehensive description.
+     - Retains higher verified view/like counts.
+     - Retains earliest creation timestamp (`createdAt`).
+     - Never overwrites known non-null values with null, empty, or undefined.
+   - `CatalogDeduplicator`:
+     - Ingests batches from specific periods and pages (`ingestBatch`).
+     - Tracks source observations (`SourceObservation`) with periodId, page, fetchedAt, apiVersion.
+     - Tracks duplicate origin periods in `DeduplicationSummary`.
+     - `reconcileFinalCatalog`: Sorts chronologically, computes date bounds, year/month distributions, and deterministic SHA-256 checksum.
+     - Guaranteed manifest integrity: `manifest.items.length === manifest.totalUniqueItems`.
+
+3. **UI Strategy Panel & Period Continuation Card (`src/components/link-explorer/`)**:
+   - `<CatalogRetrievalStrategyPanel />`: Luxury OLED Obsidian panel with strategy selection cards, bidirectional toggle (`Newest to Oldest` / `Oldest to Newest`), custom date inputs, and granularity selector.
+   - `LinkExplorerWorkspace`:
+     - Renders active period banner, period status, next period preview, period pages vs cumulative metrics, and progress ratio.
+     - Action toolbar: `[Load Next Page]`, `[Load Next Month / Year / Period]`, `[Fetch All Remaining Periods]`, `[Pause / Resume]`, `[Retry Failed Periods]`, `[Finalize Catalog]`.
+     - Integrated `handleFinalizeCatalog` saving reconciled manifest with SHA-256 checksum into Completed Explorations.
+
+4. **API Route Hardening (`src/app/api/discovery/`)**:
+   - `v1/[resource]/route.ts`: Defensive `dateToUnix` parsing both Unix timestamps (seconds or ms) and ISO-8601 strings.
+   - `v2/[resource]/route.ts`: Defensive `iso` parser handling Unix timestamp strings and ISO-8601 strings.
+
+**Files Created & Modified**
+- `src/lib/link-explorer/catalog-partition-engine.ts` (created): Partition engine, calendar boundaries, adaptive subdivision, ledger management.
+- `src/lib/link-explorer/deduplication-service.ts` (created): Stable identity, non-destructive merging, provenance tracking, catalog reconciliation.
+- `src/components/link-explorer/catalog-retrieval-strategy-panel.tsx` (created): Strategy selection and custom date range UI.
+- `src/app/api/discovery/v1/[resource]/route.ts` (modified): Hardened date parameter handling.
+- `src/app/api/discovery/v2/[resource]/route.ts` (modified): Hardened date parameter handling.
+- `src/lib/link-explorer/link-explorer-types.ts` (modified): Added types for partition ledger, periods, strategies, and deduplication.
+- `src/lib/link-explorer/scan-checkpoint-service.ts` (modified): Added ledger and deduplication fields to scan checkpoints.
+- `src/lib/link-explorer/completed-explorations-service.ts` (modified): Added ledger and deduplication fields to completed manifests.
+- `src/lib/link-explorer/link-explorer-service.ts` (modified): Integrated deduplicator, partition ledger, and adaptive window splitting.
+- `src/components/link-explorer/link-explorer-workspace.tsx` (modified): Strategy panel, separate page/period pagination, period ledger card, finalize catalog.
+- `src/lib/link-explorer/__tests__/link-explorer-intelligence.test.ts` (modified): 33 comprehensive tests for strategies, date boundaries, leap years, adaptive splitting, deduplication, and pagination separation.
+
+**Verification Results**
+- **Vitest**: `node ./node_modules/vitest/vitest.mjs run src/lib/link-explorer/__tests__/link-explorer-intelligence.test.ts` exited 0 (**33/33 tests passing**).
+- **Zero Local Builds**: Strict adherence to prohibition against `npm run build`, `next build`, `vercel build`, `vercel deploy --prebuilt`. All production builds are managed remotely on Vercel.
+
+---
 
 ## 2026-11-20 Link Explorer: Continuation Retrieval Workflow, Durable Checkpoints, Completed Explorations Local Archive & Description HTML Sanitization
 
