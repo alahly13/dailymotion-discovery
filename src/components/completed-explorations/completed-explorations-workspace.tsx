@@ -796,7 +796,12 @@ export function CompletedExplorationsWorkspace() {
                 return (
                   <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4">
                     {filtered.map((item) => (
-                      <ResultCard key={item.id} item={item} />
+                      <ResultCard
+                        key={item.id}
+                        item={item}
+                        saved={false}
+                        onToggleSave={() => {}}
+                      />
                     ))}
                   </div>
                 );

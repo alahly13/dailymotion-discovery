@@ -2,7 +2,7 @@
 
 Updated: 2026-11-20
 Repo path: `E:\discovery\dailymotion-discovery`
-Scope: Project source-of-truth ledger, updated after Link Explorer Time-Partitioned Catalog Retrieval, User-Controlled Periods & Intelligent Deduplication (V1 + V2) implementation, 100% Vitest / TypeScript verification.
+Scope: Project source-of-truth ledger, updated after Link Explorer Durable Fetch Checkpoints, Progressive IndexedDB Persistence, Continuation Workflow & Zero-API Local Catalog Search Engine implementation. 100% Vitest / TypeScript verification.
 
 ## Table of Contents
 
@@ -23,6 +23,52 @@ Scope: Project source-of-truth ledger, updated after Link Explorer Time-Partitio
 - [Known Limitations](#known-limitations)
 - [Future Roadmap](#future-roadmap)
 - [Agent Instructions](#agent-instructions)
+
+## 2026-11-20 Link Explorer: Durable Fetch Checkpoints, Progressive IndexedDB Persistence, Continuation Workflow & Zero-API Local Catalog Search Engine
+
+**User intent addressed**
+- Solved the critical Link Explorer retrieval limitation where deep crawls stopped at provider query window limits (e.g., retrieving only 700 items out of 3,090 provider total) with false completion badges.
+- Implemented an intelligent backward date-slicing engine that extracts the creation timestamp (`created_at` / `created_time`) of the oldest retrieved item and spawns backward query windows (`created_before`) down to channel inception, continuing until provider total is strictly reached or no earlier items exist.
+- Implemented a durable, multi-tab safe Checkpoint & Continuation system with multi-tab lease concurrency protection (`acquireScanLease`, `isScanLeaseActive`, `releaseScanLease`), query fingerprinting, and automatic session restoration.
+- Implemented progressive part-by-part IndexedDB persistence (`link_explorer_catalog_items`) with non-destructive metadata merging on composite key collisions (`checkpointKey::kind:id`), preventing localStorage 5MB crashes and zero RAM hoarding.
+- Built an interactive Continuation Workflow with a prominent `[Continue Fetching (Date Partitioning)]` action button in the Retrieval Progress panel, strictly implementing append-only state updates.
+- Built an inspectable Historical Checkpoint Timeline UI (`<CatalogFetchHistoryPanel />`) with period inspection, status tabs, and per-period resume actions (`[Resume Period]`, `[Start Period]`, `[Filter by Period]`).
+- Built a dedicated, accessible, zero-API-call Local Catalog Search System (`<LocalCatalogSearchBar />`) featuring bilingual Arabic & English normalization (Tashkeel stripping, Alef unification, Taa Marbuta / Alif Maqsura normalization), multi-word token scoring, real-time background indexing, filter chips (All, Videos, Playlists, Live), duration/views range filtering, and keyboard shortcut `/`.
+
+**Architecture & Implementation Details**
+
+1. **Progressive IndexedDB Persistence (`src/lib/link-explorer/catalog-persistence-service.ts`)**:
+   - `LOCAL_STORES.CATALOG_ITEMS = "link_explorer_catalog_items"` (IndexedDB v5) with composite key `checkpointKey::kind:id`.
+   - `persistProgressiveBatch`: Persists batches page-by-page. On collisions, non-destructively merges metadata (keeps longest description, higher views, earliest creation date, union of tags).
+   - `getCatalogItemsForCheckpoint`: Retrieves items sorted chronologically.
+   - `consolidateAndFinalizeCatalog`: Consolidates items into `completed_explorations_manifests` with deterministic SHA-256 checksum and cleans up progressive rows.
+
+2. **Zero-API-Call Local Catalog Search Engine (`src/lib/link-explorer/local-catalog-search-service.ts`)**:
+   - `searchLocalCatalog`: Instant in-memory search with zero network calls.
+   - `normalizeSearchString`: Bilingual normalization handling Arabic Tashkeel removal, Tatweel stripping, Alef normalization (أ, إ, آ -> ا), Taa Marbuta (ة -> ه), Alif Maqsura (ى -> ي), and Latin Unicode NFC lowercase.
+   - Multi-word token scoring: Matches tokens across title, description, tags, ID, and owner name with weighted relevance scoring.
+   - Composable filters: kind, year, custom date bounds, duration ranges (`short`, `medium`, `long`), views tiers (`under_1k`, `1k_10k`, `10k_100k`, `over_100k`), and sorting (`relevance`, `newest`, `oldest`, `views_desc`, `views_asc`, `duration_desc`, `title_asc`).
+
+3. **Multi-Tab Concurrency Leases & Durable Checkpoints (`src/lib/link-explorer/scan-checkpoint-service.ts`)**:
+   - `acquireScanLease`: Locks checkpoint for 30s per tab using `tabIdRef.current`.
+   - `isScanLeaseActive`: Prevents race conditions and duplicate crawls when the same catalog is opened across multiple browser tabs.
+   - `releaseScanLease`: Releases lock cleanly upon crawl finish or pause.
+   - `buildQueryFingerprint`: Deterministic query signature caching scan configurations.
+
+4. **UI Components & Workspace Integration (`src/components/link-explorer/`)**:
+   - `<LocalCatalogSearchBar />`: Luxury OLED Obsidian search bar with `/` shortcut, quick clear `X`, live count readout `Showing X of Y retrieved records (0 API calls)`, and live background crawling indicator.
+   - `<CatalogFetchHistoryPanel />`: Historical Checkpoint Timeline with accordion toggle, segmented tabs (All, Incomplete, Completed), per-period metrics, and direct resume/filter actions.
+   - `LinkExplorerWorkspace`:
+     - Prominent `[Continue Fetching (Date Partitioning)]` action button.
+     - Strict append-only state updates (`setResolution(prev => ...)`).
+     - Backward date-partitioning parameter forwarding (`createdAfter`, `createdBefore`).
+     - Automatic session restoration from IndexedDB upon page load.
+
+5. **Verification**:
+   - `catalog-persistence-and-search.test.ts`: 13/13 Vitest tests passed (100%).
+   - `link-explorer-intelligence.test.ts`: 33/33 Vitest tests passed (100%).
+   - Combined test suite: 46/46 tests passed (100%).
+   - `npx tsc --noEmit`: 100% clean compilation (zero errors).
 
 ## 2026-11-20 Link Explorer: Time-Partitioned Catalog Retrieval, User-Controlled Periods & Intelligent Deduplication (V1 + V2)
 

@@ -146,10 +146,11 @@ export function mergeMetadata(
 
   // 10. Append provenance observation safely
   if (observation) {
-    const prevObs = (merged.extra?.observations as SourceObservation[]) || [];
+    const rawExtra = (merged.extra ?? {}) as Record<string, unknown>;
+    const prevObs = (rawExtra.observations as SourceObservation[] | undefined) || [];
     merged.extra = {
       ...merged.extra,
-      observations: [...prevObs, observation],
+      observations: [...prevObs, observation] as any,
       lastObservedAt: observation.fetchedAt,
     };
   }
@@ -229,8 +230,8 @@ export class CatalogDeduplicator {
           ...item,
           extra: {
             ...item.extra,
-            observations: [observation],
-            seenInPeriods: [periodId],
+            observations: [observation] as any,
+            seenInPeriods: [periodId] as any,
             firstObservedPeriod: periodId,
           },
         };

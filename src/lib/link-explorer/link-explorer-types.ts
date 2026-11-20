@@ -16,6 +16,9 @@ import type {
   RetrievalPeriod,
   RetrievalStrategy,
 } from "./catalog-partition-engine";
+import type { CatalogItemRecord } from "./catalog-persistence-service";
+import type { LocalCatalogSearchCriteria, LocalCatalogSearchResult } from "./local-catalog-search-service";
+import type { ScanCheckpointRecord } from "./scan-checkpoint-service";
 
 export type {
   CatalogPartitionLedger,
@@ -24,6 +27,10 @@ export type {
   RetrievalDirection,
   RetrievalPeriod,
   RetrievalStrategy,
+  CatalogItemRecord,
+  LocalCatalogSearchCriteria,
+  LocalCatalogSearchResult,
+  ScanCheckpointRecord,
 };
 
 export type ScanStrategy = "quick" | "standard" | "deep" | "resume" | "custom";

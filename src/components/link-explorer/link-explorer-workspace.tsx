@@ -29,6 +29,7 @@ import {
   Library,
   Link as LinkIcon,
   Loader2,
+  Play,
   Radio,
   RefreshCw,
   Search,
@@ -95,7 +96,18 @@ import {
   getScanCheckpoint,
   deleteScanCheckpoint,
   buildCheckpointKey,
+  acquireScanLease,
+  releaseScanLease,
+  isScanLeaseActive,
 } from "@/lib/link-explorer/scan-checkpoint-service";
+import {
+  persistProgressiveBatch,
+  getCatalogItemsForCheckpoint,
+  countCatalogItemsForCheckpoint,
+} from "@/lib/link-explorer/catalog-persistence-service";
+import { LocalCatalogSearchBar } from "./local-catalog-search-bar";
+import { CatalogFetchHistoryPanel } from "./catalog-fetch-history-panel";
+import type { LocalCatalogSearchResult } from "@/lib/link-explorer/local-catalog-search-service";
 import { saveCompletedExplorationManifest } from "@/lib/link-explorer/completed-explorations-service";
 import { captureLinkSubmission } from "@/lib/saved-titles/capture-service";
 
@@ -164,6 +176,15 @@ export function LinkExplorerWorkspace() {
     year: null,
   });
 
+  // Concurrency & Local Catalog Search State (2026)
+  const tabIdRef = useRef<string>(
+    typeof window !== "undefined"
+      ? `tab_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`
+      : "tab_ssr"
+  );
+  const [localSearchResult, setLocalSearchResult] = useState<LocalCatalogSearchResult | null>(null);
+  const [activePeriodFilter, setActivePeriodFilter] = useState<string | null>(null);
+
   // Sync real-time detection preview when input changes
   useEffect(() => {
     if (input.trim()) {
@@ -175,8 +196,67 @@ export function LinkExplorerWorkspace() {
 
   // Execute resolution if URL or ID param was provided; else restore from IndexedDB
   useEffect(() => {
-    if (initialUrl.trim()) {
-      void executeResolution(initialUrl.trim(), initialVersion);
+    const cleanInitial = initialUrl.trim();
+    if (cleanInitial) {
+      void (async () => {
+        try {
+          const owner = await getClientOwnerId();
+          const analyzed = analyzeDailymotionUrlOrId(cleanInitial);
+          const chk = await getScanCheckpoint(owner, initialVersion, analyzed.kind, analyzed.identifier);
+          if (chk) {
+            const storedItems = await getCatalogItemsForCheckpoint(chk.id);
+            if (storedItems.length > 0) {
+              const intelligence = computeResourceIntelligence(
+                storedItems,
+                storedItems[0] ?? null,
+                initialVersion,
+                analyzed,
+                chk.status,
+                {
+                  providerReportedLifetimeTotal: chk.lifetimeTotal,
+                  providerReportedTotal: chk.queryTotal,
+                  targetIdentity: chk.targetIdentity,
+                }
+              );
+
+              setResolution({
+                ok: true,
+                analyzed,
+                targetIdentity: chk.targetIdentity,
+                effectiveKind: chk.resourceType,
+                version: initialVersion,
+                item: storedItems[0] ?? null,
+                items: storedItems,
+                hasMore: chk.status === "fetching_pages" || chk.canResume,
+                page: chk.currentPage || 1,
+                total: chk.lifetimeTotal || chk.queryTotal || storedItems.length,
+                lifetimeTotal: chk.lifetimeTotal,
+                nextCursor: chk.nextCursor,
+                intelligence,
+                scanProgress: null,
+                manifest: null,
+                retrievalLedger: chk.retrievalLedger,
+                totalRawObserved: chk.totalRawObserved || storedItems.length,
+                totalUniqueRetained: storedItems.length,
+                totalDuplicatesDetected: chk.totalDuplicatesDetected || 0,
+                checkpoint: {
+                  nextPage: (chk.currentPage || 1) + 1,
+                  nextCursor: chk.nextCursor || null,
+                  visitedPages: chk.visitedPages || [],
+                  visitedCursors: chk.visitedCursors || [],
+                  canResume: chk.canResume,
+                },
+              });
+              setCurrentPage(chk.currentPage || 1);
+              setRestoredFromHistory(true);
+              return;
+            }
+          }
+        } catch {
+          // Fallback to fresh execution
+        }
+        void executeResolution(cleanInitial, initialVersion);
+      })();
     } else {
       void getLatestRestorableSearchSnapshot("link_explorer", { apiVersion: version }).then((replay) => {
         if (replay && replay.items.length > 0) {
@@ -268,13 +348,44 @@ export function LinkExplorerWorkspace() {
 
     try {
       const selectedKind = overrideKind === "auto" ? undefined : overrideKind;
+      const owner = await getClientOwnerId();
+      const checkpointKey = buildCheckpointKey(owner, targetVersion, selectedKind || "video", clean);
+
       const res = await resolveLinkExplorerInput(
         clean,
         targetVersion,
         selectedKind,
         effectiveBudgetConfig,
         (progress) => setScanProgress(progress),
-        abortCtrl.signal
+        abortCtrl.signal,
+        undefined,
+        async (batch) => {
+          try {
+            await persistProgressiveBatch({
+              checkpointKey,
+              scanId: `scan-${Date.now()}`,
+              ownerId: owner,
+              targetResourceId: clean,
+              apiVersion: targetVersion,
+              items: batch.items,
+              periodId: batch.period?.periodId || null,
+              page: batch.page,
+            });
+            // Append-only state update: keep previously loaded items and update cumulative counters
+            setResolution((prev) => {
+              if (!prev) return prev;
+              return {
+                ...prev,
+                items: batch.cumulativeItems,
+                page: batch.page,
+                currentPeriod: batch.period || prev.currentPeriod,
+                totalUniqueRetained: batch.cumulativeItems.length,
+              };
+            });
+          } catch (commitErr) {
+            console.warn("[LinkExplorer] Progressive batch commit failed:", commitErr);
+          }
+        }
       );
 
       setResolution(res);
@@ -325,7 +436,7 @@ export function LinkExplorerWorkspace() {
       await saveScanCheckpoint({
         id: buildCheckpointKey(owner, version, res.effectiveKind, res.analyzed.identifier),
         ownerId: owner,
-        scanId: res.manifest?.scanId || `scan-${Date.now()}`,
+        scanId: res.manifest?.manifestId || `scan-${Date.now()}`,
         apiVersion: version,
         resourceType: res.effectiveKind,
         resourceId: res.analyzed.identifier,
@@ -392,7 +503,7 @@ export function LinkExplorerWorkspace() {
         resourceDescription: resolution.item?.description || null,
         resourceThumbnail: resolution.item?.thumbnail || null,
         targetIdentity: resolution.targetIdentity,
-        scanId: resolution.manifest?.scanId || `scan-${Date.now()}`,
+        scanId: resolution.manifest?.manifestId || `scan-${Date.now()}`,
         scanStrategy: scanConfig.strategy,
         retrievalStrategy: scanConfig.retrievalStrategy || resolution.retrievalLedger?.strategy || retrievalStrategy,
         retrievalDirection: scanConfig.retrievalDirection || resolution.retrievalLedger?.direction || retrievalDirection,
@@ -432,14 +543,67 @@ export function LinkExplorerWorkspace() {
     }
   }
 
-  // Continue Retrieval Action (Supports: next_page within period, next_period, all_remaining, or retry_failed)
+  // Continue Retrieval Action (Supports: next_page within period, next_period, all_remaining, retry_failed, or specific_period)
   async function handleContinueRetrieval(
-    mode: "next_page" | "next_period" | "all_remaining" | "retry_failed" = "next_page"
+    mode: "next_page" | "next_period" | "all_remaining" | "retry_failed" | "specific_period" = "next_page",
+    targetPeriodParam?: RetrievalPeriod
   ) {
     if (!resolution?.analyzed || loadingMore || !resolution.ok) return;
     setLoadingMore(true);
     setLoadMoreError(null);
     if (mode === "all_remaining") setIsContinuingDeep(true);
+
+    const owner = await getClientOwnerId();
+    const checkpointKey = buildCheckpointKey(owner, version, resolution.effectiveKind, resolution.analyzed.identifier);
+    let existingChk = await getScanCheckpoint(owner, version, resolution.effectiveKind, resolution.analyzed.identifier);
+
+    // Multi-tab lease protection: check if another tab is currently crawling this resource
+    if (existingChk && isScanLeaseActive(existingChk, tabIdRef.current)) {
+      setLoadMoreError("Another browser tab holds an active retrieval lease on this catalog. Operation paused to prevent race conditions.");
+      setLoadingMore(false);
+      setIsContinuingDeep(false);
+      return;
+    }
+
+    if (existingChk) {
+      await acquireScanLease(existingChk, tabIdRef.current);
+    }
+
+    // Shared progressive commit callback: append-only IndexedDB persistence & UI state sync
+    const onProgressiveCommit = async (batch: {
+      page: number;
+      items: DiscoveryItem[];
+      cumulativeItems: DiscoveryItem[];
+      period?: RetrievalPeriod;
+      checkpoint?: any;
+    }) => {
+      try {
+        await persistProgressiveBatch({
+          checkpointKey,
+          scanId: `scan-${Date.now()}`,
+          ownerId: owner,
+          targetResourceId: resolution.analyzed.identifier,
+          apiVersion: version,
+          items: batch.items,
+          periodId: batch.period?.periodId || null,
+          page: batch.page,
+        });
+
+        // Append-only state update: never discard existing items, increment counters reactively
+        setResolution((prev) => {
+          if (!prev) return prev;
+          return {
+            ...prev,
+            items: batch.cumulativeItems,
+            page: batch.page,
+            currentPeriod: batch.period || prev.currentPeriod,
+            totalUniqueRetained: batch.cumulativeItems.length,
+          };
+        });
+      } catch (commitErr) {
+        console.warn("[LinkExplorer] Progressive batch commit failed:", commitErr);
+      }
+    };
 
     try {
       const selectedKind = overrideKind === "auto" ? undefined : overrideKind;
@@ -477,7 +641,8 @@ export function LinkExplorerWorkspace() {
             retrievalLedger: ledger,
             currentPeriod: activePeriod || undefined,
             targetPeriodId: activePeriod?.periodId,
-          }
+          },
+          onProgressiveCommit
         );
 
         if (!res.ok) {
@@ -529,7 +694,8 @@ export function LinkExplorerWorkspace() {
             retrievalLedger: ledger,
             currentPeriod: nextPeriod,
             targetPeriodId: nextPeriod.periodId,
-          }
+          },
+          onProgressiveCommit
         );
 
         if (!res.ok) {
@@ -562,7 +728,51 @@ export function LinkExplorerWorkspace() {
       }
 
       // ============================================================
-      // D. FETCH ALL REMAINING PERIODS (Automated Loop with Pause/Resume)
+      // D. RESUME SPECIFIC PERIOD FROM HISTORY PANEL
+      // ============================================================
+      else if (mode === "specific_period") {
+        if (!ledger || !targetPeriodParam) return;
+        ledger.activePeriodId = targetPeriodParam.periodId;
+        targetPeriodParam.status = "in_progress";
+
+        const res = await resolveLinkExplorerInput(
+          input.trim(),
+          version,
+          selectedKind,
+          { ...scanConfig, maxPages: 1 },
+          (progress) => setScanProgress(progress),
+          abortControllerRef.current?.signal,
+          {
+            startPage: targetPeriodParam.nextPage || 1,
+            nextCursor: targetPeriodParam.nextCursor || null,
+            existingItems: currentRes.items,
+            existingDuplicates: currentRes.totalDuplicatesDetected ?? currentRes.duplicatesSkipped ?? 0,
+            providerReportedTotal: currentRes.total,
+            providerReportedLifetimeTotal: currentRes.lifetimeTotal,
+            omittedOrUnavailableReferences: currentRes.omittedOrUnavailableReferences ?? 0,
+            diagnostics: currentRes.diagnostics,
+            retrievalLedger: ledger,
+            currentPeriod: targetPeriodParam,
+            targetPeriodId: targetPeriodParam.periodId,
+          },
+          onProgressiveCommit
+        );
+
+        if (!res.ok) {
+          setLoadMoreError(res.error || `Failed to resume period ${targetPeriodParam.label}.`);
+          return;
+        }
+
+        const addedCount = res.items.length - currentRes.items.length;
+        setResolution(res);
+        setCurrentPage(targetPeriodParam.nextPage || 1);
+        if (res.scanProgress) setScanProgress(res.scanProgress);
+        setLastAppendedToast(`Resumed period ${targetPeriodParam.label} (+${addedCount} items, ${res.items.length} total)`);
+        await saveCheckpointFromResolution(res);
+      }
+
+      // ============================================================
+      // E. FETCH ALL REMAINING PERIODS (Automated Loop with Pause/Resume)
       // ============================================================
       else if (mode === "all_remaining") {
         let keepRunning = true;
@@ -615,7 +825,8 @@ export function LinkExplorerWorkspace() {
               retrievalLedger: curLedger,
               currentPeriod: targetP,
               targetPeriodId: targetP.periodId,
-            }
+            },
+            onProgressiveCommit
           );
 
           if (!res.ok) {
@@ -644,6 +855,14 @@ export function LinkExplorerWorkspace() {
     } catch (err) {
       setLoadMoreError(err instanceof Error ? err.message : "Error continuing retrieval.");
     } finally {
+      try {
+        existingChk = await getScanCheckpoint(owner, version, resolution.effectiveKind, resolution.analyzed.identifier);
+        if (existingChk) {
+          await releaseScanLease(existingChk, tabIdRef.current);
+        }
+      } catch {
+        // Non-blocking lease release
+      }
       setLoadingMore(false);
       setIsContinuingDeep(false);
     }
@@ -745,18 +964,19 @@ export function LinkExplorerWorkspace() {
     return Array.from(set).sort((a, b) => b - a);
   }, [resolution?.items]);
 
-  // Apply In-Memory Filtering and Sorting Pipeline
+  // Apply In-Memory Filtering and Sorting Pipeline (Zero API Calls)
   const visibleItems = useMemo(() => {
     if (!resolution?.items) return [];
-    let list = [...resolution.items];
 
-    // 1. Dedicated Title Search (case-insensitive, trimmed whitespace)
-    if (localFilters.titleSearch.trim()) {
-      const tq = localFilters.titleSearch.trim().toLowerCase();
-      list = list.filter((it) => (it.title || "").toLowerCase().includes(tq));
+    // Base items from dedicated local search result if available, else catalog items
+    let list = localSearchResult ? [...localSearchResult.items] : [...resolution.items];
+
+    // Filter by specific period if selected in CatalogFetchHistoryPanel
+    if (activePeriodFilter) {
+      list = list.filter((it) => it.provenance?.dateWindowId === activePeriodFilter);
     }
 
-    // 2. Year Filter from Intelligence Overview
+    // Year Filter from Intelligence Overview
     if (activeYearFilter !== null) {
       list = list.filter((it) => {
         if (!it.createdAt) return false;
@@ -765,92 +985,34 @@ export function LinkExplorerWorkspace() {
       });
     }
 
-    // 3. Year Filter from Local Filters Dropdown
-    if (localFilters.year !== null) {
-      list = list.filter((it) => {
-        if (!it.createdAt) return false;
-        const yr = new Date(it.createdAt).getUTCFullYear();
-        return yr === localFilters.year;
-      });
-    }
-
-    // 4. Search Query Filter (deep metadata: desc, tags, id, owner)
-    if (localFilters.searchQuery.trim()) {
-      const q = localFilters.searchQuery.trim().toLowerCase();
-      list = list.filter((it) => {
-        const matchTitle = (it.title || "").toLowerCase().includes(q);
-        const matchDesc = (it.description || "").toLowerCase().includes(q);
-        const matchTags = (it.tags || []).some((t) => t.toLowerCase().includes(q));
-        const matchId = (it.id || "").toLowerCase().includes(q);
-        const matchOwner = (it.ownerName || it.ownerId || "").toLowerCase().includes(q);
-        return matchTitle || matchDesc || matchTags || matchId || matchOwner;
-      });
-    }
-
-    // 4. Duration Range Filter
-    if (localFilters.durationRange !== "all") {
-      list = list.filter((it) => {
-        if (it.duration === null || it.duration === undefined) return false;
-        if (localFilters.durationRange === "short") return it.duration < 300;
-        if (localFilters.durationRange === "medium") return it.duration >= 300 && it.duration <= 1200;
-        if (localFilters.durationRange === "long") return it.duration > 1200;
-        return true;
-      });
-    }
-
-    // 5. Views Range Filter
-    if (localFilters.viewsRange !== "all") {
-      list = list.filter((it) => {
-        const v = it.views || 0;
-        if (localFilters.viewsRange === "under_1k") return v < 1000;
-        if (localFilters.viewsRange === "1k_10k") return v >= 1000 && v < 10000;
-        if (localFilters.viewsRange === "10k_100k") return v >= 10000 && v < 100000;
-        if (localFilters.viewsRange === "over_100k") return v >= 100000;
-        return true;
-      });
-    }
-
-    // 6. Local Sorter
-    if (localSort === "newest") {
-      list.sort((a, b) => {
-        const tA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-        const tB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-        return tB - tA;
-      });
-    } else if (localSort === "oldest") {
-      list.sort((a, b) => {
-        const tA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-        const tB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-        return tA - tB;
-      });
-    } else if (localSort === "views_desc") {
-      list.sort((a, b) => (b.views || 0) - (a.views || 0));
-    } else if (localSort === "views_asc") {
-      list.sort((a, b) => (a.views || 0) - (b.views || 0));
-    } else if (localSort === "duration_desc") {
-      list.sort((a, b) => (b.duration || 0) - (a.duration || 0));
-    } else if (localSort === "duration_asc") {
-      list.sort((a, b) => (a.duration || 0) - (b.duration || 0));
-    } else if (localSort === "title_asc") {
-      list.sort((a, b) => (a.title || "").localeCompare(b.title || ""));
-    } else if (localSort === "title_desc") {
-      list.sort((a, b) => (b.title || "").localeCompare(a.title || ""));
-    } else if (localSort === "engagement_desc") {
-      list.sort((a, b) => {
-        const likesA = Number(a.extra?.likes_total) || 0;
-        const viewsA = a.views || 1;
-        const ratioA = viewsA > 0 ? likesA / viewsA : 0;
-
-        const likesB = Number(b.extra?.likes_total) || 0;
-        const viewsB = b.views || 1;
-        const ratioB = viewsB > 0 ? likesB / viewsB : 0;
-
-        return ratioB - ratioA;
-      });
+    // Fallback in-memory filters if local search result is not yet initialized
+    if (!localSearchResult) {
+      if (localFilters.titleSearch.trim()) {
+        const tq = localFilters.titleSearch.trim().toLowerCase();
+        list = list.filter((it) => (it.title || "").toLowerCase().includes(tq));
+      }
+      if (localFilters.year !== null) {
+        list = list.filter((it) => {
+          if (!it.createdAt) return false;
+          const yr = new Date(it.createdAt).getUTCFullYear();
+          return yr === localFilters.year;
+        });
+      }
+      if (localFilters.searchQuery.trim()) {
+        const q = localFilters.searchQuery.trim().toLowerCase();
+        list = list.filter((it) => {
+          const matchTitle = (it.title || "").toLowerCase().includes(q);
+          const matchDesc = (it.description || "").toLowerCase().includes(q);
+          const matchTags = (it.tags || []).some((t) => t.toLowerCase().includes(q));
+          const matchId = (it.id || "").toLowerCase().includes(q);
+          const matchOwner = (it.ownerName || it.ownerId || "").toLowerCase().includes(q);
+          return matchTitle || matchDesc || matchTags || matchId || matchOwner;
+        });
+      }
     }
 
     return list;
-  }, [resolution?.items, activeYearFilter, localFilters, localSort]);
+  }, [resolution?.items, localSearchResult, activePeriodFilter, activeYearFilter, localFilters]);
 
   return (
     <div className="space-y-6">
@@ -1211,6 +1373,28 @@ export function LinkExplorerWorkspace() {
             />
           )}
 
+          {/* DEDICATED ZERO-API LOCAL CATALOG SEARCH BAR */}
+          {resolution.items.length > 0 && (
+            <LocalCatalogSearchBar
+              items={resolution.items}
+              onFilteredItemsChange={(res) => setLocalSearchResult(res)}
+              availableYears={availableYears}
+              isCrawling={loading || loadingMore}
+            />
+          )}
+
+          {/* HISTORICAL FETCH CHECKPOINT TIMELINE & PERIOD RESUME PANEL */}
+          {resolution.retrievalLedger && (
+            <CatalogFetchHistoryPanel
+              ledger={resolution.retrievalLedger}
+              targetLabel={resolution.analyzed.identifier}
+              onSelectPeriodToResume={(period) => void handleContinueRetrieval("specific_period", period)}
+              onFilterByPeriod={(periodId) => setActivePeriodFilter(periodId)}
+              activePeriodFilter={activePeriodFilter}
+              disabled={loading || loadingMore}
+            />
+          )}
+
           {/* PROVIDER VS LOCAL FILTER & SORT BAR */}
           {resolution.items.length > 0 && (
             <LinkExplorerFilters
@@ -1310,7 +1494,6 @@ export function LinkExplorerWorkspace() {
                 {(() => {
                   const lifetimeTotal =
                     resolution.lifetimeTotal ??
-                    resolution.intelligence?.statistics.providerReportedLifetimeTotal ??
                     resolution.intelligence?.statistics.providerReportedVideos ??
                     null;
                   const hasRemainingCatalog = Boolean(lifetimeTotal && lifetimeTotal > resolution.items.length);
@@ -1507,6 +1690,46 @@ export function LinkExplorerWorkspace() {
 
                       {/* Continuation Actions Button Cluster */}
                       <div className="flex flex-wrap items-center justify-center gap-2.5 pt-2">
+                        {/* 0. PROMINENT CONTINUE FETCHING (RESUME / DATE PARTITIONING) BUTTON */}
+                        {(hasRemainingCatalog || (activePeriod?.hasMore ?? resolution.hasMore) || Boolean(nextPeriod)) && (
+                          <button
+                            type="button"
+                            disabled={loadingMore && !isContinuingDeep}
+                            onClick={() => {
+                              if (isContinuingDeep) {
+                                if (abortControllerRef.current) abortControllerRef.current.abort();
+                                setIsContinuingDeep(false);
+                              } else {
+                                void handleContinueRetrieval("all_remaining");
+                              }
+                            }}
+                            className={cn(
+                              "inline-flex min-h-11 items-center gap-2.5 rounded-xl px-5 text-xs font-black transition-all cursor-pointer shadow-md shadow-emerald-950/20 ring-2",
+                              isContinuingDeep
+                                ? "bg-amber-600 text-white hover:bg-amber-700 ring-amber-500/50"
+                                : "bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 text-white hover:opacity-95 ring-emerald-500/40"
+                            )}
+                            title="Resume catalog retrieval from the exact last checkpoint cutoff using backward date partitioning"
+                          >
+                            {isContinuingDeep ? (
+                              <>
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                                <span>Pause Fetching</span>
+                              </>
+                            ) : (
+                              <>
+                                <Play className="h-4 w-4 fill-white" />
+                                <span>Continue Fetching (Date Partitioning)</span>
+                                {remainingCount > 0 && (
+                                  <span className="rounded-full bg-black/30 px-2 py-0.5 text-[10px] font-bold text-white/95">
+                                    +{remainingCount.toLocaleString()} remaining
+                                  </span>
+                                )}
+                              </>
+                            )}
+                          </button>
+                        )}
+
                         {/* 1. LOAD NEXT PAGE (Within Current Date Window) */}
                         {(activePeriod?.hasMore ?? resolution.hasMore) && (
                           <button

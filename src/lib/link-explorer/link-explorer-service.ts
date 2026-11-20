@@ -159,7 +159,14 @@ export async function resolveLinkExplorerInput(
   scanConfig: Partial<ScanBudgetConfig> = {},
   onProgress?: (progress: ScanProgressState) => void,
   abortSignal?: AbortSignal,
-  continuationState?: ContinuationState
+  continuationState?: ContinuationState,
+  onPageCommitted?: (params: {
+    page: number;
+    items: DiscoveryItem[];
+    cumulativeItems: DiscoveryItem[];
+    period?: RetrievalPeriod;
+    checkpoint?: any;
+  }) => Promise<void> | void
 ): Promise<LinkExplorerResolution> {
   const analyzed = analyzeDailymotionUrlOrId(input);
   const effectiveKind =
@@ -590,8 +597,9 @@ export async function resolveLinkExplorerInput(
       let keepFetching = true;
       let reachedWindowCap = false;
       let pagesFetchedThisRun = 0;
+      let lastPageItems: DiscoveryItem[] = [];
       const initialWindowUniqueStart = items.length;
-      const loopBudget = targetMaxPages > 0 ? targetMaxPages : 50;
+      const loopBudget = targetMaxPages > 0 ? targetMaxPages : 200;
 
       while (keepFetching) {
         if (abortSignal?.aborted) {
@@ -635,8 +643,18 @@ export async function resolveLinkExplorerInput(
         if (config.serverSort) {
           queryParams.set("sort", config.serverSort);
         }
-        if (config.dateFrom) queryParams.set("createdAfter", config.dateFrom);
-        if (config.dateTo) queryParams.set("createdBefore", config.dateTo);
+        const effectiveDateAfter =
+          config.dateFrom ||
+          continuationState?.dateAfter ||
+          (activePeriod ? (version === "v1" ? String(activePeriod.startUnix) : activePeriod.startIso) : null);
+
+        const effectiveDateBefore =
+          config.dateTo ||
+          continuationState?.dateBefore ||
+          (activePeriod ? (version === "v1" ? String(activePeriod.endUnix) : activePeriod.endIso) : null);
+
+        if (effectiveDateAfter) queryParams.set("createdAfter", effectiveDateAfter);
+        if (effectiveDateBefore) queryParams.set("createdBefore", effectiveDateBefore);
 
         const videosRes = await fetch(
           `/api/discovery/${version}/channels?${queryParams.toString()}`,
@@ -655,6 +673,7 @@ export async function resolveLinkExplorerInput(
 
         pagesFetchedThisRun += 1;
         const pageItems = videosData.items ?? videosData.result?.items ?? [];
+        lastPageItems = pageItems;
         hasMore = Boolean(videosData.hasMore ?? videosData.result?.hasMore);
         currentNextCursor = videosData.result?.nextCursor ?? (videosData as any).nextCursor ?? null;
 
@@ -701,6 +720,27 @@ export async function resolveLinkExplorerInput(
           duplicateCount,
         });
 
+        // Progressive persistence: commit every page immediately into IndexedDB before fetching next
+        if (onPageCommitted && pageItems.length > 0) {
+          try {
+            await onPageCommitted({
+              page,
+              items: pageItems,
+              cumulativeItems: currentCanonicalItems,
+              period: activePeriod || undefined,
+              checkpoint: {
+                nextPage: page + 1,
+                nextCursor: currentNextCursor,
+                visitedPages: Array.from(visitedPages),
+                visitedCursors: Array.from(visitedCursors),
+                canResume: hasMore || Boolean(currentNextCursor) || reachedWindowCap,
+              },
+            });
+          } catch (commitErr) {
+            console.warn("[LinkExplorer] Progressive page commit error:", commitErr);
+          }
+        }
+
         // Check window cap (Dailymotion caps pagination at 1000 items per query window)
         const totalConsumed = page * config.pageSize;
         if (
@@ -729,8 +769,14 @@ export async function resolveLinkExplorerInput(
       }
 
       // Update active period status in ledger upon completing current fetch run
+      const canonicalItemsAfterLoop = deduplicator.getCanonicalItems();
+      const hasMissingLifetimeItems = Boolean(
+        providerReportedLifetimeTotal !== null &&
+        canonicalItemsAfterLoop.length < providerReportedLifetimeTotal
+      );
+
       if (activePeriod) {
-        if (reachedWindowCap) {
+        if (reachedWindowCap || (hasMissingLifetimeItems && (!hasMore || lastPageItems.length === 0))) {
           activePeriod.isCapped = true;
           activePeriod.status = "capped";
 
@@ -751,7 +797,59 @@ export async function resolveLinkExplorerInput(
               ledger.activePeriodId = childPeriods[0].periodId;
             }
           }
-        } else if (!hasMore || (pageItems && pageItems.length === 0)) {
+
+          // Automatic backward date-slicing window generation:
+          // Extract oldest video creation timestamp to bypass 1,000-item / single-window ceiling
+          let oldestItemForBackward: DiscoveryItem | null = null;
+          let oldestTimeMsForBackward = Infinity;
+          for (const it of canonicalItemsAfterLoop) {
+            if (it.createdAt) {
+              const t = new Date(it.createdAt).getTime();
+              if (!Number.isNaN(t) && t < oldestTimeMsForBackward) {
+                oldestTimeMsForBackward = t;
+                oldestItemForBackward = it;
+              }
+            }
+          }
+
+          if (oldestItemForBackward && oldestTimeMsForBackward < Infinity) {
+            const backwardEndIso = new Date(oldestTimeMsForBackward - 1).toISOString();
+            const backwardEndUnix = Math.floor(oldestTimeMsForBackward / 1000) - 1;
+            const inceptionIso = "2005-01-01T00:00:00.000Z";
+            const inceptionUnix = Math.floor(new Date(inceptionIso).getTime() / 1000);
+
+            const backwardId = `period:backward:${oldestItemForBackward.createdAt?.substring(0, 10)}_${Date.now()}:${version}:${analyzed.identifier}`;
+            const existingBackward = ledger.periods.find((p) => p.endUnix === backwardEndUnix || p.endIso === backwardEndIso);
+
+            if (!existingBackward) {
+              const backwardPeriod: RetrievalPeriod = {
+                periodId: backwardId,
+                parentPeriodId: activePeriod.periodId,
+                granularity: "entire_range",
+                label: `Prior to ${oldestItemForBackward.createdAt?.substring(0, 10)} (${version === "v1" ? `Unix ${backwardEndUnix}` : backwardEndIso.substring(0, 10)})`,
+                startIso: inceptionIso,
+                endIso: backwardEndIso,
+                startUnix: inceptionUnix,
+                endUnix: backwardEndUnix,
+                apiVersion: version,
+                resourceIdentity: analyzed.identifier,
+                status: "pending",
+                pagesFetched: 0,
+                rawItemsReceived: 0,
+                uniqueItemsRetained: 0,
+                duplicatesDetected: 0,
+                isCapped: false,
+                nextPage: 1,
+                nextCursor: null,
+                hasMore: true,
+              };
+              ledger.periods.push(backwardPeriod);
+              if (!ledger.activePeriodId || ledger.activePeriodId === activePeriod.periodId) {
+                ledger.activePeriodId = backwardPeriod.periodId;
+              }
+            }
+          }
+        } else if (!hasMore || lastPageItems.length === 0) {
           activePeriod.status = "completed";
           activePeriod.hasMore = false;
           activePeriod.completedAt = new Date().toISOString();
@@ -852,28 +950,21 @@ export async function resolveLinkExplorerInput(
             const yrItems = yrData.items ?? yrData.result?.items ?? [];
             yearHasMore = Boolean(yrData.hasMore ?? yrData.result?.hasMore);
 
-            let yrDupes = 0;
             for (const item of yrItems) {
-              const cKey = discoveryCompositeKey(item.apiVersion, item.kind, item.id);
-              if (seenCompositeKeys.has(cKey)) {
-                yrDupes += 1;
-              } else {
-                seenCompositeKeys.add(cKey);
-                item.provenance = {
-                  provider: "dailymotion",
-                  apiVersion: version,
-                  resourceType: item.kind,
-                  resourceId: item.id,
-                  fetchedAt: new Date().toISOString(),
-                  scanId,
-                  dateWindowId: `window-year-${yr}`,
-                  page: yearPage,
-                  ownerId: analyzed.identifier,
-                  schemaVersion: 1,
-                };
-                items.push(item);
-              }
+              item.provenance = {
+                provider: "dailymotion",
+                apiVersion: version,
+                resourceType: item.kind,
+                resourceId: item.id,
+                fetchedAt: new Date().toISOString(),
+                scanId,
+                dateWindowId: `window-year-${yr}`,
+                page: yearPage,
+                ownerId: analyzed.identifier,
+                schemaVersion: 1,
+              };
             }
+            const { duplicateCount: yrDupes } = deduplicator.ingestBatch(yrItems, `window-year-${yr}`, yearPage);
             duplicateCount += yrDupes;
 
             page += 1;
@@ -955,28 +1046,21 @@ export async function resolveLinkExplorerInput(
                 const mItems = mData.items ?? mData.result?.items ?? [];
                 mHasMore = Boolean(mData.hasMore ?? mData.result?.hasMore);
 
-                let mDupes = 0;
                 for (const item of mItems) {
-                  const cKey = discoveryCompositeKey(item.apiVersion, item.kind, item.id);
-                  if (seenCompositeKeys.has(cKey)) {
-                    mDupes += 1;
-                  } else {
-                    seenCompositeKeys.add(cKey);
-                    item.provenance = {
-                      provider: "dailymotion",
-                      apiVersion: version,
-                      resourceType: item.kind,
-                      resourceId: item.id,
-                      fetchedAt: new Date().toISOString(),
-                      scanId,
-                      dateWindowId: `window-month-${yr}-${mStr}`,
-                      page: mPage,
-                      ownerId: analyzed.identifier,
-                      schemaVersion: 1,
-                    };
-                    items.push(item);
-                  }
+                  item.provenance = {
+                    provider: "dailymotion",
+                    apiVersion: version,
+                    resourceType: item.kind,
+                    resourceId: item.id,
+                    fetchedAt: new Date().toISOString(),
+                    scanId,
+                    dateWindowId: `window-month-${yr}-${mStr}`,
+                    page: mPage,
+                    ownerId: analyzed.identifier,
+                    schemaVersion: 1,
+                  };
                 }
+                const { duplicateCount: mDupes } = deduplicator.ingestBatch(mItems, `window-month-${yr}-${mStr}`, mPage);
                 duplicateCount += mDupes;
 
                 page += 1;
@@ -1112,8 +1196,9 @@ export async function resolveLinkExplorerInput(
       let keepFetching = true;
       let consecutiveEmptyPages = 0;
       let pagesFetchedThisRun = 0;
+      let lastPageItems: DiscoveryItem[] = [];
       const initialWindowUniqueStart = items.length;
-      const loopBudget = targetMaxPages > 0 ? targetMaxPages : 50;
+      const loopBudget = targetMaxPages > 0 ? targetMaxPages : 200;
 
       while (keepFetching) {
         if (abortSignal?.aborted) {
@@ -1168,6 +1253,7 @@ export async function resolveLinkExplorerInput(
 
         pagesFetchedThisRun += 1;
         const pageItems = videosData.items ?? videosData.result?.items ?? [];
+        lastPageItems = pageItems;
         hasMore = Boolean(videosData.hasMore ?? videosData.result?.hasMore);
         currentNextCursor = videosData.result?.nextCursor ?? (videosData as any).nextCursor ?? null;
 
@@ -1199,6 +1285,25 @@ export async function resolveLinkExplorerInput(
           uniqueItemsAdded: playlistCanonical.length,
           duplicateCount,
         });
+
+        if (onPageCommitted && pageItems.length > 0) {
+          try {
+            await onPageCommitted({
+              page,
+              items: pageItems,
+              cumulativeItems: playlistCanonical,
+              checkpoint: {
+                nextPage: page + 1,
+                nextCursor: currentNextCursor,
+                visitedPages: Array.from(visitedPages),
+                visitedCursors: Array.from(visitedCursors),
+                canResume: hasMore || Boolean(currentNextCursor),
+              },
+            });
+          } catch (commitErr) {
+            console.warn("[LinkExplorer] Progressive playlist commit error:", commitErr);
+          }
+        }
 
         if (pageItems.length === 0) {
           consecutiveEmptyPages += 1;
@@ -1348,7 +1453,20 @@ export async function resolveLinkExplorerInput(
       nextCursor: currentNextCursor,
       visitedPages: Array.from(visitedPages),
       visitedCursors: Array.from(visitedCursors),
-      canResume: hasMore || Boolean(currentNextCursor) || Boolean(getNextPendingPeriod(ledger)),
+      canResume:
+        hasMore ||
+        Boolean(currentNextCursor) ||
+        Boolean(getNextPendingPeriod(ledger)) ||
+        Boolean(providerReportedLifetimeTotal && finalCanonicalItems.length < providerReportedLifetimeTotal),
+      lastSuccessfullyFetchedItem:
+        finalCanonicalItems.length > 0
+          ? {
+              id: finalCanonicalItems[finalCanonicalItems.length - 1].id,
+              createdAt: finalCanonicalItems[finalCanonicalItems.length - 1].createdAt || undefined,
+            }
+          : undefined,
+      oldestItemDate: intelligence.chronology.oldestVideo?.date || null,
+      newestItemDate: intelligence.chronology.newestVideo?.date || null,
     };
 
     // Persist to search history snapshot asynchronously with 7-day durability (only for initial scans)

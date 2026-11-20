@@ -19,7 +19,7 @@ import {
  */
 
 export const LOCAL_IDB_NAME = "dailymotion_discovery_local_v1";
-export const LOCAL_IDB_VERSION = 4;
+export const LOCAL_IDB_VERSION = 5;
 
 export const LOCAL_STORES = {
   SAVED_ITEMS: "entities_saved_items",
@@ -36,6 +36,7 @@ export const LOCAL_STORES = {
   SAVED_TITLES: "entities_saved_titles",
   COMPLETED_EXPLORATIONS: "completed_explorations_manifests",
   SCAN_CHECKPOINTS: "link_explorer_scan_checkpoints",
+  CATALOG_ITEMS: "link_explorer_catalog_items",
 } as const;
 
 export type LocalStoreName = (typeof LOCAL_STORES)[keyof typeof LOCAL_STORES];
@@ -239,6 +240,7 @@ const KEY_PATHS: Record<LocalStoreName, string> = {
   [LOCAL_STORES.SAVED_TITLES]: "id",
   [LOCAL_STORES.COMPLETED_EXPLORATIONS]: "id",
   [LOCAL_STORES.SCAN_CHECKPOINTS]: "id",
+  [LOCAL_STORES.CATALOG_ITEMS]: "id",
 };
 
 /**
@@ -326,6 +328,12 @@ function openNativeIndexedDB(): Promise<IDBDatabase> {
               os.createIndex("by_resourceId", "resourceId", { unique: false });
               os.createIndex("by_apiVersion", "apiVersion", { unique: false });
               os.createIndex("by_status", "status", { unique: false });
+              os.createIndex("by_updatedAt", "updatedAt", { unique: false });
+            } else if (storeName === LOCAL_STORES.CATALOG_ITEMS) {
+              os.createIndex("by_checkpointKey", "checkpointKey", { unique: false });
+              os.createIndex("by_targetResourceId", "targetResourceId", { unique: false });
+              os.createIndex("by_apiVersion", "apiVersion", { unique: false });
+              os.createIndex("by_createdAt", "createdAt", { unique: false });
               os.createIndex("by_updatedAt", "updatedAt", { unique: false });
             }
           }
