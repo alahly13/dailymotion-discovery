@@ -133,6 +133,7 @@ export function normalizeV2Video(raw: V2RawVideo): DiscoveryItem | null {
 export function normalizeV2Profile(raw: V2RawProfile, kind: DiscoveryItemKind = "channel"): DiscoveryItem | null {
   if (!raw.profile_id) return null;
   const createdAt = validIso(raw.created_at);
+  const total = typeof (raw as any).videos_total === "number" ? (raw as any).videos_total : null;
   return {
     ...base(kind, raw.profile_id, raw),
     title: raw.display_name ?? raw.name ?? raw.profile_id,
@@ -143,13 +144,19 @@ export function normalizeV2Profile(raw: V2RawProfile, kind: DiscoveryItemKind = 
     year: yearOf(createdAt),
     ownerId: raw.profile_id,
     ownerName: raw.display_name ?? raw.name ?? null,
-    extra: { profileName: raw.name ?? null },
+    extra: {
+      profileName: raw.name ?? null,
+      profileId: raw.profile_id,
+      videosTotal: total,
+      videos_total: total,
+    },
   };
 }
 
 export function normalizeV2Playlist(raw: V2RawPlaylist): DiscoveryItem | null {
   if (!raw.playlist_id) return null;
   const createdAt = validIso(raw.created_at);
+  const total = typeof raw.videos_total === "number" ? raw.videos_total : null;
   return {
     ...base("playlist", raw.playlist_id, raw),
     title: raw.title ?? raw.name ?? raw.playlist_id,
@@ -157,7 +164,7 @@ export function normalizeV2Playlist(raw: V2RawPlaylist): DiscoveryItem | null {
     url: `https://www.dailymotion.com/playlist/${raw.playlist_id}`,
     createdAt,
     year: yearOf(createdAt),
-    extra: { videosTotal: typeof raw.videos_total === "number" ? raw.videos_total : null },
+    extra: { videosTotal: total, videos_total: total },
   };
 }
 

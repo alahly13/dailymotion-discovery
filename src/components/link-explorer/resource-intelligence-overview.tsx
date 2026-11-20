@@ -1,8 +1,9 @@
 // Resource Intelligence Overview — Dailymotion Channel, Playlist & Resource Intelligence Dashboard (2026)
 //
 // What this controls: Comprehensive analytical dashboard rendered immediately below the Link Explorer
-// input. Displays profile metadata, verified vs local statistical counters, chronological landmarks
-// (oldest video, newest video, registration date), and interactive year/month distribution graphs.
+// input. Displays profile metadata, verified target identity, provider vs local statistical counters,
+// accurate coverage percentage (no false 100%), retrieval diagnostics breakdown with date windows,
+// chronological landmarks (oldest video, newest video), and interactive year/month distribution graphs.
 // Why it exists: Transforms Link Explorer from a basic single-page fetcher into a deep intelligence workspace.
 // Scope: Link Explorer (/link-explorer).
 
@@ -11,23 +12,18 @@
 import { useState } from "react";
 import Link from "next/link";
 import {
-  Activity,
   AlertCircle,
   Calendar,
   CheckCircle2,
-  Clock,
+  ChevronDown,
+  ChevronUp,
   Compass,
   Copy,
   ExternalLink,
-  Eye,
-  FileCheck2,
   Film,
   Globe2,
   History,
   Layers,
-  Library,
-  Radio,
-  Share2,
   Sparkles,
   TrendingUp,
   Tv,
@@ -49,9 +45,11 @@ export function ResourceIntelligenceOverview({
   onSelectYearFilter,
 }: ResourceIntelligenceOverviewProps) {
   const [descriptionExpanded, setDescriptionExpanded] = useState(false);
+  const [diagnosticsExpanded, setDiagnosticsExpanded] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
 
-  const { profile, statistics, chronology, distribution } = data;
+  const { profile, statistics, chronology, distribution, diagnostics } = data;
+  const targetId = profile.targetIdentity;
 
   const handleCopyLink = () => {
     if (profile.canonicalUrl) {
@@ -63,6 +61,49 @@ export function ResourceIntelligenceOverview({
 
   const isLongDescription = (profile.description || "").length > 180;
 
+  // Format status badge label
+  const statusLabels: Record<string, { label: string; color: string }> = {
+    standard_scan_completed: {
+      label: "Standard Scan Completed (Partial)",
+      color: "bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30",
+    },
+    capped_window: {
+      label: "Capped 1,000-Item Window",
+      color: "bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30",
+    },
+    date_partitioning_required: {
+      label: "Date Partitioning Required",
+      color: "bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30",
+    },
+    complete_within_verified_scope: {
+      label: "100% Verified Scope",
+      color: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30",
+    },
+    completed_with_known_limitations: {
+      label: "Completed With Known Limitations",
+      color: "bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30",
+    },
+    completed: {
+      label: "Scan Completed",
+      color: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30",
+    },
+    partial: {
+      label: "Partial Catalog",
+      color: "bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30",
+    },
+    coverage_unknown: {
+      label: "Coverage Unknown",
+      color: "bg-neutral-500/15 text-neutral-400 border border-neutral-500/30",
+    },
+  };
+
+  const currentStatusBadge =
+    statusLabels[statistics.coverageStatus] ||
+    statusLabels[profile.catalogStatus] || {
+      label: profile.catalogStatus.replace(/_/g, " "),
+      color: "bg-surface text-muted-foreground border border-border",
+    };
+
   return (
     <div className="space-y-6">
       {/* 1. Main Profile & Resource Header Banner */}
@@ -73,7 +114,7 @@ export function ResourceIntelligenceOverview({
         <div className="flex flex-col md:flex-row items-start justify-between gap-6 relative z-10">
           {/* Avatar & Profile Identity */}
           <div className="flex items-start gap-4">
-            <div className="relative h-16 w-16 md:h-20 md:md:w-20 shrink-0 overflow-hidden rounded-2xl border-2 border-border bg-surface shadow-md">
+            <div className="relative h-16 w-16 md:h-20 md:w-20 shrink-0 overflow-hidden rounded-2xl border-2 border-border bg-surface shadow-md">
               {profile.avatarUrl ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
@@ -111,14 +152,33 @@ export function ResourceIntelligenceOverview({
                 >
                   API {profile.apiVersion.toUpperCase()}
                 </span>
-                <span className="rounded-md bg-surface px-2 py-0.5 text-[11px] font-semibold text-muted-foreground border border-border">
-                  {profile.catalogStatus.replace(/_/g, " ")}
+                <span
+                  className={cn(
+                    "rounded-md px-2 py-0.5 text-[11px] font-bold uppercase tracking-wider",
+                    currentStatusBadge.color
+                  )}
+                >
+                  {currentStatusBadge.label}
                 </span>
               </div>
 
+              {/* Verified Resource Identifiers Row */}
               <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground font-mono">
-                <span>ID: {profile.id}</span>
-                {profile.handle && <span>Handle: {profile.handle}</span>}
+                {targetId?.legacyUserId ? (
+                  <span className="font-semibold text-foreground/90">
+                    Legacy User ID: {targetId.legacyUserId}
+                  </span>
+                ) : (
+                  <span>ID: {profile.id}</span>
+                )}
+                {targetId?.legacyUsername && (
+                  <span>Username: @{targetId.legacyUsername}</span>
+                )}
+                {targetId?.v2ProfileId && (
+                  <span className="text-indigo-400 font-semibold">
+                    V2 Profile ID: {targetId.v2ProfileId}
+                  </span>
+                )}
                 {profile.country && (
                   <span className="flex items-center gap-1 font-sans">
                     <Globe2 className="h-3.5 w-3.5" />
@@ -182,7 +242,7 @@ export function ResourceIntelligenceOverview({
               </>
             )}
             <Link
-              href={`/channel-explorer?channel=${encodeURIComponent(profile.id)}`}
+              href={`/channel-explorer?channel=${encodeURIComponent(targetId?.legacyUsername || profile.id)}`}
               className="inline-flex min-h-9 items-center gap-1.5 rounded-lg bg-primary px-3 text-xs font-bold text-primary-foreground hover:opacity-90 transition-opacity shadow-xs"
             >
               <Compass className="h-3.5 w-3.5" />
@@ -205,13 +265,21 @@ export function ResourceIntelligenceOverview({
           <p className="text-2xl font-black text-foreground">
             {statistics.providerReportedVideos !== null
               ? statistics.providerReportedVideos.toLocaleString()
+              : statistics.isGlobalTotalUnknown
+              ? "Unknown"
               : "Unreported"}
           </p>
-          <p className="text-[11px] text-muted-foreground">
+          <p className="text-[11px] text-muted-foreground leading-tight">
             {statistics.providerReportedVideos !== null
-              ? "Official catalog size reported by API"
-              : "Provider does not expose fixed count"}
+              ? "Official lifetime catalog size reported by API"
+              : "Global total unknown — date-window retrieval"}
           </p>
+          {statistics.providerReportedQueryTotal !== null &&
+            statistics.providerReportedQueryTotal !== statistics.providerReportedVideos && (
+              <p className="text-[10px] text-muted-foreground font-mono">
+                Query window: {statistics.providerReportedQueryTotal.toLocaleString()} items
+              </p>
+            )}
           {statistics.omittedOrUnavailableReferences !== undefined &&
             statistics.omittedOrUnavailableReferences > 0 && (
               <p className="text-[11px] text-amber-600 dark:text-amber-400 font-semibold">
@@ -232,8 +300,13 @@ export function ResourceIntelligenceOverview({
             {statistics.totalRetrieved.toLocaleString()}
           </p>
           <p className="text-[11px] text-muted-foreground">
-            Indexed into local memory & snapshot
+            Indexed into local memory & manifest
           </p>
+          {statistics.pagesRetrieved !== undefined && (
+            <p className="text-[10px] text-muted-foreground font-mono">
+              Across {statistics.pagesRetrieved} page{statistics.pagesRetrieved > 1 ? "s" : ""}
+            </p>
+          )}
         </div>
 
         {/* Metric 3: Catalog Coverage */}
@@ -244,17 +317,35 @@ export function ResourceIntelligenceOverview({
             </span>
             <TrendingUp className="h-4 w-4 text-emerald-500" />
           </div>
-          <p className="text-2xl font-black text-emerald-500">
+          <p
+            className={cn(
+              "text-2xl font-black",
+              statistics.coveragePercent === 100
+                ? "text-emerald-500"
+                : statistics.coveragePercent !== null
+                ? "text-amber-500"
+                : "text-muted-foreground"
+            )}
+          >
             {statistics.coveragePercent !== null
               ? `${statistics.coveragePercent}%`
-              : "100%"}
+              : "Unknown"}
           </p>
           <div className="h-1.5 w-full rounded-full bg-surface overflow-hidden">
             <div
-              className="h-full bg-emerald-500 transition-all duration-500"
-              style={{ width: `${statistics.coveragePercent || 100}%` }}
+              className={cn(
+                "h-full transition-all duration-500",
+                statistics.coveragePercent === 100 ? "bg-emerald-500" : "bg-amber-500"
+              )}
+              style={{ width: `${statistics.coveragePercent || 0}%` }}
             />
           </div>
+          <p className="text-[10px] text-muted-foreground truncate" title={statistics.coverageEvidence}>
+            {statistics.coverageEvidence ||
+              (statistics.coveragePercent === 100
+                ? "Verified complete scope"
+                : "Partial catalog fetched")}
+          </p>
         </div>
 
         {/* Metric 4: Resource Breakdown */}
@@ -299,6 +390,99 @@ export function ResourceIntelligenceOverview({
           </p>
         </div>
       </div>
+
+      {/* 2.5 Retrieval Diagnostics & Date Windows Expandable Panel (Section 7 Requirement) */}
+      {diagnostics && diagnostics.windows && diagnostics.windows.length > 0 && (
+        <div className="rounded-xl border border-border bg-card shadow-2xs overflow-hidden">
+          <button
+            type="button"
+            onClick={() => setDiagnosticsExpanded((prev) => !prev)}
+            className="w-full flex items-center justify-between p-4 bg-surface/50 hover:bg-surface transition-colors cursor-pointer text-left"
+          >
+            <div className="flex items-center gap-2">
+              <Sparkles className="h-4 w-4 text-primary" />
+              <h4 className="text-xs font-black uppercase tracking-wider text-foreground">
+                Retrieval Diagnostics & Date Windows ({diagnostics.windows.length} partition{diagnostics.windows.length > 1 ? "s" : ""})
+              </h4>
+              <span className="rounded-md bg-surface px-2 py-0.5 text-[10px] font-mono text-muted-foreground border border-border">
+                {diagnostics.scanStrategy.toUpperCase()} SCAN
+              </span>
+            </div>
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <span>{diagnosticsExpanded ? "Collapse" : "Expand Details"}</span>
+              {diagnosticsExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+            </div>
+          </button>
+
+          {diagnosticsExpanded && (
+            <div className="p-4 border-t border-border/60 space-y-4 text-xs font-mono">
+              {/* Evidence banner */}
+              <div className="rounded-lg border border-border bg-surface p-3 space-y-1 font-sans">
+                <span className="text-[10px] font-black uppercase tracking-wider text-muted-foreground">
+                  Coverage Evidence & Verification
+                </span>
+                <p className="text-xs text-foreground font-medium">
+                  {statistics.coverageEvidence}
+                </p>
+                {statistics.coverageStatus === "standard_scan_completed" && statistics.providerReportedVideos && (
+                  <p className="text-[11px] text-amber-600 dark:text-amber-400 font-medium pt-1">
+                    Tip: Standard Scan stopped at its configured page budget. Switch strategy to &quot;Deep Catalog Scan&quot; to automatically partition date ranges and retrieve the entire historical archive.
+                  </p>
+                )}
+              </div>
+
+              {/* Window Partitions Table */}
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="border-b border-border/80 text-[10px] uppercase tracking-wider text-muted-foreground font-sans">
+                      <th className="py-2 pr-3">Partition Window</th>
+                      <th className="py-2 px-3">Date Range</th>
+                      <th className="py-2 px-3 text-right">Pages</th>
+                      <th className="py-2 px-3 text-right">Unique Items</th>
+                      <th className="py-2 px-3">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border/40 text-[11px]">
+                    {diagnostics.windows.map((w, idx) => (
+                      <tr key={w.windowId || idx} className="hover:bg-surface/60 transition-colors">
+                        <td className="py-2 pr-3 font-semibold text-foreground">
+                          {w.label}
+                        </td>
+                        <td className="py-2 px-3 text-muted-foreground">
+                          {w.dateFrom && w.dateTo
+                            ? `${w.dateFrom} → ${w.dateTo}`
+                            : "Full Query Window"}
+                        </td>
+                        <td className="py-2 px-3 text-right font-bold text-foreground">
+                          {w.pageCount}
+                        </td>
+                        <td className="py-2 px-3 text-right font-bold text-primary">
+                          {w.uniqueCount}
+                        </td>
+                        <td className="py-2 px-3">
+                          <span
+                            className={cn(
+                              "rounded px-2 py-0.5 text-[10px] font-bold uppercase",
+                              w.status === "completed"
+                                ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                                : w.status === "capped"
+                                ? "bg-amber-500/10 text-amber-600 dark:text-amber-400"
+                                : "bg-neutral-500/10 text-neutral-400"
+                            )}
+                          >
+                            {w.status}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* 3. Chronological Landmarks (Oldest vs Newest) */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -501,7 +685,7 @@ export function ResourceIntelligenceOverview({
                     />
                   </div>
                   <span className="mt-1 text-[10px] text-muted-foreground">
-                    {yr.percentage}% of catalog
+                    {yr.percentage}% of retrieved
                   </span>
                 </button>
               );

@@ -2,26 +2,20 @@
 //
 // What this controls: Sorting and filtering for Link Explorer with clear, unmistakable visual badges
 // for API capabilities (API V1, API V2, LOCAL ONLY · ZERO API CALLS, UNAVAILABLE).
-// Why it exists: Enforces strict transparency regarding what is requested upstream from Dailymotion
-// vs what is sorted/filtered purely in-memory on already retrieved items.
+// Features a dedicated prominent local title search field filtering all retrieved records without network calls.
 // Scope: Link Explorer (/link-explorer).
 
 "use client";
 
 import { useState } from "react";
 import {
-  ArrowDownAZ,
-  ArrowDownWideNarrow,
-  ArrowUpAZ,
   Clock,
   Eye,
   Filter,
   Layers,
   ListFilter,
-  RefreshCw,
   Search,
   Sparkles,
-  ThumbsUp,
   X,
   XCircle,
 } from "lucide-react";
@@ -41,6 +35,7 @@ export type LocalSortOption =
   | "engagement_desc";
 
 export interface LocalFilterCriteria {
+  titleSearch: string;
   searchQuery: string;
   durationRange: "all" | "short" | "medium" | "long";
   viewsRange: "all" | "under_1k" | "1k_10k" | "10k_100k" | "over_100k";
@@ -58,6 +53,7 @@ export interface LinkExplorerFiltersProps {
   totalLoadedItems: number;
   totalVisibleItems: number;
   availableYears: number[];
+  isPartiallyFetched?: boolean;
 }
 
 export function LinkExplorerFilters({
@@ -71,10 +67,12 @@ export function LinkExplorerFilters({
   totalLoadedItems,
   totalVisibleItems,
   availableYears,
+  isPartiallyFetched = false,
 }: LinkExplorerFiltersProps) {
   const [isOpen, setIsOpen] = useState(false);
 
   const activeFiltersCount =
+    (filters.titleSearch ? 1 : 0) +
     (filters.searchQuery ? 1 : 0) +
     (filters.durationRange !== "all" ? 1 : 0) +
     (filters.viewsRange !== "all" ? 1 : 0) +
@@ -83,6 +81,7 @@ export function LinkExplorerFilters({
 
   const handleResetFilters = () => {
     onChangeFilters({
+      titleSearch: "",
       searchQuery: "",
       durationRange: "all",
       viewsRange: "all",
@@ -152,7 +151,8 @@ export function LinkExplorerFilters({
 
       {/* 2. Full-Width Collapsible Local Filters Panel */}
       {isOpen && (
-        <div className="rounded-xl border border-border bg-card p-5 space-y-4 shadow-sm">
+        <div className="rounded-xl border border-border bg-card p-5 space-y-5 shadow-sm">
+          {/* Header Row */}
           <div className="flex items-center justify-between border-b border-border/60 pb-3">
             <div className="flex items-center gap-2">
               <ListFilter className="h-4 w-4 text-primary" />
@@ -172,12 +172,60 @@ export function LinkExplorerFilters({
             )}
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            {/* Filter 1: Search inside loaded results */}
+          {/* DEDICATED PROMINENT LOCAL TITLE SEARCH FIELD (Section 9 Requirement) */}
+          <div className="rounded-xl border border-primary/30 bg-surface/80 p-4 space-y-2.5 shadow-2xs">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <label className="text-xs font-black uppercase tracking-wider text-foreground flex items-center gap-1.5">
+                <Search className="h-3.5 w-3.5 text-primary" />
+                Search titles in retrieved results
+              </label>
+              <div className="flex items-center gap-2">
+                <span className="rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-black uppercase tracking-wider text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                  LOCAL ONLY · ZERO API CALLS
+                </span>
+                <span className="text-xs text-muted-foreground font-mono font-semibold">
+                  Showing <strong className="text-primary">{totalVisibleItems}</strong> of <strong className="text-foreground">{totalLoadedItems}</strong> retrieved records
+                </span>
+              </div>
+            </div>
+
+            <div className="relative">
+              <input
+                type="text"
+                value={filters.titleSearch}
+                onChange={(e) =>
+                  onChangeFilters({ ...filters, titleSearch: e.target.value })
+                }
+                placeholder="Type a video title to filter the loaded catalog..."
+                className="w-full h-10 rounded-lg border border-border bg-card px-3.5 pr-10 text-xs text-foreground placeholder:text-muted-foreground outline-none focus:ring-2 focus:ring-primary shadow-2xs font-medium"
+              />
+              {filters.titleSearch && (
+                <button
+                  type="button"
+                  onClick={() => onChangeFilters({ ...filters, titleSearch: "" })}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded-full p-1 text-muted-foreground hover:text-foreground hover:bg-surface transition-colors cursor-pointer"
+                  title="Clear title search"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              )}
+            </div>
+
+            {isPartiallyFetched && (
+              <p className="text-[11px] text-amber-600 dark:text-amber-400 flex items-center gap-1.5 font-medium pt-0.5">
+                <Sparkles className="h-3.5 w-3.5 shrink-0" />
+                Filtering across the {totalLoadedItems} locally retrieved records. Videos not yet retrieved from Dailymotion are not included in this search.
+              </p>
+            )}
+          </div>
+
+          {/* Secondary In-Memory Filters Grid */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 pt-1">
+            {/* Filter 1: General metadata search (tags, desc, owner) */}
             <div className="space-y-1.5">
               <label className="text-xs font-bold text-foreground flex items-center gap-1.5">
-                <Search className="h-3.5 w-3.5 text-primary" />
-                Search in Catalog
+                <Search className="h-3.5 w-3.5 text-muted-foreground" />
+                Deep Metadata Filter
               </label>
               <div className="relative">
                 <input
@@ -186,7 +234,7 @@ export function LinkExplorerFilters({
                   onChange={(e) =>
                     onChangeFilters({ ...filters, searchQuery: e.target.value })
                   }
-                  placeholder="Filter by title, desc, tag..."
+                  placeholder="Filter by description, tag, owner..."
                   className="w-full h-9 rounded-lg border border-border bg-surface px-3 pr-8 text-xs text-foreground placeholder:text-muted-foreground outline-none focus:ring-2 focus:ring-primary"
                 />
                 {filters.searchQuery && (
@@ -200,7 +248,7 @@ export function LinkExplorerFilters({
                 )}
               </div>
               <p className="text-[10px] text-muted-foreground">
-                Instant match on title, bio, tags, owner.
+                Matches description, tags, and owner name.
               </p>
             </div>
 

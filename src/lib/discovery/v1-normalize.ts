@@ -44,6 +44,7 @@ export interface V1RawUser {
   language?: string | null;
   videos_total?: number | string | null;
   avatar_360_url?: string | null;
+  created_time?: number | string | null;
 }
 
 export interface V1RawPlaylist {
@@ -134,17 +135,27 @@ export function normalizeV1Video(raw: V1RawVideo): DiscoveryItem | null {
 
 export function normalizeV1User(raw: V1RawUser): DiscoveryItem | null {
   if (!raw.id) return null;
+  const createdAt = unixToIso(raw.created_time);
+  const total = zeroSafeNumber(raw.videos_total);
   return {
     ...base("user", raw.id, raw),
     title: raw.screenname ?? raw.username ?? raw.id,
     description: raw.description ?? null,
     thumbnail: raw.avatar_360_url ?? null,
     url: raw.url ?? `https://www.dailymotion.com/user/${raw.username ?? raw.id}`,
+    createdAt,
+    year: yearOf(createdAt),
     language: raw.language ?? null,
     country: raw.country ?? null,
     ownerId: raw.id,
     ownerName: raw.screenname ?? raw.username ?? null,
-    extra: { username: raw.username ?? null, videosTotal: zeroSafeNumber(raw.videos_total) },
+    extra: {
+      username: raw.username ?? null,
+      userId: raw.id,
+      screenname: raw.screenname ?? null,
+      videosTotal: total,
+      videos_total: total,
+    },
   };
 }
 
@@ -158,6 +169,7 @@ export function normalizeV1Channel(raw: V1RawUser): DiscoveryItem | null {
 export function normalizeV1Playlist(raw: V1RawPlaylist): DiscoveryItem | null {
   if (!raw.id) return null;
   const createdAt = unixToIso(raw.created_time);
+  const total = zeroSafeNumber(raw.videos_total);
   return {
     ...base("playlist", raw.id, raw),
     title: raw.name ?? raw.id,
@@ -167,7 +179,7 @@ export function normalizeV1Playlist(raw: V1RawPlaylist): DiscoveryItem | null {
     year: yearOf(createdAt),
     ownerId: raw.owner ?? null,
     ownerName: raw["owner.screenname"] ?? raw.owner ?? null,
-    extra: { videosTotal: zeroSafeNumber(raw.videos_total) },
+    extra: { videosTotal: total, videos_total: total },
   };
 }
 

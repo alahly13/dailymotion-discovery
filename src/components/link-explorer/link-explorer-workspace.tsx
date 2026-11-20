@@ -55,6 +55,7 @@ import {
   type LinkExplorerResolution,
   type ScanBudgetConfig,
   type ScanProgressState,
+  type TargetIdentity,
 } from "@/lib/link-explorer/link-explorer-types";
 import { ResourceIntelligenceOverview } from "./resource-intelligence-overview";
 import { AdvancedFetchSettingsPanel } from "./advanced-fetch-settings-panel";
@@ -126,6 +127,7 @@ export function LinkExplorerWorkspace() {
   const [activeYearFilter, setActiveYearFilter] = useState<number | null>(null);
   const [localSort, setLocalSort] = useState<LocalSortOption>("api_order");
   const [localFilters, setLocalFilters] = useState<LocalFilterCriteria>({
+    titleSearch: "",
     searchQuery: "",
     durationRange: "all",
     viewsRange: "all",
@@ -159,9 +161,20 @@ export function LinkExplorerWorkspace() {
             "completed"
           );
 
+          const targetIdentity: TargetIdentity = {
+            rawInput: replay.snapshot.query,
+            canonicalUrl: analyzed.canonicalUrl || `https://www.dailymotion.com/${analyzed.identifier}`,
+            legacyUserId: replay.snapshot.apiVersion === "v1" && (restoredKind === "channel" || restoredKind === "user") ? analyzed.identifier : null,
+            legacyUsername: replay.snapshot.apiVersion === "v1" && (restoredKind === "channel" || restoredKind === "user") ? analyzed.identifier : null,
+            v2ProfileId: replay.snapshot.apiVersion === "v2" && (restoredKind === "channel" || restoredKind === "user") ? analyzed.identifier : null,
+            resolvedKind: restoredKind,
+            selectedApiVersion: replay.snapshot.apiVersion,
+          };
+
           setResolution({
             ok: true,
             analyzed,
+            targetIdentity,
             effectiveKind: restoredKind,
             version: replay.snapshot.apiVersion,
             item: replay.items[0] ?? null,
@@ -299,6 +312,23 @@ export function LinkExplorerWorkspace() {
         setResolution(res);
         setCurrentPage(res.page ?? nextPage);
 
+        if (res.scanProgress) {
+          setScanProgress(res.scanProgress);
+        } else {
+          setScanProgress((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  pagesFetched: res.page ?? nextPage,
+                  itemsDiscovered: res.items.length + (res.duplicatesSkipped ?? 0),
+                  uniqueItemsAdded: res.items.length,
+                  duplicateCount: res.duplicatesSkipped ?? prev.duplicateCount,
+                  status: res.hasMore ? "fetching_pages" : "completed",
+                }
+              : null
+          );
+        }
+
         if (latestSnapshotIdRef.current && addedCount > 0) {
           const newlyAdded = res.items.slice(resolution.items.length);
           void appendSearchSnapshotPage(
@@ -420,7 +450,13 @@ export function LinkExplorerWorkspace() {
     if (!resolution?.items) return [];
     let list = [...resolution.items];
 
-    // 1. Year Filter from Intelligence Overview
+    // 1. Dedicated Title Search (case-insensitive, trimmed whitespace)
+    if (localFilters.titleSearch.trim()) {
+      const tq = localFilters.titleSearch.trim().toLowerCase();
+      list = list.filter((it) => (it.title || "").toLowerCase().includes(tq));
+    }
+
+    // 2. Year Filter from Intelligence Overview
     if (activeYearFilter !== null) {
       list = list.filter((it) => {
         if (!it.createdAt) return false;
@@ -429,7 +465,7 @@ export function LinkExplorerWorkspace() {
       });
     }
 
-    // 2. Year Filter from Local Filters Dropdown
+    // 3. Year Filter from Local Filters Dropdown
     if (localFilters.year !== null) {
       list = list.filter((it) => {
         if (!it.createdAt) return false;
@@ -438,7 +474,7 @@ export function LinkExplorerWorkspace() {
       });
     }
 
-    // 3. Search Query Filter
+    // 4. Search Query Filter (deep metadata: desc, tags, id, owner)
     if (localFilters.searchQuery.trim()) {
       const q = localFilters.searchQuery.trim().toLowerCase();
       list = list.filter((it) => {
@@ -871,6 +907,13 @@ export function LinkExplorerWorkspace() {
               totalLoadedItems={resolution.items.length}
               totalVisibleItems={visibleItems.length}
               availableYears={availableYears}
+              isPartiallyFetched={Boolean(
+                resolution.hasMore ||
+                (resolution.lifetimeTotal && resolution.items.length < resolution.lifetimeTotal) ||
+                resolution.intelligence?.statistics.coverageStatus === "standard_scan_completed" ||
+                resolution.intelligence?.statistics.coverageStatus === "partial" ||
+                resolution.intelligence?.statistics.coverageStatus === "capped_window"
+              )}
             />
           )}
 
@@ -999,6 +1042,7 @@ export function LinkExplorerWorkspace() {
                   onClick={() => {
                     setActiveYearFilter(null);
                     setLocalFilters({
+                      titleSearch: "",
                       searchQuery: "",
                       durationRange: "all",
                       viewsRange: "all",

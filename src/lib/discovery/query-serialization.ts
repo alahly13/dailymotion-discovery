@@ -36,7 +36,7 @@ export interface V1VideoQuery {
 export const V1_VIDEO_FIELDS =
   "id,title,description,thumbnail_720_url,thumbnail_480_url,thumbnail_360_url,thumbnail_url,duration,views_total,language,country,created_time,channel,channel.name,owner,owner.screenname,tags,url";
 
-export const V1_USER_FIELDS = "id,username,screenname,url,description,country,language,videos_total";
+export const V1_USER_FIELDS = "id,username,screenname,url,description,country,language,videos_total,created_time,avatar_360_url";
 
 export const V1_PLAYLIST_FIELDS = "id,name,description,videos_total,owner,owner.screenname,created_time,url";
 

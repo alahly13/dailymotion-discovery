@@ -1,8 +1,8 @@
 # Dailymotion Discovery Platform Ledger
 
-Updated: 2026-11-19
+Updated: 2026-11-20
 Repo path: `E:\discovery\dailymotion-discovery`
-Scope: Project source-of-truth ledger, updated after Link Explorer Correct Resource Resolution, Maximum Catalog Retrieval & Append-Only Pagination implementation, 100% Vitest / TypeScript verification.
+Scope: Project source-of-truth ledger, updated after Link Explorer Catalog Completeness, Accurate Metrics, Date Windowing & In-Memory Local Title Search implementation, 100% Vitest / TypeScript verification.
 
 ## Table of Contents
 
@@ -23,6 +23,55 @@ Scope: Project source-of-truth ledger, updated after Link Explorer Correct Resou
 - [Known Limitations](#known-limitations)
 - [Future Roadmap](#future-roadmap)
 - [Agent Instructions](#agent-instructions)
+
+## 2026-11-20 Dailymotion Link Explorer: Catalog Completeness, Accurate Metrics, Date Windowing & In-Memory Local Title Search
+
+**User intent addressed**
+- Investigated and resolved a critical catalog retrieval and data-integrity discrepancy identified from production usage on target User `lsulli282`:
+  - Fixed internal dashboard count inconsistency where 5 fetched pages of 100 records resulted in 500 unique items, yet "Retrieved Items" and "Resource Breakdown" reported 700 items while "Provider Total" reported 500 with a false "100% Complete" coverage badge.
+  - Eliminated the false 100% catalog completeness indicator across all views. When a Standard Scan terminates upon reaching its 5-page budget (500 items retrieved out of 3,090 lifetime channel videos), it now accurately reports status `standard_scan_completed`, displays the true coverage ratio (16.2%), and generates detailed diagnostic evidence text.
+  - Resolved target identity ambiguity: properly resolved and verified Legacy User ID `x1pve0i`, username `lsulli282`, screenname `"playlist 2016"`, `canonicalUrl`, and `selectedApiVersion`, without confusing Legacy User IDs and V2 Profile IDs.
+  - Documented and architected multi-window date-partitioning retrieval to overcome Dailymotion's hard 1,000-item query window limitation (page 10 saturation). Stamped fine-grained provenance metadata (`scanId`, `dateWindowId`, `page`, `ownerId`) on all retrieved items.
+  - Embedded a dedicated, high-performance in-memory local title search input directly inside the existing `Local Filters` panel (`Search titles in retrieved results`, `LOCAL ONLY · ZERO API CALLS`, `Showing X of Y retrieved records`), filtering across all loaded pages and years in real-time with zero network requests.
+
+**Architecture & Implementation Details**
+
+1. **Dashboard Count Consistency & State Synchronization (`src/components/link-explorer/link-explorer-workspace.tsx`)**:
+   - **Root Cause of the 500 vs 700 Count Discrepancy**: When clicking "Load More", `handleLoadMore` fetched pages 6 and 7 (200 records created in 2016) and appended them to `resolution.items` (bringing total items to 700). However, it never synchronized the React state `scanProgress`. Consequently, `ScanProgressBar` remained permanently frozen at `pagesFetched: 5, uniqueItemsAdded: 500, providerTotal: 500`, while `ResourceIntelligenceOverview` showed `Retrieved Items: 700`.
+   - **Fix**: Synchronized `scanProgress` inside `handleLoadMore` on every continuation response, updating `pagesFetched`, `itemsRetrieved`, and `uniqueItemsAdded` to reflect the full cumulative dataset (`totalPages`, `totalItems`).
+
+2. **Accurate Catalog Completeness & False 100% Elimination (`src/lib/link-explorer/link-explorer-service.ts`, `link-explorer-types.ts`, & `resource-intelligence-overview.tsx`)**:
+   - **Root Cause of Missing Videos & False 100%**:
+     a) *Field Naming Disconnect*: `normalizeV1User` mapped `raw.videos_total` to camelCase `extra.videosTotal`, whereas `link-explorer-service.ts` line 445 looked for snake_case `mainItem?.extra?.videos_total`.
+     b) *Missing Provider Total on Collection Endpoint*: The Dailymotion API v1 `/user/{id}/videos` endpoint does not provide a `total` field (`total: undefined`). With `mainItem.extra.videos_total` reading undefined, `providerReportedTotal` fell back to `items.length` (500).
+     c) *Page Budget Cutoff*: The default Standard Scan has a 5-page ceiling (`maxPages: 5`), stopping retrieval after 500 items (2017-01-09).
+     d) *Status Misclassification*: `finalStatus` defaulted to `"completed"` and coverage percent was calculated as `500 / 500 = 100%` (or `700 / 500` clamped to 100%), masking that the channel actually contains 3,090 videos.
+   - **Fix**:
+     - Synchronized both `extra.videosTotal` and `extra.videos_total` across `v1-normalize.ts` and `v2-normalize.ts`.
+     - Explicitly differentiated `providerReportedLifetimeTotal` (3,090) from `providerReportedQueryTotal` (500 / 1,000) and `locallyRetrievedItems` (500 / 700).
+     - Defined granular statuses: `standard_scan_completed`, `capped_window`, `date_partitioning_required`, `complete_within_verified_scope`.
+     - Standard Scan stopping at page budget sets `coverageStatus: "standard_scan_completed"`, displays true coverage ratio (`500 / 3090 = 16.2%` or `700 / 3090 = 22.7%`), and renders an informational badge rather than a false green checkmark.
+
+3. **Target Identity Verification (`src/lib/link-explorer/link-explorer-types.ts`, `link-explorer-service.ts`, `v1-normalize.ts`, `v2-normalize.ts`)**:
+   - Formulated canonical `TargetIdentity` model capturing `originalInput`, `canonicalUrl`, `legacyUserId`, `legacyUsername`, `legacyScreenname`, `v2ProfileId`, `resolvedKind`, `selectedApiVersion`, and `verified`.
+   - Populated verified values for `lsulli282`: Legacy User ID `x1pve0i`, Username `lsulli282`, Screenname `"playlist 2016"`, `created_time: 1453621344` (`2016-01-24T07:42:24.000Z`).
+   - Added verified target identity badges in `ResourceIntelligenceOverview`.
+
+4. **Multi-Window Retrieval & Provenance Stamping (`src/lib/discovery/provenance.ts`, `link-explorer-service.ts`, `link-explorer-types.ts`)**:
+   - Augmented `DailymotionSourceMetadata` with `scanId`, `dateWindowId`, `page`, `cursor`, `ownerId`.
+   - Captured retrieval diagnostics (`RetrievalDiagnostics`) tracking individual `windowRecords`, window saturation, item counts, and status per date interval.
+   - Detected 1,000-item query window caps and flagged `date_partitioning_required` when saturation occurs.
+
+5. **In-Memory Local Title Search Field (`src/components/link-explorer/link-explorer-filters.tsx` & `link-explorer-workspace.tsx`)**:
+   - Added a prominent, dedicated local title search input directly inside the existing `Local Filters` collapsible panel.
+   - Styled with luxury OLED Obsidian aesthetics, clear search icon, search count readout (`Showing X of Y retrieved records`), and amber tag `LOCAL ONLY · ZERO API CALLS`.
+   - Wired seamlessly into `localFilters.titleSearch` state in `LinkExplorerWorkspace`, filtering across the entire loaded in-memory catalog with zero API calls.
+   - Added a warning notice when the active dataset is partially fetched, alerting the user to unretrieved items remaining on Dailymotion.
+
+**Verification Results**
+- Vitest (`src/lib/link-explorer/__tests__/link-explorer-intelligence.test.ts`): 10 passed, 0 failed, 100% pass rate.
+- TypeScript check (`node ./node_modules/typescript/bin/tsc --noEmit`): Exit code 0, 0 TypeScript errors.
+- Prohibited local production builds: 0 local builds run (strict memory safety adherence).
 
 ## 2026-11-19 Link Explorer: Correct Resource Resolution, Maximum Catalog Retrieval & Append-Only Pagination (2026)
 

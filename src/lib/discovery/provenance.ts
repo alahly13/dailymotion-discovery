@@ -24,6 +24,11 @@ export interface DailymotionSourceMetadata {
   endpoint?: string;
   requestId?: string;
   schemaVersion: number;
+  scanId?: string;
+  dateWindowId?: string;
+  page?: number;
+  cursor?: string | null;
+  ownerId?: string | null;
 }
 
 /**
@@ -37,6 +42,11 @@ export function createDailymotionProvenance(options: {
   requestId?: string;
   schemaVersion?: number;
   fetchedAt?: string;
+  scanId?: string;
+  dateWindowId?: string;
+  page?: number;
+  cursor?: string | null;
+  ownerId?: string | null;
 }): DailymotionSourceMetadata {
   return {
     provider: "dailymotion",
@@ -47,6 +57,11 @@ export function createDailymotionProvenance(options: {
     endpoint: options.endpoint,
     requestId: options.requestId,
     schemaVersion: options.schemaVersion ?? 1,
+    scanId: options.scanId,
+    dateWindowId: options.dateWindowId,
+    page: options.page,
+    cursor: options.cursor,
+    ownerId: options.ownerId,
   };
 }
 

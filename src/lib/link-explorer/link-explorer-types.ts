@@ -2,7 +2,7 @@
 //
 // What this controls: Type definitions for the Advanced Dailymotion Resource Explorer &
 // Channel Intelligence Workspace, including scan strategies, multi-page catalog progress,
-// resource intelligence analysis, and exportable manifest structures.
+// resource intelligence analysis, date-window partitioning diagnostics, and exportable manifest structures.
 // Scope: Link Explorer (/link-explorer).
 
 import type { ApiVersion, DiscoveryItem } from "@/lib/discovery/types";
@@ -13,14 +13,20 @@ export type ScanStrategy = "quick" | "standard" | "deep" | "resume" | "custom";
 
 export type ScanCompletenessStatus =
   | "not_started"
+  | "in_progress"
   | "discovering"
   | "fetching_pages"
   | "splitting_date_ranges"
   | "paused"
   | "interrupted"
+  | "standard_scan_completed"
   | "partial"
-  | "completed"
+  | "capped_window"
+  | "date_partitioning_required"
   | "completed_with_known_limitations"
+  | "complete_within_verified_scope"
+  | "coverage_unknown"
+  | "completed"
   | "failed";
 
 export type FieldSelectionProfile = "basic" | "standard" | "extended" | "custom";
@@ -46,6 +52,62 @@ export interface VideoChronologyRef {
   url: string | null;
 }
 
+export interface TargetIdentity {
+  rawInput: string;
+  canonicalUrl: string | null;
+  legacyUserId: string | null;
+  legacyUsername: string | null;
+  v2ProfileId: string | null;
+  resolvedKind: DailymotionResourceKind;
+  selectedApiVersion: ApiVersion;
+  isAmbiguous?: boolean;
+  ambiguityReason?: string | null;
+}
+
+export interface RetrievalWindowRecord {
+  windowId: string;
+  label: string;
+  dateFrom: string | null;
+  dateTo: string | null;
+  pageCount: number;
+  uniqueCount: number;
+  duplicateCount: number;
+  providerTotal: number | null;
+  isCapped: boolean;
+  status: "completed" | "capped" | "unresolved" | "failed";
+  error?: string | null;
+}
+
+export interface RetrievalDiagnostics {
+  scanId: string;
+  scanStrategy: ScanStrategy;
+  startedAt: string;
+  completedAt: string | null;
+  initialQueryTotal: number | null;
+  lifetimeReportedTotal: number | null;
+  windows: RetrievalWindowRecord[];
+  activeWindowDepth: number;
+  rateLimitHits: number;
+  hasUnresolvedWindows: boolean;
+  notes: string[];
+}
+
+export interface CatalogRetrievalMetrics {
+  providerReportedTotalPerQuery: number | null;
+  providerReportedTotalLifetime: number | null;
+  pagesFetched: number;
+  uniqueRecordsFetched: number;
+  duplicateRecordsSkipped: number;
+  uniqueRecordsPersisted: number;
+  dateWindowsCompleted: number;
+  dateWindowsRemaining: number;
+  failedRequests: number;
+  unresolvedWindows: number;
+  recordsUnavailableOrInaccessible: number;
+  coverageStatus: ScanCompletenessStatus;
+  coverageEvidence: string;
+}
+
 export interface ResourceIntelligenceData {
   profile: {
     name: string;
@@ -62,9 +124,11 @@ export interface ResourceIntelligenceData {
     apiVersion: ApiVersion;
     retrievedAt: string;
     catalogStatus: ScanCompletenessStatus;
+    targetIdentity?: TargetIdentity;
   };
   statistics: {
     providerReportedVideos: number | null;
+    providerReportedQueryTotal: number | null;
     providerReportedPlaylists: number | null;
     providerReportedLivestreams: number | null;
     locallyRetrievedVideos: number;
@@ -72,7 +136,10 @@ export interface ResourceIntelligenceData {
     locallyRetrievedLivestreams: number;
     totalRetrieved: number;
     isEstimated: boolean;
+    isGlobalTotalUnknown: boolean;
     coveragePercent: number | null;
+    coverageStatus: ScanCompletenessStatus;
+    coverageEvidence: string;
     omittedOrUnavailableReferences?: number;
     duplicatesSkipped?: number;
     pagesRetrieved?: number;
@@ -91,6 +158,8 @@ export interface ResourceIntelligenceData {
     byMonth: Array<{ month: string; count: number }>;
     byResourceType: Record<string, number>;
   };
+  diagnostics?: RetrievalDiagnostics;
+  metrics?: CatalogRetrievalMetrics;
 }
 
 export interface ScanProgressState {
@@ -106,12 +175,16 @@ export interface ScanProgressState {
   currentRateThrottleMs: number;
   error: string | null;
   canResume: boolean;
+  windowsCompleted?: number;
+  windowsTotal?: number;
 }
 
 export interface LinkExplorerManifest {
   manifestId: string;
+  manifestRevision: number;
   sourceInput: string;
   identifier: string;
+  targetIdentity: TargetIdentity;
   resourceKind: DailymotionResourceKind;
   apiVersion: ApiVersion;
   createdAt: string;
@@ -119,6 +192,8 @@ export interface LinkExplorerManifest {
   totalItems: number;
   sha256Checksum: string;
   intelligence: ResourceIntelligenceData | null;
+  metrics: CatalogRetrievalMetrics;
+  diagnostics: RetrievalDiagnostics;
   items: DiscoveryItem[];
   scanConfig: ScanBudgetConfig;
   status: ScanCompletenessStatus;
@@ -132,12 +207,16 @@ export interface ContinuationState {
   visitedPages?: number[];
   visitedCursors?: string[];
   providerReportedTotal?: number | null;
+  providerReportedLifetimeTotal?: number | null;
   omittedOrUnavailableReferences?: number;
+  diagnostics?: RetrievalDiagnostics;
+  targetIdentity?: TargetIdentity;
 }
 
 export interface LinkExplorerResolution {
   ok: boolean;
   analyzed: DailymotionAnalyzedLink;
+  targetIdentity?: TargetIdentity;
   effectiveKind: DailymotionResourceKind;
   version: ApiVersion;
   item: DiscoveryItem | null;
@@ -146,6 +225,7 @@ export interface LinkExplorerResolution {
   hasMore?: boolean;
   page?: number;
   total?: number;
+  lifetimeTotal?: number | null;
   nextCursor?: string | null;
   omittedOrUnavailableReferences?: number;
   duplicatesSkipped?: number;
@@ -156,6 +236,8 @@ export interface LinkExplorerResolution {
   intelligence?: ResourceIntelligenceData | null;
   scanProgress?: ScanProgressState | null;
   manifest?: LinkExplorerManifest | null;
+  diagnostics?: RetrievalDiagnostics;
+  metrics?: CatalogRetrievalMetrics;
   checkpoint?: {
     nextPage: number;
     nextCursor: string | null;
@@ -179,7 +261,13 @@ export function computeResourceIntelligence(
     pagesRetrieved?: number;
     pagesRemaining?: number | null;
     providerReportedTotal?: number | null;
+    providerReportedLifetimeTotal?: number | null;
     omittedOrUnavailable?: number;
+    coverageStatus?: ScanCompletenessStatus;
+    coverageEvidence?: string;
+    targetIdentity?: TargetIdentity;
+    diagnostics?: RetrievalDiagnostics;
+    metrics?: CatalogRetrievalMetrics;
   }
 ): ResourceIntelligenceData {
   const profileName = mainItem?.title || analyzed.displayLabel || analyzed.identifier;
@@ -193,13 +281,24 @@ export function computeResourceIntelligence(
   const createdDate = mainItem?.createdAt || null;
   const verified = Boolean(mainItem?.extra?.verified);
 
-  // Extract provider reported stats if present
-  let providerReportedVideos: number | null = null;
+  // 1. Resolve lifetime total from profile metadata or extraStats
+  let providerReportedLifetime: number | null = null;
+  if (extraStats?.providerReportedLifetimeTotal !== undefined && extraStats.providerReportedLifetimeTotal !== null) {
+    providerReportedLifetime = extraStats.providerReportedLifetimeTotal;
+  } else if (extraStats?.providerReportedTotal === undefined || extraStats.providerReportedTotal === null) {
+    if (mainItem?.extra?.videosTotal !== undefined && mainItem.extra.videosTotal !== null) {
+      const parsed = Number(mainItem.extra.videosTotal);
+      if (!Number.isNaN(parsed)) providerReportedLifetime = parsed;
+    } else if (mainItem?.extra?.videos_total !== undefined && mainItem.extra.videos_total !== null) {
+      const parsed = Number(mainItem.extra.videos_total);
+      if (!Number.isNaN(parsed)) providerReportedLifetime = parsed;
+    }
+  }
+
+  // 2. Query-level total
+  let providerReportedQueryTotal: number | null = null;
   if (extraStats?.providerReportedTotal !== undefined && extraStats.providerReportedTotal !== null) {
-    providerReportedVideos = extraStats.providerReportedTotal;
-  } else if (mainItem?.extra?.videos_total !== undefined && mainItem.extra.videos_total !== null) {
-    const parsed = Number(mainItem.extra.videos_total);
-    if (!Number.isNaN(parsed)) providerReportedVideos = parsed;
+    providerReportedQueryTotal = extraStats.providerReportedTotal;
   }
 
   // Count locally retrieved by kind
@@ -255,12 +354,43 @@ export function computeResourceIntelligence(
     : null;
 
   const totalRetrieved = items.length;
+  const providerReportedVideos = providerReportedLifetime ?? providerReportedQueryTotal ?? null;
   const isEstimated = providerReportedVideos !== null && providerReportedVideos > 1000;
+  const isGlobalTotalUnknown = providerReportedLifetime === null;
+
+  // Accurate coverage calculation (no false 100%)
   let coveragePercent: number | null = null;
-  if (providerReportedVideos && providerReportedVideos > 0) {
-    coveragePercent = Math.min(100, Math.round((totalRetrieved / providerReportedVideos) * 1000) / 10);
-  } else if (totalRetrieved > 0) {
-    coveragePercent = 100;
+  let coverageStatus: ScanCompletenessStatus = extraStats?.coverageStatus ?? catalogStatus;
+  let coverageEvidence = extraStats?.coverageEvidence || "";
+
+  if (providerReportedLifetime && providerReportedLifetime > 0) {
+    coveragePercent = Math.min(100, Math.round((totalRetrieved / providerReportedLifetime) * 1000) / 10);
+    if (totalRetrieved < providerReportedLifetime) {
+      if (coverageStatus === "completed" || coverageStatus === "not_started") {
+        coverageStatus = "standard_scan_completed";
+      }
+      if (!coverageEvidence) {
+        coverageEvidence = `Standard scan completed: retrieved ${totalRetrieved.toLocaleString()} of ${providerReportedLifetime.toLocaleString()} lifetime channel videos (${coveragePercent}%). Additional catalog retrieval required.`;
+      }
+    } else {
+      coveragePercent = 100;
+      if (coverageStatus === "standard_scan_completed" || coverageStatus === "in_progress") {
+        coverageStatus = "complete_within_verified_scope";
+      }
+      if (!coverageEvidence) {
+        coverageEvidence = `All ${totalRetrieved.toLocaleString()} reported videos retrieved and verified.`;
+      }
+    }
+  } else if (providerReportedQueryTotal && providerReportedQueryTotal > 0) {
+    coveragePercent = Math.min(100, Math.round((totalRetrieved / providerReportedQueryTotal) * 1000) / 10);
+    if (!coverageEvidence) {
+      coverageEvidence = `Retrieved ${totalRetrieved} items within current query window (${providerReportedQueryTotal} reported). Lifetime channel total unknown.`;
+    }
+  } else {
+    coveragePercent = null;
+    if (!coverageEvidence) {
+      coverageEvidence = "Global total unknown — date-window retrieval. Coverage cannot be independently verified.";
+    }
   }
 
   // Activity calculation
@@ -285,7 +415,7 @@ export function computeResourceIntelligence(
   const yearCounts = new Map<number, number>();
   const monthCounts = new Map<string, number>();
 
-  for (const { item, timestamp } of validDatedVideos) {
+  for (const { timestamp } of validDatedVideos) {
     const d = new Date(timestamp);
     const yr = d.getUTCFullYear();
     yearCounts.set(yr, (yearCounts.get(yr) || 0) + 1);
@@ -307,6 +437,22 @@ export function computeResourceIntelligence(
     .sort((a, b) => b.month.localeCompare(a.month))
     .slice(0, 12); // Last 12 active months
 
+  const metrics: CatalogRetrievalMetrics = extraStats?.metrics ?? {
+    providerReportedTotalPerQuery: providerReportedQueryTotal,
+    providerReportedTotalLifetime: providerReportedLifetime,
+    pagesFetched: extraStats?.pagesRetrieved ?? 1,
+    uniqueRecordsFetched: totalRetrieved,
+    duplicateRecordsSkipped: extraStats?.duplicatesSkipped ?? 0,
+    uniqueRecordsPersisted: totalRetrieved,
+    dateWindowsCompleted: extraStats?.diagnostics?.windows?.length ?? 1,
+    dateWindowsRemaining: 0,
+    failedRequests: 0,
+    unresolvedWindows: 0,
+    recordsUnavailableOrInaccessible: extraStats?.omittedOrUnavailable ?? 0,
+    coverageStatus,
+    coverageEvidence,
+  };
+
   return {
     profile: {
       name: profileName,
@@ -322,10 +468,12 @@ export function computeResourceIntelligence(
       verified,
       apiVersion: version,
       retrievedAt: new Date().toISOString(),
-      catalogStatus,
+      catalogStatus: coverageStatus,
+      targetIdentity: extraStats?.targetIdentity,
     },
     statistics: {
       providerReportedVideos,
+      providerReportedQueryTotal,
       providerReportedPlaylists: null,
       providerReportedLivestreams: null,
       locallyRetrievedVideos,
@@ -333,7 +481,10 @@ export function computeResourceIntelligence(
       locallyRetrievedLivestreams,
       totalRetrieved,
       isEstimated,
+      isGlobalTotalUnknown,
       coveragePercent,
+      coverageStatus,
+      coverageEvidence,
       omittedOrUnavailableReferences: extraStats?.omittedOrUnavailable ?? 0,
       duplicatesSkipped: extraStats?.duplicatesSkipped ?? 0,
       pagesRetrieved: extraStats?.pagesRetrieved ?? 1,
@@ -352,5 +503,7 @@ export function computeResourceIntelligence(
       byMonth,
       byResourceType: typeCounts,
     },
+    diagnostics: extraStats?.diagnostics,
+    metrics,
   };
 }

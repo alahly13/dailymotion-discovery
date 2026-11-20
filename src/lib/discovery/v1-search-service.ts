@@ -125,7 +125,7 @@ export async function v1GetProfile(id: string, resource: DiscoveryResource = "ch
   const trimmed = id.trim();
   if (!trimmed) return failure(resource, "GET /user/{id}", "Enter a profile ID or username.", "user_input_error", 400, false);
   const outcome = await v1Get<V1RawUser>(`/user/${encodeURIComponent(trimmed)}`, {
-    fields: fields?.trim() || "id,username,screenname,url,description,country,language,videos_total",
+    fields: fields?.trim() || "id,username,screenname,url,description,country,language,videos_total,created_time,avatar_360_url",
   });
   if (!outcome.ok) return failure(resource, "GET /user/{id}", outcome.failure.error, outcome.failure.reason, outcome.failure.status, outcome.failure.retryable);
   const item = resource === "channels" ? normalizeV1Channel(outcome.data) : normalizeV1User(outcome.data);
