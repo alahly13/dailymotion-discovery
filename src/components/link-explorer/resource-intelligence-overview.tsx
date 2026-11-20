@@ -32,6 +32,7 @@ import {
 import type { ResourceIntelligenceData } from "@/lib/link-explorer/link-explorer-types";
 import { formatDuration } from "@/components/discovery/result-card";
 import { cn } from "@/lib/utils/cn";
+import { formatSafeDescription } from "@/lib/utils/format-description";
 
 export interface ResourceIntelligenceOverviewProps {
   data: ResourceIntelligenceData;
@@ -66,6 +67,10 @@ export function ResourceIntelligenceOverview({
     standard_scan_completed: {
       label: "Standard Scan Completed (Partial)",
       color: "bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30",
+    },
+    more_results_available: {
+      label: "More Results Available",
+      color: "bg-blue-500/15 text-blue-600 dark:text-blue-400 border border-blue-500/30",
     },
     capped_window: {
       label: "Capped 1,000-Item Window",
@@ -202,7 +207,7 @@ export function ResourceIntelligenceOverview({
                       !descriptionExpanded && isLongDescription && "line-clamp-2"
                     )}
                   >
-                    {profile.description}
+                    {formatSafeDescription(profile.description)}
                   </p>
                   {isLongDescription && (
                     <button

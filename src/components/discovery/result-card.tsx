@@ -39,6 +39,7 @@ import {
   RESOURCE_TYPE_META,
 } from "@/lib/resources/dailymotion-resource-taxonomy";
 import { AddToPlaylistModal } from "@/components/playlists/add-to-playlist-modal";
+import { formatSafeDescription } from "@/lib/utils/format-description";
 import { RawJsonDrawer } from "./raw-json-drawer";
 
 const compactNumber = new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 });
@@ -105,6 +106,7 @@ export function ResultCard({
   const liveStatus = typeof extra.status === "string" ? extra.status : null;
   const isExplicit = extra.explicit === true || extra.is_explicit === true;
   const isKids = extra.is_for_kids === true || extra.is_created_for_kids === true;
+  const safeDesc = formatSafeDescription(item.description);
 
   async function copyText(text: string, which: "id" | "url") {
     try {
@@ -274,10 +276,10 @@ export function ResultCard({
             </div>
 
             {/* Description */}
-            {item.description && (
+            {safeDesc && (
               <div className="text-xs text-[var(--muted-foreground)]">
-                <p className={descExpanded ? "leading-5" : "line-clamp-2 leading-5"}>{item.description}</p>
-                {item.description.length > 90 && (
+                <p className={descExpanded ? "leading-5 whitespace-pre-line" : "line-clamp-2 leading-5"}>{safeDesc}</p>
+                {safeDesc.length > 90 && (
                   <button
                     type="button"
                     onClick={() => setDescExpanded((p) => !p)}
@@ -388,8 +390,8 @@ export function ResultCard({
               {item.ownerName ? `Created by ${item.ownerName}` : `ID: ${item.id}`}
             </p>
 
-            {item.description && (
-              <p className="line-clamp-2 text-xs leading-5 text-[var(--muted-foreground)]">{item.description}</p>
+            {safeDesc && (
+              <p className="line-clamp-2 text-xs leading-5 text-[var(--muted-foreground)]">{safeDesc}</p>
             )}
 
             {addedNotice && (
@@ -572,10 +574,10 @@ export function ResultCard({
           </div>
 
           {/* Expandable Description */}
-          {item.description && (
+          {safeDesc && (
             <div className="text-xs text-[var(--muted-foreground)]">
-              <p className={descExpanded ? "leading-5" : "line-clamp-2 leading-5"}>{item.description}</p>
-              {item.description.length > 100 && (
+              <p className={descExpanded ? "leading-5 whitespace-pre-line" : "line-clamp-2 leading-5"}>{safeDesc}</p>
+              {safeDesc.length > 100 && (
                 <button
                   type="button"
                   onClick={() => setDescExpanded((p) => !p)}

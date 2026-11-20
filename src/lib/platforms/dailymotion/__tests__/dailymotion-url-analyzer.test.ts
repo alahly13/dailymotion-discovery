@@ -49,7 +49,7 @@ describe("analyzeDailymotionUrlOrId", () => {
     expect(playlist.playlistId).toBe("x88apm");
     expect(playlist.canonicalUrl).toBe("https://www.dailymotion.com/playlist/x88apm");
     expect(playlist.apiPathV1).toBe("/playlist/x88apm/videos");
-    expect(playlist.apiPathV2).toBe("/v2/playlists/x88apm");
+    expect(playlist.apiPathV2).toBe("/v2/playlists/x88apm/videos");
 
     const videoInPlaylist = analyzeDailymotionUrlOrId("https://www.dailymotion.com/video/x8n8x8?playlist=x88apm");
     expect(videoInPlaylist.kind).toBe("video");
@@ -69,7 +69,7 @@ describe("analyzeDailymotionUrlOrId", () => {
     const channel = analyzeDailymotionUrlOrId("https://www.dailymotion.com/channel/lemonde");
     expect(channel.kind).toBe("channel");
     expect(channel.identifier).toBe("lemonde");
-    expect(channel.apiPathV1).toBe("/channel/lemonde/videos");
+    expect(channel.apiPathV1).toBe("/user/lemonde/videos");
     expect(channel.apiPathV2).toBe("/v2/profiles/lemonde/videos");
 
     const user = analyzeDailymotionUrlOrId("https://www.dailymotion.com/user/lequipe");

@@ -19,7 +19,7 @@ import {
  */
 
 export const LOCAL_IDB_NAME = "dailymotion_discovery_local_v1";
-export const LOCAL_IDB_VERSION = 3;
+export const LOCAL_IDB_VERSION = 4;
 
 export const LOCAL_STORES = {
   SAVED_ITEMS: "entities_saved_items",
@@ -34,6 +34,8 @@ export const LOCAL_STORES = {
   SEARCH_SNAPSHOTS: "search_snapshots",
   SEARCH_SNAPSHOT_PAGES: "search_snapshot_pages",
   SAVED_TITLES: "entities_saved_titles",
+  COMPLETED_EXPLORATIONS: "completed_explorations_manifests",
+  SCAN_CHECKPOINTS: "link_explorer_scan_checkpoints",
 } as const;
 
 export type LocalStoreName = (typeof LOCAL_STORES)[keyof typeof LOCAL_STORES];
@@ -235,6 +237,8 @@ const KEY_PATHS: Record<LocalStoreName, string> = {
   [LOCAL_STORES.SEARCH_SNAPSHOTS]: "id",
   [LOCAL_STORES.SEARCH_SNAPSHOT_PAGES]: "id",
   [LOCAL_STORES.SAVED_TITLES]: "id",
+  [LOCAL_STORES.COMPLETED_EXPLORATIONS]: "id",
+  [LOCAL_STORES.SCAN_CHECKPOINTS]: "id",
 };
 
 /**
@@ -311,6 +315,18 @@ function openNativeIndexedDB(): Promise<IDBDatabase> {
               os.createIndex("by_ownerId", "ownerId", { unique: false });
               os.createIndex("by_status", "status", { unique: false });
               os.createIndex("by_createdAt", "createdAt", { unique: false });
+            } else if (storeName === LOCAL_STORES.COMPLETED_EXPLORATIONS) {
+              os.createIndex("by_ownerId", "ownerId", { unique: false });
+              os.createIndex("by_resourceId", "resourceId", { unique: false });
+              os.createIndex("by_apiVersion", "apiVersion", { unique: false });
+              os.createIndex("by_resourceKind", "resourceKind", { unique: false });
+              os.createIndex("by_completedAt", "completedAt", { unique: false });
+            } else if (storeName === LOCAL_STORES.SCAN_CHECKPOINTS) {
+              os.createIndex("by_ownerId", "ownerId", { unique: false });
+              os.createIndex("by_resourceId", "resourceId", { unique: false });
+              os.createIndex("by_apiVersion", "apiVersion", { unique: false });
+              os.createIndex("by_status", "status", { unique: false });
+              os.createIndex("by_updatedAt", "updatedAt", { unique: false });
             }
           }
         }

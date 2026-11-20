@@ -7,6 +7,22 @@ import {
 } from "../link-explorer-service";
 import { computeResourceIntelligence } from "../link-explorer-types";
 import { analyzeDailymotionUrlOrId } from "@/lib/platforms/dailymotion/dailymotion-url-analyzer";
+import { formatSafeDescription } from "@/lib/utils/format-description";
+import {
+  saveCompletedExplorationManifest,
+  getCompletedExplorationManifest,
+  listCompletedExplorationManifests,
+  deleteCompletedExplorationManifest,
+  searchCompletedExplorations,
+  type CompletedExplorationManifest,
+} from "../completed-explorations-service";
+import {
+  saveScanCheckpoint,
+  getScanCheckpoint,
+  listScanCheckpoints,
+  deleteScanCheckpoint,
+  type ScanCheckpointRecord,
+} from "../scan-checkpoint-service";
 
 describe("Link Explorer Intelligence & Capability Architecture (2026)", () => {
   const mockItems: DiscoveryItem[] = [
@@ -458,6 +474,264 @@ describe("Link Explorer Intelligence & Capability Architecture (2026)", () => {
         const matches = (itemWithoutTitle.title || "").toLowerCase().includes("test");
         expect(matches).toBe(false);
       }).not.toThrow();
+    });
+  });
+
+  describe("Safe Description & HTML Entity Sanitization (2026)", () => {
+    it("converts raw <br /> tags and HTML entities into clean readable text", () => {
+      const rawHtml = "First Line<br />Second Line<br>Third Line</p><div>Fourth Line</div>";
+      const cleaned = formatSafeDescription(rawHtml);
+      expect(cleaned).not.toContain("<br");
+      expect(cleaned).not.toContain("</p>");
+      expect(cleaned).toContain("First Line\nSecond Line\nThird Line\nFourth Line");
+
+      const entityHtml = "Batman &amp; Robin &quot;The Movie&quot; &#039;Classic&#039; &lt;1997&gt;";
+      const decoded = formatSafeDescription(entityHtml);
+      expect(decoded).toBe('Batman & Robin "The Movie" \'Classic\' <1997>');
+
+      expect(formatSafeDescription(null)).toBe("");
+      expect(formatSafeDescription(undefined)).toBe("");
+      expect(formatSafeDescription("   ")).toBe("");
+    });
+  });
+
+  describe("Completed Explorations Manifest Archive & Local Search", () => {
+    const testOwnerId = "test-user-uuid-12345";
+    const otherOwnerId = "other-user-uuid-99999";
+
+    const mockManifestChannel: Omit<CompletedExplorationManifest, "id" | "manifestSchemaVersion" | "sha256Checksum"> = {
+      manifestId: "manifest-lsulli282",
+      ownerId: testOwnerId,
+      provider: "dailymotion",
+      apiVersion: "v1",
+      resourceKind: "channel",
+      resourceId: "lsulli282",
+      canonicalSourceUrl: "https://www.dailymotion.com/lsulli282",
+      resourceTitle: "playlist 2016",
+      resourceDescription: "Full archive of 2016 anime broadcasts",
+      resourceThumbnail: "https://example.com/avatar.jpg",
+      scanId: "scan-test-1",
+      scanStrategy: "deep",
+      createdAt: "2026-11-20T10:00:00.000Z",
+      completedAt: "2026-11-20T11:00:00.000Z",
+      updatedAt: "2026-11-20T11:00:00.000Z",
+      totalUniqueItems: 2,
+      providerReportedLifetimeTotal: 3090,
+      providerReportedQueryTotal: 500,
+      duplicatesSkipped: 0,
+      omittedOrUnavailableReferences: 0,
+      oldestItemDate: "2016-12-12T10:00:00.000Z",
+      newestItemDate: "2017-03-24T06:20:28.000Z",
+      items: [
+        {
+          kind: "video",
+          apiVersion: "v1",
+          id: "x_vid_1",
+          title: "YGOTAS Episode 51 - The Death Of Tristan Taylor",
+          description: "Yu-Gi-Oh abridged classic episode",
+          thumbnail: "https://example.com/thumb1.jpg",
+          url: "https://www.dailymotion.com/video/x_vid_1",
+          duration: 300,
+          language: "en",
+          country: "US",
+          category: null,
+          createdAt: "2017-03-24T06:20:28.000Z",
+          year: 2017,
+          tags: ["ygotas", "anime"],
+          ownerId: "lsulli282",
+          ownerName: "playlist 2016",
+          views: 5000,
+          extra: {},
+          raw: {},
+        },
+        {
+          kind: "video",
+          apiVersion: "v1",
+          id: "x_vid_2",
+          title: "Oldest 2016 Archive Recording",
+          description: "Historical recording from late 2016",
+          thumbnail: "https://example.com/thumb2.jpg",
+          url: "https://www.dailymotion.com/video/x_vid_2",
+          duration: 250,
+          language: "en",
+          country: "US",
+          category: null,
+          createdAt: "2016-12-12T10:00:00.000Z",
+          year: 2016,
+          tags: ["archive"],
+          ownerId: "lsulli282",
+          ownerName: "playlist 2016",
+          views: 2000,
+          extra: {},
+          raw: {},
+        },
+      ],
+      paginationMetadata: {
+        totalPagesFetched: 7,
+        windowsRetrieved: [],
+      },
+      status: "complete_within_verified_scope",
+    };
+
+    const mockManifestPlaylist: Omit<CompletedExplorationManifest, "id" | "manifestSchemaVersion" | "sha256Checksum"> = {
+      manifestId: "manifest-playlist-cyber",
+      ownerId: testOwnerId,
+      provider: "dailymotion",
+      apiVersion: "v2",
+      resourceKind: "playlist",
+      resourceId: "x88apm",
+      canonicalSourceUrl: "https://www.dailymotion.com/playlist/x88apm",
+      resourceTitle: "Cyberpunk 2077 Night City Archives",
+      resourceDescription: "Curated gameplay and soundscapes",
+      resourceThumbnail: null,
+      scanId: "scan-test-2",
+      scanStrategy: "standard",
+      createdAt: "2026-11-20T12:00:00.000Z",
+      completedAt: "2026-11-20T12:30:00.000Z",
+      updatedAt: "2026-11-20T12:30:00.000Z",
+      totalUniqueItems: 1,
+      providerReportedLifetimeTotal: 1,
+      providerReportedQueryTotal: 1,
+      duplicatesSkipped: 0,
+      omittedOrUnavailableReferences: 0,
+      oldestItemDate: "2024-05-01T00:00:00.000Z",
+      newestItemDate: "2024-05-01T00:00:00.000Z",
+      items: [
+        {
+          kind: "video",
+          apiVersion: "v2",
+          id: "x_cyber_1",
+          title: "Night City Ambient Exploration",
+          description: "Relaxing atmospheric walk through Night City",
+          thumbnail: "https://example.com/cyber.jpg",
+          url: "https://www.dailymotion.com/video/x_cyber_1",
+          duration: 3600,
+          language: "en",
+          country: "US",
+          category: null,
+          createdAt: "2024-05-01T00:00:00.000Z",
+          year: 2024,
+          tags: ["cyberpunk", "ambient"],
+          ownerId: "cdpr",
+          ownerName: "CD Projekt",
+          views: 120000,
+          extra: {},
+          raw: {},
+        },
+      ],
+      paginationMetadata: {
+        totalPagesFetched: 1,
+        windowsRetrieved: [],
+      },
+      status: "complete_within_verified_scope",
+    };
+
+    it("saves completed exploration manifest with deterministic SHA-256 and schema version", async () => {
+      const savedChannel = await saveCompletedExplorationManifest(mockManifestChannel);
+      expect(savedChannel.manifestSchemaVersion).toBe("1.0.0");
+      expect(savedChannel.sha256Checksum.length).toBeGreaterThan(0);
+      expect(savedChannel.totalUniqueItems).toBe(2);
+
+      const retrieved = await getCompletedExplorationManifest(testOwnerId, "v1", "channel", "lsulli282");
+      expect(retrieved).not.toBeNull();
+      expect(retrieved?.resourceTitle).toBe("playlist 2016");
+      expect(retrieved?.items.length).toBe(2);
+    });
+
+    it("enforces owner isolation: User A cannot access User B's completed explorations", async () => {
+      const retrievedByOther = await getCompletedExplorationManifest(otherOwnerId, "v1", "channel", "lsulli282");
+      expect(retrievedByOther).toBeNull();
+    });
+
+    it("performs instant local search across multiple saved catalogs with zero network calls", async () => {
+      await saveCompletedExplorationManifest(mockManifestChannel);
+      await saveCompletedExplorationManifest(mockManifestPlaylist);
+
+      // Search across catalogs: match in channel video
+      const search1 = await searchCompletedExplorations(testOwnerId, "tristan taylor");
+      expect(search1.totalMatches).toBe(1);
+      expect(search1.matchedItems[0].item.id).toBe("x_vid_1");
+      expect(search1.matchedItems[0].resourceTitle).toBe("playlist 2016");
+
+      // Search across catalogs: match in playlist video
+      const search2 = await searchCompletedExplorations(testOwnerId, "night city");
+      expect(search2.totalMatches).toBe(1);
+      expect(search2.matchedItems[0].item.id).toBe("x_cyber_1");
+      expect(search2.matchedItems[0].apiVersion).toBe("v2");
+
+      // Search by description & tags
+      const search3 = await searchCompletedExplorations(testOwnerId, "ambient");
+      expect(search3.totalMatches).toBe(1);
+
+      // Empty search returns all catalogs
+      const allCatalogs = await searchCompletedExplorations(testOwnerId, "");
+      expect(allCatalogs.totalCatalogsSearched).toBeGreaterThanOrEqual(2);
+    });
+
+    it("deletes only the targeted completed exploration without affecting others", async () => {
+      const channelManifest = await getCompletedExplorationManifest(testOwnerId, "v1", "channel", "lsulli282");
+      expect(channelManifest).not.toBeNull();
+
+      if (channelManifest) {
+        await deleteCompletedExplorationManifest(channelManifest.id);
+      }
+
+      const deletedCheck = await getCompletedExplorationManifest(testOwnerId, "v1", "channel", "lsulli282");
+      expect(deletedCheck).toBeNull();
+
+      // Playlist remains intact
+      const playlistCheck = await getCompletedExplorationManifest(testOwnerId, "v2", "playlist", "x88apm");
+      expect(playlistCheck).not.toBeNull();
+    });
+  });
+
+  describe("Scan Checkpoint Service & Resumable Scanning", () => {
+    const testOwner = "chk-test-owner";
+    const checkpoint: ScanCheckpointRecord = {
+      id: "chk:chk-test-owner:v1:channel:lsulli282",
+      ownerId: testOwner,
+      scanId: "scan-chk-1",
+      apiVersion: "v1",
+      resourceType: "channel",
+      resourceId: "lsulli282",
+      canonicalUrl: "https://www.dailymotion.com/lsulli282",
+      scanConfig: {
+        strategy: "standard",
+        pageSize: 100,
+        maxPages: 5,
+        throttleMs: 150,
+        fieldsProfile: "standard",
+      },
+      currentPage: 5,
+      nextCursor: null,
+      visitedPages: [1, 2, 3, 4, 5],
+      visitedCursors: [],
+      completedPages: 5,
+      itemsRetrieved: 500,
+      lifetimeTotal: 3090,
+      queryTotal: 500,
+      oldestItemDate: "2017-01-09T10:31:01.000Z",
+      newestItemDate: "2017-03-24T06:20:28.000Z",
+      status: "standard_scan_completed",
+      completedWindows: [],
+      updatedAt: new Date().toISOString(),
+      canResume: true,
+    };
+
+    it("saves and retrieves scan checkpoint durably for resumption", async () => {
+      await saveScanCheckpoint(checkpoint);
+      const retrieved = await getScanCheckpoint(testOwner, "v1", "channel", "lsulli282");
+      expect(retrieved).not.toBeNull();
+      expect(retrieved?.itemsRetrieved).toBe(500);
+      expect(retrieved?.lifetimeTotal).toBe(3090);
+      expect(retrieved?.canResume).toBe(true);
+
+      const list = await listScanCheckpoints(testOwner);
+      expect(list.some((c) => c.resourceId === "lsulli282")).toBe(true);
+
+      await deleteScanCheckpoint(testOwner, "v1", "channel", "lsulli282");
+      const postDelete = await getScanCheckpoint(testOwner, "v1", "channel", "lsulli282");
+      expect(postDelete).toBeNull();
     });
   });
 });

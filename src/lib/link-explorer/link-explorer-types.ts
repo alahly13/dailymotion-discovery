@@ -20,6 +20,7 @@ export type ScanCompletenessStatus =
   | "paused"
   | "interrupted"
   | "standard_scan_completed"
+  | "more_results_available"
   | "partial"
   | "capped_window"
   | "date_partitioning_required"
@@ -211,6 +212,9 @@ export interface ContinuationState {
   omittedOrUnavailableReferences?: number;
   diagnostics?: RetrievalDiagnostics;
   targetIdentity?: TargetIdentity;
+  dateBefore?: string | null;
+  dateAfter?: string | null;
+  dateWindowLabel?: string | null;
 }
 
 export interface LinkExplorerResolution {
@@ -223,6 +227,7 @@ export interface LinkExplorerResolution {
   items: DiscoveryItem[];
   relatedItems?: DiscoveryItem[];
   hasMore?: boolean;
+  hasRemainingCatalog?: boolean;
   page?: number;
   total?: number;
   lifetimeTotal?: number | null;

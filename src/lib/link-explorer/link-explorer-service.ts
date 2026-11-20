@@ -222,10 +222,25 @@ export async function resolveLinkExplorerInput(
   let providerReportedQueryTotal: number | null = continuationState?.providerReportedTotal ?? null;
   let providerReportedLifetimeTotal: number | null = continuationState?.providerReportedLifetimeTotal ?? null;
   let omittedOrUnavailableReferences = continuationState?.omittedOrUnavailableReferences ?? 0;
-  const visitedPages = new Set<number>(continuationState?.visitedPages ?? []);
-  const visitedCursors = new Set<string>(continuationState?.visitedCursors ?? []);
-  const startPage = continuationState?.startPage ?? 1;
-  let currentNextCursor: string | null = continuationState?.nextCursor ?? null;
+
+  const isDatePartition = Boolean(continuationState?.dateBefore);
+  if (continuationState?.dateBefore) {
+    config.dateTo = continuationState.dateBefore;
+  }
+  if (continuationState?.dateAfter) {
+    config.dateFrom = continuationState.dateAfter;
+  }
+
+  const visitedPages = new Set<number>(isDatePartition ? [] : (continuationState?.visitedPages ?? []));
+  const visitedCursors = new Set<string>(isDatePartition ? [] : (continuationState?.visitedCursors ?? []));
+  const startPage = isDatePartition ? 1 : (continuationState?.startPage ?? 1);
+  let currentNextCursor: string | null = isDatePartition ? null : (continuationState?.nextCursor ?? null);
+
+  const currentWindowId = continuationState?.dateBefore
+    ? `window-before-${continuationState.dateBefore.replace(/[^a-zA-Z0-9]/g, "-")}`
+    : isContinuation
+    ? "window-continuation"
+    : "window-initial";
 
   const scanId = `scan-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
   const windowRecords: RetrievalWindowRecord[] = continuationState?.diagnostics?.windows
@@ -612,7 +627,7 @@ export async function resolveLinkExplorerInput(
               resourceId: item.id,
               fetchedAt: new Date().toISOString(),
               scanId,
-              dateWindowId: "window-initial",
+              dateWindowId: currentWindowId,
               page,
               ownerId: analyzed.identifier,
               schemaVersion: 1,
@@ -655,10 +670,16 @@ export async function resolveLinkExplorerInput(
         }
       }
 
-      // Record primary initial retrieval window
+      // Record retrieval window
       windowRecords.push({
-        windowId: "window-initial",
-        label: "Primary Query Window",
+        windowId: currentWindowId,
+        label:
+          continuationState?.dateWindowLabel ||
+          (continuationState?.dateBefore
+            ? `Partition Before ${continuationState.dateBefore}`
+            : isContinuation
+            ? "Continuation Window"
+            : "Primary Query Window"),
         dateFrom: config.dateFrom || null,
         dateTo: config.dateTo || null,
         pageCount: pagesFetchedThisRun,
@@ -1260,6 +1281,7 @@ export async function resolveLinkExplorerInput(
       item: mainItem,
       items,
       hasMore,
+      hasRemainingCatalog: Boolean(providerReportedLifetimeTotal && items.length < providerReportedLifetimeTotal),
       page: progressState.pagesFetched,
       total: providerReportedLifetimeTotal || providerReportedQueryTotal || items.length,
       lifetimeTotal: providerReportedLifetimeTotal,

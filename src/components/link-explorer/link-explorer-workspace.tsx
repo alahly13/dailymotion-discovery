@@ -79,6 +79,14 @@ import {
   captureSearchSnapshot,
   getLatestRestorableSearchSnapshot,
 } from "@/lib/search-history/search-snapshot-service";
+import { getClientOwnerId } from "@/lib/saved-titles/capture-service";
+import {
+  saveScanCheckpoint,
+  getScanCheckpoint,
+  deleteScanCheckpoint,
+  buildCheckpointKey,
+} from "@/lib/link-explorer/scan-checkpoint-service";
+import { saveCompletedExplorationManifest } from "@/lib/link-explorer/completed-explorations-service";
 import { captureLinkSubmission } from "@/lib/saved-titles/capture-service";
 
 const EXAMPLE_CHIPS: Array<{ label: string; value: string; kind: DailymotionResourceKind }> = [
@@ -122,6 +130,9 @@ export function LinkExplorerWorkspace() {
   const [rawDrawerOpen, setRawDrawerOpen] = useState(false);
   const [copiedUrl, setCopiedUrl] = useState(false);
   const [restoredFromHistory, setRestoredFromHistory] = useState(false);
+  const [isSavingManifest, setIsSavingManifest] = useState(false);
+  const [savedManifestNotice, setSavedManifestNotice] = useState<string | null>(null);
+  const [isContinuingDeep, setIsContinuingDeep] = useState(false);
 
   // Local In-Memory Filters and Sorters (Zero Network Calls)
   const [activeYearFilter, setActiveYearFilter] = useState<number | null>(null);
@@ -281,52 +292,132 @@ export function LinkExplorerWorkspace() {
     }
   }
 
-  async function handleLoadMore() {
+  // Save Completed Exploration Manifest
+  async function handleSaveCompletedExploration() {
+    if (!resolution || !resolution.ok || resolution.items.length === 0) return;
+    setIsSavingManifest(true);
+    try {
+      const owner = await getClientOwnerId();
+      await saveCompletedExplorationManifest({
+        manifestId: `manifest-${Date.now()}-${resolution.analyzed.identifier}`,
+        ownerId: owner,
+        provider: "dailymotion",
+        apiVersion: version,
+        resourceKind: resolution.effectiveKind,
+        resourceId: resolution.analyzed.identifier,
+        canonicalSourceUrl: resolution.analyzed.canonicalUrl || "",
+        resourceTitle: resolution.item?.title || resolution.analyzed.displayLabel || resolution.analyzed.identifier,
+        resourceDescription: resolution.item?.description || null,
+        resourceThumbnail: resolution.item?.thumbnail || null,
+        targetIdentity: resolution.targetIdentity,
+        scanId: resolution.manifest?.scanId || `scan-${Date.now()}`,
+        scanStrategy: scanConfig.strategy,
+        createdAt: resolution.manifest?.createdAt || new Date().toISOString(),
+        completedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        totalUniqueItems: resolution.items.length,
+        providerReportedLifetimeTotal: resolution.lifetimeTotal ?? null,
+        providerReportedQueryTotal: resolution.total ?? null,
+        duplicatesSkipped: resolution.duplicatesSkipped ?? 0,
+        omittedOrUnavailableReferences: resolution.omittedOrUnavailableReferences ?? 0,
+        oldestItemDate: resolution.intelligence?.chronology.oldestVideo?.date || null,
+        newestItemDate: resolution.intelligence?.chronology.newestVideo?.date || null,
+        items: resolution.items,
+        paginationMetadata: {
+          totalPagesFetched: resolution.page || 1,
+          windowsRetrieved: resolution.diagnostics?.windows || [],
+        },
+        status: resolution.items.length >= (resolution.lifetimeTotal ?? resolution.items.length)
+          ? "complete_within_verified_scope"
+          : "completed_with_known_limitations",
+      });
+      setSavedManifestNotice("Catalog successfully saved to Completed Explorations!");
+      setTimeout(() => setSavedManifestNotice(null), 4000);
+    } catch (err) {
+      setLoadMoreError(err instanceof Error ? err.message : "Failed to save completed exploration.");
+    } finally {
+      setIsSavingManifest(false);
+    }
+  }
+
+  // Continue Retrieval Action (supports single next page, date partitioning, and deep scan)
+  async function handleContinueRetrieval(strategy: "next_page" | "date_partition" | "deep_scan" = "next_page") {
     if (!resolution?.analyzed || loadingMore || !resolution.ok) return;
     setLoadingMore(true);
     setLoadMoreError(null);
-    try {
-      const nextPage = (resolution.checkpoint?.nextPage ?? currentPage) + 1;
-      const selectedKind = overrideKind === "auto" ? undefined : overrideKind;
-      const res = await resolveLinkExplorerInput(
-        input.trim(),
-        version,
-        selectedKind,
-        { ...scanConfig, maxPages: 1 },
-        undefined,
-        abortControllerRef.current?.signal,
-        {
-          startPage: nextPage,
-          nextCursor: resolution.nextCursor ?? resolution.checkpoint?.nextCursor ?? null,
-          existingItems: resolution.items,
-          existingDuplicates: resolution.duplicatesSkipped ?? 0,
-          visitedPages: resolution.checkpoint?.visitedPages ?? [],
-          visitedCursors: resolution.checkpoint?.visitedCursors ?? [],
-          providerReportedTotal: resolution.total,
-          omittedOrUnavailableReferences: resolution.omittedOrUnavailableReferences ?? 0,
-        }
-      );
+    if (strategy === "deep_scan") setIsContinuingDeep(true);
 
-      if (res.ok) {
-        const addedCount = res.items.length - resolution.items.length;
+    try {
+      const selectedKind = overrideKind === "auto" ? undefined : overrideKind;
+      let currentRes = resolution;
+      let keepLooping = true;
+      let loopCount = 0;
+      const maxLoops = strategy === "deep_scan" ? 25 : 1;
+
+      while (keepLooping && loopCount < maxLoops) {
+        if (abortControllerRef.current?.signal.aborted) break;
+        loopCount++;
+
+        const isCurrentlyInCurrentWindow = Boolean(currentRes.hasMore && strategy !== "date_partition");
+        let dateBeforeParam: string | null = null;
+        let dateWindowLabel: string | null = null;
+
+        if (!isCurrentlyInCurrentWindow) {
+          // Find the oldest video created date in currentRes.items to partition backward
+          let oldestIso: string | null = null;
+          for (const it of currentRes.items) {
+            if (it.createdAt) {
+              if (!oldestIso || new Date(it.createdAt).getTime() < new Date(oldestIso).getTime()) {
+                oldestIso = it.createdAt;
+              }
+            }
+          }
+          if (oldestIso) {
+            const oldestMs = new Date(oldestIso).getTime();
+            dateBeforeParam = new Date(Math.max(0, oldestMs - 1000)).toISOString();
+            dateWindowLabel = `Partition Before ${oldestIso.substring(0, 10)}`;
+          }
+        }
+
+        const nextPage = isCurrentlyInCurrentWindow
+          ? (currentRes.checkpoint?.nextPage ?? currentPage) + 1
+          : 1;
+
+        const res = await resolveLinkExplorerInput(
+          input.trim(),
+          version,
+          selectedKind,
+          { ...scanConfig, maxPages: strategy === "deep_scan" ? 2 : 1 },
+          (progress) => setScanProgress(progress),
+          abortControllerRef.current?.signal,
+          {
+            startPage: nextPage,
+            nextCursor: isCurrentlyInCurrentWindow ? (currentRes.nextCursor ?? currentRes.checkpoint?.nextCursor ?? null) : null,
+            existingItems: currentRes.items,
+            existingDuplicates: currentRes.duplicatesSkipped ?? 0,
+            visitedPages: isCurrentlyInCurrentWindow ? (currentRes.checkpoint?.visitedPages ?? []) : [],
+            visitedCursors: isCurrentlyInCurrentWindow ? (currentRes.checkpoint?.visitedCursors ?? []) : [],
+            providerReportedTotal: currentRes.total,
+            providerReportedLifetimeTotal: currentRes.lifetimeTotal,
+            omittedOrUnavailableReferences: currentRes.omittedOrUnavailableReferences ?? 0,
+            diagnostics: currentRes.diagnostics,
+            dateBefore: dateBeforeParam,
+            dateWindowLabel,
+          }
+        );
+
+        if (!res.ok) {
+          setLoadMoreError(res.error || "Failed to continue catalog retrieval.");
+          break;
+        }
+
+        const addedCount = res.items.length - currentRes.items.length;
+        currentRes = res;
         setResolution(res);
         setCurrentPage(res.page ?? nextPage);
 
         if (res.scanProgress) {
           setScanProgress(res.scanProgress);
-        } else {
-          setScanProgress((prev) =>
-            prev
-              ? {
-                  ...prev,
-                  pagesFetched: res.page ?? nextPage,
-                  itemsDiscovered: res.items.length + (res.duplicatesSkipped ?? 0),
-                  uniqueItemsAdded: res.items.length,
-                  duplicateCount: res.duplicatesSkipped ?? prev.duplicateCount,
-                  status: res.hasMore ? "fetching_pages" : "completed",
-                }
-              : null
-          );
         }
 
         if (latestSnapshotIdRef.current && addedCount > 0) {
@@ -340,17 +431,90 @@ export function LinkExplorerWorkspace() {
           );
         }
 
-        setLastAppendedToast(`${addedCount} additional records loaded`);
-        setTimeout(() => setLastAppendedToast(null), 4000);
-      } else {
-        // Safe error state: preserves all already loaded items
-        setLoadMoreError(res.error || `Failed to fetch page ${nextPage}.`);
+        setLastAppendedToast(`${addedCount} additional records loaded (${res.items.length} total)`);
+
+        // Checkpoint saving to IndexedDB
+        const owner = await getClientOwnerId();
+        await saveScanCheckpoint({
+          id: buildCheckpointKey(owner, version, res.effectiveKind, res.analyzed.identifier),
+          ownerId: owner,
+          scanId: res.manifest?.scanId || `scan-${Date.now()}`,
+          apiVersion: version,
+          resourceType: res.effectiveKind,
+          resourceId: res.analyzed.identifier,
+          canonicalUrl: res.analyzed.canonicalUrl || "",
+          targetIdentity: res.targetIdentity,
+          scanConfig,
+          currentPage: res.page ?? nextPage,
+          nextCursor: res.nextCursor,
+          visitedPages: res.checkpoint?.visitedPages || [],
+          visitedCursors: res.checkpoint?.visitedCursors || [],
+          completedPages: res.page ?? nextPage,
+          itemsRetrieved: res.items.length,
+          lifetimeTotal: res.lifetimeTotal ?? null,
+          queryTotal: res.total ?? null,
+          oldestItemDate: res.intelligence?.chronology.oldestVideo?.date || null,
+          newestItemDate: res.intelligence?.chronology.newestVideo?.date || null,
+          status: res.hasMore ? "fetching_pages" : (res.hasRemainingCatalog ? "more_results_available" : "completed"),
+          completedWindows: res.diagnostics?.windows || [],
+          updatedAt: new Date().toISOString(),
+          canResume: true,
+        });
+
+        // Check exit condition
+        const lifetime = res.lifetimeTotal;
+        const isComplete = lifetime ? res.items.length >= lifetime : !res.hasMore;
+        if (isComplete || addedCount === 0 || strategy !== "deep_scan") {
+          keepLooping = false;
+          if (isComplete && lifetime) {
+            await saveCompletedExplorationManifest({
+              manifestId: `manifest-${Date.now()}-${res.analyzed.identifier}`,
+              ownerId: owner,
+              provider: "dailymotion",
+              apiVersion: version,
+              resourceKind: res.effectiveKind,
+              resourceId: res.analyzed.identifier,
+              canonicalSourceUrl: res.analyzed.canonicalUrl || "",
+              resourceTitle: res.item?.title || res.analyzed.displayLabel || res.analyzed.identifier,
+              resourceDescription: res.item?.description || null,
+              resourceThumbnail: res.item?.thumbnail || null,
+              targetIdentity: res.targetIdentity,
+              scanId: res.manifest?.scanId || `scan-${Date.now()}`,
+              scanStrategy: scanConfig.strategy,
+              createdAt: res.manifest?.createdAt || new Date().toISOString(),
+              completedAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+              totalUniqueItems: res.items.length,
+              providerReportedLifetimeTotal: res.lifetimeTotal ?? null,
+              providerReportedQueryTotal: res.total ?? null,
+              duplicatesSkipped: res.duplicatesSkipped ?? 0,
+              omittedOrUnavailableReferences: res.omittedOrUnavailableReferences ?? 0,
+              oldestItemDate: res.intelligence?.chronology.oldestVideo?.date || null,
+              newestItemDate: res.intelligence?.chronology.newestVideo?.date || null,
+              items: res.items,
+              paginationMetadata: {
+                totalPagesFetched: res.page || 1,
+                windowsRetrieved: res.diagnostics?.windows || [],
+              },
+              status: "complete_within_verified_scope",
+            });
+            await deleteScanCheckpoint(owner, version, res.effectiveKind, res.analyzed.identifier);
+            setSavedManifestNotice("Catalog 100% complete — saved to Completed Explorations!");
+          }
+        } else if (scanConfig.throttleMs > 0) {
+          await new Promise((r) => setTimeout(r, scanConfig.throttleMs));
+        }
       }
     } catch (err) {
-      setLoadMoreError(err instanceof Error ? err.message : "Error loading more records.");
+      setLoadMoreError(err instanceof Error ? err.message : "Error continuing retrieval.");
     } finally {
       setLoadingMore(false);
+      setIsContinuingDeep(false);
     }
+  }
+
+  async function handleLoadMore() {
+    await handleContinueRetrieval("next_page");
   }
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -986,46 +1150,166 @@ export function LinkExplorerWorkspace() {
                   </div>
                 )}
 
-                {/* Load More Button */}
-                {resolution.hasMore ? (
-                  <div className="flex flex-col items-center gap-2">
-                    <button
-                      type="button"
-                      disabled={loadingMore}
-                      onClick={() => void handleLoadMore()}
-                      className="inline-flex min-h-10 items-center gap-2 rounded-lg bg-primary px-6 text-xs font-black text-primary-foreground hover:opacity-95 disabled:opacity-50 transition-all cursor-pointer shadow-xs"
-                    >
-                      {loadingMore ? (
-                        <>
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                          Loading next page...
-                        </>
-                      ) : (
-                        <>
-                          <RefreshCw className="h-3.5 w-3.5" />
-                          Load More Videos
-                        </>
+                {/* Dedicated Catalog Retrieval Progress & Continuation Actions (2026) */}
+                {(() => {
+                  const lifetimeTotal =
+                    resolution.lifetimeTotal ??
+                    resolution.intelligence?.statistics.providerReportedLifetimeTotal ??
+                    resolution.intelligence?.statistics.providerReportedVideos ??
+                    null;
+                  const hasRemainingCatalog = Boolean(lifetimeTotal && lifetimeTotal > resolution.items.length);
+                  const remainingCount = lifetimeTotal ? Math.max(0, lifetimeTotal - resolution.items.length) : 0;
+                  const coverageRatio =
+                    lifetimeTotal && lifetimeTotal > 0
+                      ? Math.min(100, Math.round((resolution.items.length / lifetimeTotal) * 1000) / 10)
+                      : null;
+
+                  return (
+                    <div className="w-full max-w-2xl rounded-2xl border border-border/80 bg-card/90 p-5 shadow-sm space-y-4 text-center">
+                      {/* Header */}
+                      <div className="flex items-center justify-between border-b border-border/60 pb-2.5">
+                        <div className="flex items-center gap-2">
+                          <Compass className="h-4 w-4 text-primary" />
+                          <span className="text-xs font-black uppercase tracking-wider text-foreground">
+                            Catalog Retrieval Progress
+                          </span>
+                        </div>
+                        {coverageRatio !== null && (
+                          <span className="text-xs font-black text-amber-500">
+                            {coverageRatio}% of reported reference count
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Numbers */}
+                      <div className="space-y-1">
+                        <div className="text-xl sm:text-2xl font-black tracking-tight text-foreground">
+                          {resolution.items.length.toLocaleString()}{" "}
+                          <span className="text-muted-foreground text-sm font-bold">/</span>{" "}
+                          {lifetimeTotal ? `${lifetimeTotal.toLocaleString()} references retrieved` : "references retrieved"}
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                          {hasRemainingCatalog ? (
+                            <span>
+                              <strong className="text-amber-500">{remainingCount.toLocaleString()}</strong> additional references remain on Dailymotion across earlier dates.
+                            </span>
+                          ) : (
+                            <span className="text-emerald-500 font-bold">
+                              All accessible references retrieved within verified scope ({resolution.items.length.toLocaleString()} records loaded).
+                            </span>
+                          )}
+                        </p>
+                      </div>
+
+                      {/* Progress Bar */}
+                      {coverageRatio !== null && (
+                        <div className="w-full bg-secondary/80 rounded-full h-2 overflow-hidden">
+                          <div
+                            className={cn(
+                              "h-2 rounded-full transition-all duration-300",
+                              coverageRatio >= 100 ? "bg-emerald-500" : "bg-primary"
+                            )}
+                            style={{ width: `${Math.min(100, Math.max(2, coverageRatio))}%` }}
+                          />
+                        </div>
                       )}
-                    </button>
-                    {loadMoreError && (
-                      <div className="flex items-center gap-2 rounded-lg border border-destructive/40 bg-destructive/10 p-2 text-xs text-destructive">
-                        <AlertCircle className="h-4 w-4 shrink-0" />
-                        <span>{loadMoreError}</span>
+
+                      {/* Multi-Window / Continuation Status Notice */}
+                      {!resolution.hasMore && hasRemainingCatalog && (
+                        <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-600 dark:text-amber-400 font-semibold space-y-1">
+                          <p>Current retrieval window completed ({resolution.items.length.toLocaleString()} records loaded).</p>
+                          <p className="text-[11px] opacity-90">
+                            Dailymotion caps single query windows at 1,000 items. To retrieve the remaining {remainingCount.toLocaleString()} records, continue using date partitioning.
+                          </p>
+                        </div>
+                      )}
+
+                      {/* Continuation Actions Button Cluster */}
+                      <div className="flex flex-wrap items-center justify-center gap-2 pt-2">
+                        {resolution.hasMore && (
+                          <button
+                            type="button"
+                            disabled={loadingMore}
+                            onClick={() => void handleContinueRetrieval("next_page")}
+                            className="inline-flex min-h-10 items-center gap-2 rounded-xl bg-primary px-5 text-xs font-black text-primary-foreground hover:opacity-95 disabled:opacity-50 transition cursor-pointer shadow-xs"
+                          >
+                            {loadingMore && !isContinuingDeep ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <RefreshCw className="h-3.5 w-3.5" />
+                            )}
+                            Load Next Page
+                          </button>
+                        )}
+
+                        {hasRemainingCatalog && (
+                          <button
+                            type="button"
+                            disabled={loadingMore}
+                            onClick={() => void handleContinueRetrieval("date_partition")}
+                            className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-amber-500/50 bg-amber-500/15 px-5 text-xs font-black text-amber-600 dark:text-amber-400 hover:bg-amber-500/25 disabled:opacity-50 transition cursor-pointer shadow-xs"
+                          >
+                            {loadingMore && !isContinuingDeep ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <ArrowRight className="h-3.5 w-3.5" />
+                            )}
+                            Continue Fetching (Date Partitioning)
+                          </button>
+                        )}
+
+                        {hasRemainingCatalog && (
+                          <button
+                            type="button"
+                            disabled={loadingMore}
+                            onClick={() => void handleContinueRetrieval("deep_scan")}
+                            className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-primary/50 bg-primary/10 px-5 text-xs font-black text-primary hover:bg-primary/20 disabled:opacity-50 transition cursor-pointer shadow-xs"
+                          >
+                            {isContinuingDeep ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <Sparkles className="h-3.5 w-3.5" />
+                            )}
+                            Resume Deep Scan
+                          </button>
+                        )}
+
+                        {/* Save to Completed Explorations Button */}
                         <button
                           type="button"
-                          onClick={() => void handleLoadMore()}
-                          className="ml-2 font-bold underline hover:opacity-80 cursor-pointer"
+                          disabled={isSavingManifest}
+                          onClick={() => void handleSaveCompletedExploration()}
+                          className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-border bg-secondary/80 px-4 text-xs font-black text-foreground hover:bg-secondary disabled:opacity-50 transition cursor-pointer"
+                          title="Save this catalog snapshot permanently into Completed Explorations"
                         >
-                          Retry
+                          {isSavingManifest ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          ) : savedManifestNotice ? (
+                            <Check className="h-3.5 w-3.5 text-emerald-500" />
+                          ) : (
+                            <BookmarkCheck className="h-3.5 w-3.5 text-primary" />
+                          )}
+                          {savedManifestNotice ? "Saved to Completed Explorations!" : "Save to Completed Explorations"}
                         </button>
                       </div>
-                    )}
-                  </div>
-                ) : (
-                  <div className="text-xs font-semibold text-muted-foreground/80 py-1">
-                    All available pages have been retrieved ({resolution.items.length} records loaded)
-                  </div>
-                )}
+
+                      {/* Error Banner */}
+                      {loadMoreError && (
+                        <div className="flex items-center justify-center gap-2 rounded-xl border border-destructive/40 bg-destructive/10 p-2.5 text-xs text-destructive">
+                          <AlertCircle className="h-4 w-4 shrink-0" />
+                          <span>{loadMoreError}</span>
+                          <button
+                            type="button"
+                            onClick={() => void handleContinueRetrieval("date_partition")}
+                            className="ml-2 font-bold underline hover:opacity-80 cursor-pointer"
+                          >
+                            Retry
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
               </div>
             </div>
           ) : (

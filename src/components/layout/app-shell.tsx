@@ -9,6 +9,7 @@ import {
   BookmarkPlus,
   Compass,
   ExternalLink,
+  FolderCheck,
   FolderKanban,
   History,
   LayoutDashboard,
@@ -95,6 +96,7 @@ const navSections: NavSection[] = [
     links: [
       { label: "Saved Items", href: "/saved-items", icon: BookmarkCheck },
       { label: "Saved Titles", href: "/saved-titles", icon: BookmarkPlus },
+      { label: "Completed Explorations", href: "/completed-explorations", icon: FolderCheck },
       { label: "Playlists", href: "/playlists", icon: ListMusic },
       { label: "Search History", href: "/search-history", icon: History },
       { label: "Collections", href: "/collections", icon: FolderKanban },

@@ -24,6 +24,69 @@ Scope: Project source-of-truth ledger, updated after Link Explorer Catalog Compl
 - [Future Roadmap](#future-roadmap)
 - [Agent Instructions](#agent-instructions)
 
+## 2026-11-20 Link Explorer: Continuation Retrieval Workflow, Durable Checkpoints, Completed Explorations Local Archive & Description HTML Sanitization
+
+**User intent addressed**
+- Investigated and fixed the catalog retrieval workflow and usability bottleneck where target User `lsulli282` stalled at 700 retrieved items out of 3,090 provider-reported references, showing the misleading message `"All available pages have been retrieved (700 records loaded)"`.
+- Added an interactive, prominent `Catalog Retrieval Progress` card replacing the false completion banner:
+  - Displays exact progress ratio: `700 / 3,090 references retrieved (22.7% of the reported reference count)`.
+  - Provides explicit continuation actions: `[Load Next Page]`, `[Continue Fetching (Date Partitioning)]`, `[Resume Deep Scan]`, and `[Save to Local Archive]`.
+  - Dedupes and appends newly fetched records to existing items without replacing, overwriting, or discarding previously loaded records.
+- Built automatic continuation and durable, owner-scoped scan checkpoints (`link_explorer_scan_checkpoints` in IndexedDB store v4):
+  - Checkpoints store `ownerId`, `apiVersion`, `resourceKind`, `resourceId`, `canonicalUrl`, `scanId`, `completedPages`, `pendingPages`, `lastDateBefore`, `itemsRetrieved`, `providerReportedTotal`, `status`, and `updatedAt`.
+  - Fully survives browser refreshes, tab closures, network loss, and user sign-in/out.
+- Prevented false completion across Link Explorer: accurately differentiates `more_results_available`, `capped_window`, `standard_scan_completed`, and `complete_within_verified_scope`.
+- Built the permanent local Completed Explorations archive page at `/completed-explorations` (placed under the `Library` section in the sidebar with `FolderCheck` icon):
+  - Consolidated versioned JSON manifests (`manifestSchemaVersion: "1.0.0"`) with deterministic SHA-256 checksums stored in IndexedDB (`completed_explorations_manifests`).
+  - Top search bar: `Search saved exploration results...` with `LOCAL ARCHIVE SEARCH · ZERO API CALLS` and `Showing X matching records across Y saved catalogs`, filtering in-memory across all saved manifests by video title, description, channel name, ID, and tags with **ZERO network calls**.
+  - Two segmented tabs: `Completed Explorations` (card grid with `Open Catalog` [0 network calls], `View Metadata`, `View Raw Manifest`, `Export JSON`, `Delete Archive`) and `In-Progress Scans` (incomplete/paused checkpoints with progress ratio and `Resume in Link Explorer`).
+  - Integrated modal catalog inspector with instant in-modal title filtering and 0 network requests.
+- Eliminated raw HTML tags (e.g. `<br />`, `<p>`) and unescaped entities (`&quot;`, `&amp;`, `&#039;`) in channel and video descriptions via `formatSafeDescription` utility, preventing literal `<br />` strings from rendering in UI cards and intelligence panels.
+- Maintained strict production safety: **ZERO local production builds** (`npm run build`, `next build`, `vercel build`, `vercel deploy --prebuilt` strictly prohibited). Verified through targeted Vitest test suites.
+
+**Architecture & Implementation Details**
+
+1. **Root Cause Analysis & Empirical Discovery (700 vs 3,090 Videos)**:
+   - *Hard API Limit*: Dailymotion V1 API `/user/{id}/videos` imposes a hard ceiling of 1,000 items (10 pages of 100 items) for any single query window. Page 11 returns an empty array `[]` and `has_more: false`.
+   - *Target Behavior*: For `lsulli282`, pages 1-7 yielded 700 items (500 in 2017, 200 in 2016). When page 11 returned empty, `hasMore` became `false`.
+   - *UI Bug*: The workspace checked `!hasMore` and rendered `"All available pages have been retrieved (700 records loaded)"`, hiding the remaining 2,390 videos.
+   - *Empirical Proof*: Verified via `curl.exe -4` that passing `created_before=1481536800` (the Unix timestamp of the oldest video in the 700-item set) immediately unlocks the earlier 2,390 videos from 2016 without hitting the page 10 ceiling.
+
+2. **Interactive Continuation Workflow (`src/components/link-explorer/link-explorer-workspace.tsx` & `link-explorer-service.ts`)**:
+   - Replaced false completion banner with `Catalog Retrieval Progress` card showing progress percentage (`(retrieved / total) * 100`).
+   - Wired `handleContinueRetrieval(strategy: "next_page" | "date_partition" | "deep_scan")`:
+     - Calculates oldest video's creation timestamp (`created_time` / `publishedAt`) for backwards date-slicing (`dateBeforeParam`).
+     - Passes `continuationState: { dateBefore, targetIdentity, visitedPages, visitedCursors }` to `resolveLinkExplorerInput`.
+     - Appends newly retrieved items into existing items array using `seenCompositeKeys` deduplication.
+     - Persists scan progress to durable scan checkpoint after each successful page.
+
+3. **Durable Scan Checkpoints (`src/lib/link-explorer/scan-checkpoint-service.ts` & `src/lib/local-first/indexeddb-store.ts`)**:
+   - Upgraded IndexedDB version to 4, adding store `link_explorer_scan_checkpoints` (`SCAN_CHECKPOINTS`).
+   - Built `ScanCheckpointService` with `saveScanCheckpoint`, `getScanCheckpoint`, `listScanCheckpoints`, `deleteScanCheckpoint`, and deterministic key builder `buildCheckpointKey(ownerId, apiVersion, resourceKind, resourceId)`.
+   - Owner-scoped isolation: unauthenticated users fall back to `local-owner`, authenticated users use their Supabase UUID.
+
+4. **Permanent Local Archive Page (`src/app/completed-explorations/page.tsx` & `src/components/completed-explorations/completed-explorations-workspace.tsx`)**:
+   - Created `/completed-explorations` page with Suspense wrapper and metadata.
+   - Added to sidebar `Library` section in `src/components/layout/app-shell.tsx` with `FolderCheck` icon.
+   - Built versioned manifest service `CompletedExplorationsService` (`src/lib/link-explorer/completed-explorations-service.ts`):
+     - `CompletedExplorationManifest` with `manifestSchemaVersion: "1.0.0"`.
+     - Generates deterministic SHA-256 checksums (`manifestChecksum`).
+     - In-memory multi-catalog search function `searchCompletedExplorations` with **ZERO network calls**.
+   - Workspace features:
+     - Real-time in-memory search bar (`LOCAL ARCHIVE SEARCH · ZERO API CALLS`).
+     - Archive card grid with `Open Catalog` (opens in-memory catalog modal with 0 network calls), `JSON` raw manifest viewer, `Export` JSON download, and `Delete` confirmation.
+     - In-Progress Scans tab with progress bars and `Resume in Link Explorer` action.
+
+5. **Description HTML Sanitization (`src/lib/utils/format-description.ts`, `result-card.tsx`, `resource-intelligence-overview.tsx`)**:
+   - Created `formatSafeDescription(raw)`:
+     - Strips HTML tags (`<br />`, `<p>`, `<div>`, etc.) and converts break tags into clean newlines.
+     - Decodes HTML entities (`&amp;`, `&quot;`, `&#039;`, `&lt;`, `&gt;`, `&nbsp;`).
+     - Eliminates raw `<br />` rendering in result cards and channel headers.
+
+6. **Verification & Test Coverage (`src/lib/link-explorer/__tests__/link-explorer-intelligence.test.ts`)**:
+   - Added 16 automated tests covering HTML sanitization, manifest checksum generation, owner-scoped isolation, zero-network in-memory archive search, scan checkpoint lifecycle, and multi-window continuation.
+   - 100% test pass rate in Vitest across all test suites.
+
 ## 2026-11-20 Dailymotion Link Explorer: Catalog Completeness, Accurate Metrics, Date Windowing & In-Memory Local Title Search
 
 **User intent addressed**
