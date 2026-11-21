@@ -717,101 +717,179 @@ export default function SavedItemsPage() {
         </div>
       )}
 
-      {/* Results Rendering: List View */}
+      {/* Results Rendering: Dedicated Data Table View with explicit Title column */}
       {ready && viewMode === "list" && (
-        <div className="divide-y divide-[var(--border)] rounded-xl border border-[var(--border)] bg-[var(--card)]">
-          {filteredItems.map((item) => {
-            const isSelected = selectedKeys.has(item.compositeKey);
-            const openUrl = canonicalDailymotionUrl(toDiscoveryKind(item.resourceType), item.id, item.url);
-            const stableId = item.stableId || `dailymotion:${item.resourceType}:${item.id}`;
-
-            return (
-              <div
-                key={item.compositeKey}
-                className={`flex flex-col gap-3 p-4 transition sm:flex-row sm:items-center sm:justify-between ${
-                  isSelected ? "bg-[var(--primary)]/5" : "hover:bg-[var(--surface-container-low)]"
-                }`}
-              >
-                <div className="flex min-w-0 items-start gap-3">
+        <div className="overflow-x-auto rounded-xl border border-[var(--border)] bg-[var(--card)] shadow-xs">
+          <table className="w-full min-w-[760px] text-left text-xs">
+            <thead className="border-b border-[var(--border)] bg-[var(--surface-container-low)] text-[11px] font-black uppercase text-[var(--muted-foreground)]">
+              <tr>
+                <th className="w-10 px-3 py-3">
                   <input
                     type="checkbox"
-                    checked={isSelected}
-                    onChange={() => toggleSelectItem(item.compositeKey)}
-                    className="mt-1 h-4 w-4 shrink-0 rounded accent-[var(--primary)]"
+                    checked={allVisibleSelected}
+                    onChange={toggleSelectAll}
+                    className="h-3.5 w-3.5 rounded accent-[var(--primary)]"
+                    title="Select all visible"
                   />
-
-                  <div className="h-16 w-24 shrink-0 overflow-hidden rounded-md bg-[var(--surface-container-high)]">
-                    {item.thumbnail ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={item.thumbnail} alt="" loading="lazy" className="h-full w-full object-cover" />
-                    ) : (
-                      <div className="flex h-full w-full items-center justify-center text-[var(--muted-foreground)]">
-                        {item.resourceType === "CHANNEL" || item.resourceType === "USER" || item.resourceType === "PROFILE" ? (
-                          <Compass className="h-5 w-5" />
-                        ) : (
-                          <Tv className="h-5 w-5" />
-                        )}
-                      </div>
-                    )}
+                </th>
+                <th className="min-w-[280px] px-3 py-3">
+                  <div className="flex items-center gap-1.5 text-[var(--foreground)]">
+                    <Tv className="h-3.5 w-3.5 text-[var(--primary)]" />
+                    <span>Title</span>
                   </div>
+                </th>
+                <th className="w-24 px-3 py-3">Resource</th>
+                <th className="w-36 px-3 py-3">ID</th>
+                <th className="w-32 px-3 py-3">Owner / Channel</th>
+                <th className="w-28 px-3 py-3">Status</th>
+                <th className="w-28 px-3 py-3">Saved Date</th>
+                <th className="w-28 px-3 py-3 text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-[var(--border)]">
+              {filteredItems.map((item) => {
+                const isSelected = selectedKeys.has(item.compositeKey);
+                const openUrl = canonicalDailymotionUrl(toDiscoveryKind(item.resourceType), item.id, item.url);
+                const stableId = item.stableId || `dailymotion:${item.resourceType}:${item.id}`;
 
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-1.5 text-[10px] font-black uppercase">
-                      <span className="rounded bg-blue-500/15 px-1.5 py-0.5 text-blue-600">{item.resourceType}</span>
-                      <span className="font-mono text-zinc-500">{stableId}</span>
-                      <span className="rounded bg-zinc-500/10 px-1.5 py-0.5">
+                return (
+                  <tr
+                    key={item.compositeKey}
+                    className={`transition hover:bg-[var(--surface-container-low)] ${
+                      isSelected ? "bg-[var(--primary)]/5" : ""
+                    }`}
+                  >
+                    <td className="px-3 py-3">
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={() => toggleSelectItem(item.compositeKey)}
+                        className="h-3.5 w-3.5 rounded accent-[var(--primary)]"
+                      />
+                    </td>
+                    <td className="px-3 py-3">
+                      <div className="flex items-center gap-3">
+                        <div className="h-10 w-16 shrink-0 overflow-hidden rounded bg-[var(--surface-container-high)]">
+                          {item.thumbnail ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img src={item.thumbnail} alt="" loading="lazy" className="h-full w-full object-cover" />
+                          ) : (
+                            <div className="flex h-full w-full items-center justify-center text-[var(--muted-foreground)]">
+                              <Tv className="h-4 w-4" />
+                            </div>
+                          )}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="line-clamp-1 font-black text-sm text-[var(--foreground)]" title={item.title}>
+                            {openUrl ? (
+                              <a href={openUrl} target="_blank" rel="noreferrer noopener" className="hover:underline">
+                                {item.title}
+                              </a>
+                            ) : (
+                              item.title
+                            )}
+                          </p>
+                          {item.description && (
+                            <p className="line-clamp-1 text-[11px] text-[var(--muted-foreground)]">
+                              {item.description}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    </td>
+                    <td className="px-3 py-3 font-semibold">
+                      <span
+                        className={`rounded px-1.5 py-0.5 text-[10px] font-black uppercase ${
+                          item.resourceType === "CHANNEL" || item.resourceType === "USER" || item.resourceType === "PROFILE"
+                            ? "bg-blue-500/15 text-blue-600 dark:text-blue-400"
+                            : "bg-purple-500/15 text-purple-600 dark:text-purple-400"
+                        }`}
+                      >
+                        {item.resourceType}
+                      </span>
+                    </td>
+                    <td className="px-3 py-3 font-mono text-[11px] text-[var(--muted-foreground)]">
+                      <div className="flex items-center gap-1">
+                        <span className="truncate max-w-[100px]" title={item.id}>
+                          {item.id}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => void copyToClipboard(stableId, item.compositeKey)}
+                          className="shrink-0 p-1 hover:text-[var(--foreground)]"
+                          title="Copy stable ID"
+                        >
+                          {copiedKey === item.compositeKey ? (
+                            <Check className="h-3 w-3 text-emerald-500" />
+                          ) : (
+                            <Copy className="h-3 w-3" />
+                          )}
+                        </button>
+                      </div>
+                    </td>
+                    <td className="px-3 py-3 text-[var(--muted-foreground)]">
+                      <span className="truncate block max-w-[110px]" title={item.ownerName || ""}>
+                        {item.ownerName || "—"}
+                      </span>
+                    </td>
+                    <td className="px-3 py-3">
+                      <span
+                        className={`rounded px-1.5 py-0.5 text-[10px] font-bold uppercase ${
+                          item.syncStatus === "cloud_verified"
+                            ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"
+                            : "bg-zinc-500/15 text-zinc-600 dark:text-zinc-400"
+                        }`}
+                      >
                         {item.syncStatus === "cloud_verified" ? "Cloud verified" : "Local only"}
                       </span>
-                    </div>
-
-                    <h4 className="mt-1 truncate text-sm font-black">
-                      {openUrl ? (
-                        <a href={openUrl} target="_blank" rel="noreferrer noopener" className="hover:underline">
-                          {item.title}
-                        </a>
-                      ) : (
-                        item.title
-                      )}
-                    </h4>
-
-                    <p className="mt-0.5 text-xs text-[var(--muted-foreground)]">
-                      {[item.ownerName, item.viewsTotal ? `${compactNumber.format(item.viewsTotal)} views` : null, `Saved ${safeFormatDate(item.savedAt)}`]
-                        .filter(Boolean)
-                        .join(" · ")}
-                    </p>
-                  </div>
-                </div>
-
-                <div className="flex shrink-0 items-center gap-2 pt-2 sm:pt-0">
-                  <button
-                    type="button"
-                    onClick={() => void coordinator.setSavedItemFavorite(item.compositeKey, !item.isFavorite)}
-                    className="p-1.5 text-[var(--muted-foreground)] hover:text-amber-400"
-                  >
-                    <Star className={`h-4 w-4 ${item.isFavorite ? "fill-amber-400 text-amber-400" : ""}`} />
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setInspectedItem(item)}
-                    className="rounded-md border border-[var(--border)] p-1.5 hover:bg-[var(--surface-container-high)]"
-                    title="Inspect JSON"
-                  >
-                    <Code2 className="h-4 w-4" />
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => void coordinator.removeItem(item.compositeKey)}
-                    className="rounded-md border border-red-500/30 p-1.5 text-red-600 hover:bg-red-500/10"
-                    title="Remove item"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </button>
-                </div>
-              </div>
-            );
-          })}
+                    </td>
+                    <td className="px-3 py-3 text-[11px] text-[var(--muted-foreground)] whitespace-nowrap">
+                      {safeFormatDate(item.savedAt)}
+                    </td>
+                    <td className="px-3 py-3 text-right">
+                      <div className="inline-flex items-center gap-1 justify-end">
+                        <button
+                          type="button"
+                          onClick={() => void coordinator.setSavedItemFavorite(item.compositeKey, !item.isFavorite)}
+                          className="rounded p-1 text-[var(--muted-foreground)] hover:text-amber-400"
+                          title={item.isFavorite ? "Remove favorite" : "Mark favorite"}
+                        >
+                          <Star className={`h-3.5 w-3.5 ${item.isFavorite ? "fill-amber-400 text-amber-400" : ""}`} />
+                        </button>
+                        {openUrl && (
+                          <a
+                            href={openUrl}
+                            target="_blank"
+                            rel="noreferrer noopener"
+                            className="rounded p-1 text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
+                            title="Open in Dailymotion"
+                          >
+                            <ExternalLink className="h-3.5 w-3.5" />
+                          </a>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => setInspectedItem(item)}
+                          className="rounded p-1 text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
+                          title="Inspect raw JSON"
+                        >
+                          <Code2 className="h-3.5 w-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void coordinator.removeItem(item.compositeKey)}
+                          className="rounded p-1 text-red-500/80 hover:bg-red-500/10 hover:text-red-600"
+                          title="Remove item"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
       )}
 

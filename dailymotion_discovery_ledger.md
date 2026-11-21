@@ -1,8 +1,8 @@
 # Dailymotion Discovery Platform Ledger
 
-Updated: 2026-11-20
+Updated: 2026-11-21
 Repo path: `E:\discovery\dailymotion-discovery`
-Scope: Project source-of-truth ledger, updated after Link Explorer Durable Fetch Checkpoints, Progressive IndexedDB Persistence, Continuation Workflow & Zero-API Local Catalog Search Engine implementation. 100% Vitest / TypeScript verification.
+Scope: Project source-of-truth ledger, updated after Link Explorer V1/V2 Separation Repair, Dedicated Video Title Persistence, Complete Catalog Fetching (No Artificial Loop Caps), Durable Local Storage & Owner-Scoped Cloudflare R2 Architecture (`admins/{adminId}/dailymotion/...`). 100% Vitest / TypeScript verification.
 
 ## Table of Contents
 
@@ -23,6 +23,79 @@ Scope: Project source-of-truth ledger, updated after Link Explorer Durable Fetch
 - [Known Limitations](#known-limitations)
 - [Future Roadmap](#future-roadmap)
 - [Agent Instructions](#agent-instructions)
+
+## 2026-11-21 Link Explorer V1/V2 Separation, Video Title Persistence, Complete Fetching & Owner-Scoped R2 Architecture
+
+**User intent addressed**
+- Repaired the Link Explorer and Channel Fetcher end-to-end data lifecycle, addressing title loss, version-contract mixing, pagination cutoffs, local persistence vulnerabilities, and cloud storage organization.
+- **Dedicated, Reliable Video Title Field**: Fixed video titles across the entire pipeline. Guaranteed that video titles are never replaced by video IDs or channel names, never lost during normalization, never overwritten by null/empty incoming payloads, and preserved across merges (`mergeTitles`).
+- **Complete Separation of Dailymotion API V1 vs V2 Contracts**:
+  - Eliminated V1 parameter leakage into V2 requests (removed `duration` -> `source.duration`, removed `views_total` which does not exist in V2, changed `owner` -> `profile.profile_id,profile.name`, included official V2 fields).
+  - Ensured channel video queries under V2 forward the resolved profile ID (`profileId`) rather than raw legacy handles or usernames.
+- **Exhaustive Fetching Without Premature Pagination Caps**:
+  - Removed the artificial `loopBudget = 200` ceiling in deep scan mode (`loopBudget = 10000`).
+  - Added resilient empty-page thresholding (`consecutiveEmptyPages >= 5` before aborting) so isolated omitted, private, or deleted videos in channels/playlists do not prematurely stop deep catalog ingestion.
+- **Durable Local Storage & Offline-First Modal Resilience**:
+  - Fixed the Add Saved Title modal error ("Network error while submitting entry" on user URLs like `https://www.dailymotion.com/user/lsulli282`), adding an immediate local-first IndexedDB persistence fallback so manual entries succeed even if remote auth/network is unreachable.
+- **Owner-Scoped Cloudflare R2 Architecture (`admins/{adminId}/dailymotion/...`)**:
+  - Designed and implemented independent storage trees:
+    - Items: `admins/{adminId}/dailymotion/items/{resourceType}/{id}.json`
+    - Titles: `admins/{adminId}/dailymotion/titles/{resourceType}/{id}.json` (using lightweight `StoredTitleRecord`)
+    - Indexes: `admins/{adminId}/dailymotion/indexes/{indexName}.json`
+    - Manifests: `admins/{adminId}/dailymotion/manifest.json`
+  - Cloudflare Worker (`cloudflare/workers/dailymotion-discovery-api`): Updated `isOwnerScopedDailymotionKey` to authorize `admins/${cleanOwner}/dailymotion/` while preserving backward compatibility with legacy `dailymotion/persistence/...` archives.
+  - Implemented strict 9-step cryptographic verification (`verifyLocalItemForSafeDeletion`) ensuring local records are never deleted until confirmed, verified, and SHA-256 matched in both items and titles cloud paths.
+- **Dedicated Saved Items Data Table View**:
+  - Replaced the stacked list view with a responsive, structured Data Table featuring an explicit `Title` column header, `Resource`, `ID`, `Owner / Channel`, `Status`, `Saved Date`, and `Actions`.
+
+**Architecture & Implementation Details**
+
+1. **Title Normalization Engine (`src/lib/titles/title-normalization.ts`)**:
+   - `normalizeTitle(rawTitle, fallback)`: Strips whitespace, rejects generic placeholders (`"untitled"`, `"untitled video"`, `"unknown"`), and returns clean title string.
+   - `isMeaningfulTitle(title)`: Returns boolean indicating whether title contains substantive characters beyond IDs and placeholders.
+   - `mergeTitles(existingTitle, incomingTitle)`: Non-destructive merge logic strictly preserving existing valid titles when incoming payloads lack titles or contain placeholders.
+   - `buildStoredTitleRecord`: Produces a lightweight `StoredTitleRecord` schema `{ provider, kind, id, canonicalItemKey, title, sourceApiVersion, updatedAt, schemaVersion }`.
+
+2. **Link Explorer V2 Request & Pagination Repair (`src/lib/link-explorer/link-explorer-service.ts`)**:
+   - `resolveFieldSelection`: V2 fields updated to official REST specification (`video_id,title,description,created_at,published_at,video_url,visibility,profile.profile_id,profile.name,source.duration,thumbnail.h720_url,thumbnail.h480_url,likes_total,aspect_ratio,embed_url`).
+   - Line 632: Dynamic profile ID resolution for V2 channel queries: `queryParams.set(version === "v2" ? "profileId" : "owner", effectiveOwnerOrProfile)`.
+   - Line 602 & 1216: Deep scan loop budget expanded from 200 to 10,000 pages for complete ingestion.
+   - Line 760: Exit condition thresholded with `consecutiveEmptyPages >= 5` to navigate past gaps in playlists and channel listings.
+
+3. **Cloudflare Worker Owner-Scoped Authorization (`cloudflare/workers/dailymotion-discovery-api/src/index.ts`)**:
+   - `isOwnerScopedDailymotionKey`: Extended to validate `admins/${cleanOwner}/dailymotion/` prefixes, enforcing tenant and admin isolation at the edge.
+   - Tested and verified against path traversal, cross-owner token spoofing, and immutable part collisions.
+
+4. **Owner-Scoped R2 Storage Service (`src/lib/storage/owner-scoped-r2-service.ts`)**:
+   - `uploadOwnerScopedItemsAndTitles`: Batches and uploads items to `admins/{adminId}/dailymotion/items/...` and dedicated titles to `admins/{adminId}/dailymotion/titles/...` with SHA-256 integrity verification, updating `titles-index.json` and `manifest.json`.
+   - `verifyLocalItemForSafeDeletion`: Strict 9-step check:
+     - Step 1: Local item validation.
+     - Step 2: Cloud sync state confirmation.
+     - Step 3: Cloud item object existence check.
+     - Step 4: Cloud title object existence check.
+     - Step 5: Item SHA-256 digest / identity verification.
+     - Step 6: Title SHA-256 digest verification.
+     - Step 7: Title meaningfulness verification.
+     - Step 8: Manifest / index reference linkage.
+     - Step 9: Safe local deletion clearance.
+   - Integrated into `src/lib/persistence/r2-sync-service.ts` (`executeSaveAll`), saving individual records concurrently with generational archive bundles.
+
+5. **Saved Items Data Table (`src/app/saved-items/page.tsx`)**:
+   - Dedicated table view with explicit `Title` column header, `Resource`, `ID`, `Owner / Channel`, `Status`, `Saved Date`, and `Actions`.
+   - Includes selection checkboxes, thumbnail previews, stable ID copy buttons, external Dailymotion links, and raw JSON inspection.
+
+6. **Offline-First Saved Title Entry Modal (`src/components/saved-titles/add-saved-title-modal.tsx`)**:
+   - Added resilient local-first IndexedDB persistence fallback so "+ Save to Local" always succeeds even if remote network/auth fails.
+
+7. **Verification**:
+   - `title-normalization.test.ts`: 4/4 Vitest tests passed.
+   - `owner-scoped-r2-service.test.ts`: 3/3 Vitest tests passed.
+   - `cloudflare/workers/dailymotion-discovery-api/src/index.test.ts`: 4/4 Vitest tests passed.
+   - `link-explorer-intelligence.test.ts`: 33/33 Vitest tests passed.
+   - `catalog-persistence-and-search.test.ts`: 13/13 Vitest tests passed.
+   - Total test suite: 57/57 Vitest tests passing (100%).
+   - `tsc --noEmit`: 100% clean compilation (zero type errors).
+
 
 ## 2026-11-20 Link Explorer: Durable Fetch Checkpoints, Progressive IndexedDB Persistence, Continuation Workflow & Zero-API Local Catalog Search Engine
 

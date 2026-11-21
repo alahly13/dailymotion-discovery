@@ -9,6 +9,7 @@
 import { zeroSafeNumber } from "@/lib/utils/zero-safe-number";
 import type { DiscoveryItem, DiscoveryItemKind } from "./types";
 import { createDailymotionProvenance } from "./provenance";
+import { normalizeTitle, UNTITLED_VIDEO_PLACEHOLDER } from "@/lib/titles/title-normalization";
 
 export interface V1RawVideo {
   id?: string;
@@ -110,7 +111,7 @@ export function normalizeV1Video(raw: V1RawVideo): DiscoveryItem | null {
     raw.thumbnail_720_url ?? raw.thumbnail_480_url ?? raw.thumbnail_360_url ?? raw.thumbnail_url ?? null;
   return {
     ...base("video", raw.id, raw),
-    title: raw.title ?? "Untitled Dailymotion video",
+    title: normalizeTitle(raw.title, "Untitled Dailymotion video"),
     description: raw.description ?? null,
     thumbnail,
     url: raw.url ?? `https://www.dailymotion.com/video/${raw.id}`,

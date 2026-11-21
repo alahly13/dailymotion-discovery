@@ -8,6 +8,7 @@
 
 import type { DiscoveryItem, DiscoveryItemKind } from "./types";
 import { createDailymotionProvenance } from "./provenance";
+import { normalizeTitle } from "@/lib/titles/title-normalization";
 
 export interface V2RawVideo {
   video_id?: string;
@@ -108,7 +109,7 @@ export function normalizeV2Video(raw: V2RawVideo): DiscoveryItem | null {
   const thumbnail = raw.thumbnail?.h720_url ?? raw.thumbnail?.h480_url ?? raw.thumbnail?.h1080_url ?? null;
   return {
     ...base("video", raw.video_id, raw),
-    title: raw.title ?? "Untitled Dailymotion video",
+    title: normalizeTitle(raw.title, "Untitled Dailymotion video"),
     description: raw.description ?? null,
     thumbnail,
     url: raw.video_url ?? `https://www.dailymotion.com/video/${raw.video_id}`,

@@ -124,3 +124,63 @@ export function savedTitlesGenerationManifestKey(ownerId: string, generationId: 
   const gen = assertSafeSegment(generationId, "generationId");
   return `${savedTitlesRootPrefix(ownerId)}/generations/${gen}/manifest.json`;
 }
+
+/**
+ * Professional Owner-Scoped Dailymotion Architecture Paths (2026)
+ *
+ * Dedicated storage tree strictly isolated per administrator/owner:
+ *   admins/{adminId}/dailymotion/items/{resourceType}/{id}.json
+ *   admins/{adminId}/dailymotion/titles/{resourceType}/{id}.json
+ *   admins/{adminId}/dailymotion/indexes/{indexName}.json
+ *   admins/{adminId}/dailymotion/manifest.json
+ *   admins/{adminId}/dailymotion/generations/{generationId}/manifest.json
+ *   admins/{adminId}/dailymotion/checkpoints/{scanId}.json
+ *   admins/{adminId}/dailymotion/sync-receipts/{batchId}.json
+ */
+export function adminRootPrefix(ownerId?: string | null): string {
+  const owner = normalizeStorageOwnerId(ownerId);
+  return `admins/${owner}/dailymotion`;
+}
+
+export function sanitizeResourceId(id: string): string {
+  const cleaned = id.trim().toLowerCase().replace(/[^a-z0-9._-]/g, "-");
+  if (!cleaned) {
+    throw new Error("Resource ID cannot be empty or invalid");
+  }
+  return cleaned;
+}
+
+export function adminItemObjectKey(ownerId: string, resourceType: string, id: string): string {
+  const type = assertSafeSegment(resourceType, "resourceType");
+  const cleanId = sanitizeResourceId(id);
+  return `${adminRootPrefix(ownerId)}/items/${type}/${cleanId}.json`;
+}
+
+export function adminTitleObjectKey(ownerId: string, resourceType: string, id: string): string {
+  const type = assertSafeSegment(resourceType, "resourceType");
+  const cleanId = sanitizeResourceId(id);
+  return `${adminRootPrefix(ownerId)}/titles/${type}/${cleanId}.json`;
+}
+
+export function adminIndexKey(ownerId: string, indexName: string): string {
+  const index = assertSafeSegment(indexName, "indexName");
+  return `${adminRootPrefix(ownerId)}/indexes/${index}.json`;
+}
+
+export function adminManifestKey(ownerId: string, generationId?: string): string {
+  if (generationId) {
+    const gen = assertSafeSegment(generationId, "generationId");
+    return `${adminRootPrefix(ownerId)}/generations/${gen}/manifest.json`;
+  }
+  return `${adminRootPrefix(ownerId)}/manifest.json`;
+}
+
+export function adminCheckpointKey(ownerId: string, scanId: string): string {
+  const scan = assertSafeSegment(scanId, "scanId");
+  return `${adminRootPrefix(ownerId)}/checkpoints/${scan}.json`;
+}
+
+export function adminSyncReceiptKey(ownerId: string, batchId: string): string {
+  const batch = assertSafeSegment(batchId, "batchId");
+  return `${adminRootPrefix(ownerId)}/sync-receipts/${batch}.json`;
+}

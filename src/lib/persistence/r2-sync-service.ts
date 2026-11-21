@@ -13,6 +13,7 @@ import {
 } from "@/lib/storage/r2-manifest-serializer";
 import { R2WorkerClient } from "@/lib/storage/r2-worker-client";
 import { getR2WorkerConfig } from "@/lib/storage/r2-capability-token";
+import { uploadOwnerScopedItemsAndTitles } from "@/lib/storage/owner-scoped-r2-service";
 import { PersistenceUnavailableError } from "@/lib/persistence/repositories/errors";
 import type { SaveReceipt } from "@/lib/sync/save-receipt";
 
@@ -169,6 +170,20 @@ export async function executeSaveAll(
       await r2Client.putObject(ownerId, bundle.manifestKey, bundle.manifestJson, { sha256: bundle.manifestSha256 });
       await r2Client.putObject(ownerId, bundle.versionPointerKey, bundle.versionPointerJson);
     }
+
+    // Owner-scoped individual item and title objects under admins/{ownerId}/dailymotion/...
+    if (input.datasets.savedItems && input.datasets.savedItems.length > 0) {
+      try {
+        await uploadOwnerScopedItemsAndTitles(
+          input.datasets.savedItems as any,
+          ownerId,
+          r2Client
+        );
+      } catch (ownerScopedErr) {
+        console.warn("[R2Sync] Non-fatal owner-scoped items/titles sync warning:", ownerScopedErr);
+      }
+    }
+
     verifiedByWorker = true;
   }
 

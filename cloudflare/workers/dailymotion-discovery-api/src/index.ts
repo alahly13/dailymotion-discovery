@@ -108,6 +108,8 @@ export function isOwnerScopedDailymotionKey(key: string, owner: string): boolean
   if (!cleanOwner) return false;
   const lower = key.toLowerCase();
   return (
+    lower.startsWith(`admins/${cleanOwner}/dailymotion/`) ||
+    lower === `admins/${cleanOwner}/dailymotion` ||
     lower.startsWith(`dailymotion/persistence/${cleanOwner}/`) ||
     lower.startsWith(`dailymotion/temp/${cleanOwner}/`) ||
     lower === `dailymotion/persistence/${cleanOwner}` ||

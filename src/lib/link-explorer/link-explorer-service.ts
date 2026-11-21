@@ -96,15 +96,15 @@ export function resolveFieldSelection(
     }
   }
 
-  // Version 2 REST fields
+  // Version 2 REST fields (aligned with official Dailymotion v2 schema; never leak v1 fields)
   switch (profile) {
     case "basic":
-      return "video_id,title,created_at";
+      return "video_id,title,created_at,video_url";
     case "extended":
-      return "video_id,title,description,created_at,duration,views_total,likes_total,category,country,language,tags,aspect_ratio,embed_url,owner";
+      return "video_id,title,description,category,visibility,language,country,created_at,published_at,source.duration,tags,likes_total,aspect_ratio,embed_url,thumbnail.h1080_url,thumbnail.h720_url,thumbnail.h480_url,profile.profile_id,profile.name,video_url";
     case "standard":
     default:
-      return "video_id,title,description,created_at,duration,views_total,owner";
+      return "video_id,title,description,created_at,published_at,video_url,visibility,profile.profile_id,profile.name,source.duration,thumbnail.h720_url,thumbnail.h480_url";
   }
 }
 
@@ -595,11 +595,13 @@ export async function resolveLinkExplorerInput(
 
       let page = startPage;
       let keepFetching = true;
+      let consecutiveEmptyPages = 0;
       let reachedWindowCap = false;
       let pagesFetchedThisRun = 0;
       let lastPageItems: DiscoveryItem[] = [];
       const initialWindowUniqueStart = items.length;
-      const loopBudget = targetMaxPages > 0 ? targetMaxPages : 200;
+      // In deep scan mode, remove artificial 200-page limit so complete catalog ingestion can proceed
+      const loopBudget = targetMaxPages > 0 ? targetMaxPages : (config.strategy === "deep" ? 10000 : 200);
 
       while (keepFetching) {
         if (abortSignal?.aborted) {
@@ -630,7 +632,11 @@ export async function resolveLinkExplorerInput(
         // Build request parameters respecting V1 vs V2 capability
         const queryParams = new URLSearchParams();
         queryParams.set("mode", "videos");
-        queryParams.set("owner", analyzed.identifier);
+        const effectiveOwnerOrProfile =
+          version === "v2" && (targetIdentity.v2ProfileId || mainItem?.id)
+            ? targetIdentity.v2ProfileId || mainItem?.id || analyzed.identifier
+            : (mainItem?.id || analyzed.identifier);
+        queryParams.set(version === "v2" ? "profileId" : "owner", effectiveOwnerOrProfile);
         queryParams.set("page", String(page));
         queryParams.set("pageSize", String(config.pageSize));
 
@@ -750,8 +756,17 @@ export async function resolveLinkExplorerInput(
           reachedWindowCap = true;
         }
 
-        // Check exit conditions
-        if (!hasMore || pageItems.length === 0) {
+        if (pageItems.length === 0) {
+          consecutiveEmptyPages += 1;
+        } else {
+          consecutiveEmptyPages = 0;
+        }
+
+        // Check exit conditions: do not abort prematurely on an isolated empty page if hasMore or cursor is active
+        if (!hasMore && !currentNextCursor) {
+          keepFetching = false;
+        } else if (consecutiveEmptyPages >= 5) {
+          // Break only after 5 consecutive empty pages despite provider reporting hasMore
           keepFetching = false;
         } else if (targetMaxPages > 0 && pagesFetchedThisRun >= targetMaxPages) {
           keepFetching = false;
@@ -1198,7 +1213,8 @@ export async function resolveLinkExplorerInput(
       let pagesFetchedThisRun = 0;
       let lastPageItems: DiscoveryItem[] = [];
       const initialWindowUniqueStart = items.length;
-      const loopBudget = targetMaxPages > 0 ? targetMaxPages : 200;
+      // In deep scan mode, remove artificial 200-page limit so complete catalog ingestion can proceed
+      const loopBudget = targetMaxPages > 0 ? targetMaxPages : (config.strategy === "deep" ? 10000 : 200);
 
       while (keepFetching) {
         if (abortSignal?.aborted) {

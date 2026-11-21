@@ -3,7 +3,8 @@
 import { useState } from "react";
 import { Plus, RotateCw, X, AlertCircle } from "lucide-react";
 import { saveLocalSavedTitle } from "@/lib/saved-titles/local-storage";
-import type { SavedTitleEntry } from "@/lib/saved-titles/types";
+import { analyzeDailymotionUrlOrId } from "@/lib/platforms/dailymotion/dailymotion-url-analyzer";
+import type { SavedTitleEntry, SavedTitleKind } from "@/lib/saved-titles/types";
 
 interface AddSavedTitleModalProps {
   isOpen: boolean;
@@ -32,30 +33,77 @@ export function AddSavedTitleModal({ isOpen, onClose, onCreated }: AddSavedTitle
 
     try {
       // 1. Submit to server endpoint to obtain server-verified addedBy identity (administrator or user)
-      const res = await fetch("/api/saved-titles/create-manual", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          input: cleanInput,
-          notes: notes.trim(),
-        }),
-      });
+      let createdEntry: SavedTitleEntry | null = null;
+      try {
+        const res = await fetch("/api/saved-titles/create-manual", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            input: cleanInput,
+            notes: notes.trim(),
+          }),
+        });
 
-      const data = (await res.json()) as { ok: boolean; entry?: SavedTitleEntry; error?: string };
-      if (!res.ok || !data.ok || !data.entry) {
-        setError(data.error || "Failed to create manual saved title.");
-        return;
+        if (res.ok) {
+          const data = (await res.json()) as { ok: boolean; entry?: SavedTitleEntry; error?: string };
+          if (data.ok && data.entry) {
+            createdEntry = data.entry;
+          }
+        }
+      } catch {
+        // Network unavailable: proceed to local-first browser storage fallback below
       }
 
-      // 2. Persist immediately into owner's local IndexedDB with "pending_sync" status
-      await saveLocalSavedTitle(data.entry);
+      // 2. If server was unreachable or in offline mode, construct resilient local-first entry
+      if (!createdEntry) {
+        const parsed = analyzeDailymotionUrlOrId(cleanInput);
+        let detectedKind: SavedTitleKind = "text_reference";
+        if (cleanInput.startsWith("http://") || cleanInput.startsWith("https://") || cleanInput.startsWith("dai.ly")) {
+          detectedKind = "url";
+        } else if (cleanInput.startsWith("@") || cleanInput.startsWith("channel:")) {
+          detectedKind = "handle";
+        } else if (/^[a-zA-Z0-9_-]{5,}$/.test(cleanInput)) {
+          detectedKind = "resource_id";
+        } else if (parsed.kind === "search") {
+          detectedKind = "search_query";
+        }
 
-      onCreated(data.entry);
+        const resourceType = parsed.kind === "unsupported" || parsed.kind === "search" ? null : parsed.kind;
+        const now = new Date().toISOString();
+        const rand = Math.random().toString(36).slice(2, 8);
+        createdEntry = {
+          id: `st_man_${Date.now().toString(36)}_${rand}`,
+          ownerId: "local-owner",
+          kind: detectedKind,
+          value: cleanInput,
+          displayTitle: parsed.displayLabel || cleanInput,
+          source: {
+            workspace: "admin-manual",
+            label: "Local Manual",
+            apiVersion: null,
+            resourceType,
+          },
+          addedBy: {
+            type: "user-manual",
+          },
+          createdAt: now,
+          updatedAt: now,
+          resourceType,
+          canonicalUrl: parsed.canonicalUrl || null,
+          notes: notes.trim() || null,
+          status: "pending_sync",
+        };
+      }
+
+      // 3. Persist immediately into owner's local IndexedDB with "pending_sync" status
+      await saveLocalSavedTitle(createdEntry);
+
+      onCreated(createdEntry);
       setInput("");
       setNotes("");
       onClose();
-    } catch {
-      setError("Network error while submitting entry.");
+    } catch (saveErr) {
+      setError(saveErr instanceof Error ? saveErr.message : "Failed to save title to local storage.");
     } finally {
       setLoading(false);
     }

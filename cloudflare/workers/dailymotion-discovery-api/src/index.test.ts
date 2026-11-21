@@ -202,4 +202,53 @@ describe("dailymotion-discovery-api Worker", () => {
     expect(verifyJson.ok).toBe(true);
     expect(verifyJson.verifiedCount).toBe(1);
   });
+
+  it("supports owner-scoped storage under admins/{owner}/dailymotion/ structure", async () => {
+    const env = makeEnv();
+    const itemKey = "admins/admin-42/dailymotion/items/video/x12345.json";
+    const titleKey = "admins/admin-42/dailymotion/titles/video/x12345.json";
+    const payload = JSON.stringify({ provider: "dailymotion", kind: "video", id: "x12345", title: "Valid Title" });
+
+    const uploadToken = signCapabilityToken(
+      { operation: "upload", key: itemKey, storageOwnerUuid: "admin-42" },
+      SECRET
+    );
+    const putRes = await handleWorkerRequest(
+      new Request(`https://worker.test/objects/${itemKey}`, {
+        method: "PUT",
+        headers: { Authorization: `Bearer ${uploadToken}`, "Content-Type": "application/json" },
+        body: payload,
+      }),
+      env
+    );
+    expect(putRes.status).toBe(200);
+
+    // Cross-owner check
+    const crossToken = signCapabilityToken(
+      { operation: "download", key: itemKey, storageOwnerUuid: "other-admin" },
+      SECRET
+    );
+    const crossRes = await handleWorkerRequest(
+      new Request(`https://worker.test/objects/${itemKey}`, {
+        headers: { Authorization: `Bearer ${crossToken}` },
+      }),
+      env
+    );
+    expect(crossRes.status).toBe(403);
+
+    // Valid owner download
+    const downloadToken = signCapabilityToken(
+      { operation: "download", key: itemKey, storageOwnerUuid: "admin-42" },
+      SECRET
+    );
+    const getRes = await handleWorkerRequest(
+      new Request(`https://worker.test/objects/${itemKey}`, {
+        headers: { Authorization: `Bearer ${downloadToken}` },
+      }),
+      env
+    );
+    expect(getRes.status).toBe(200);
+    const getBody = await getRes.json();
+    expect(getBody.title).toBe("Valid Title");
+  });
 });

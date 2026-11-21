@@ -8,6 +8,7 @@ import {
   discoveryCompositeKey,
   type DailymotionResourceType,
 } from "@/lib/resources/dailymotion-resource-taxonomy";
+import { normalizeTitle, UNTITLED_VIDEO_PLACEHOLDER } from "@/lib/titles/title-normalization";
 
 /**
  * Local-First IndexedDB persistence engine (`dailymotion_discovery_local_v1`).
@@ -482,7 +483,8 @@ export function buildLocalSavedItemRecord(
     id: cleanId,
     apiVersion: cleanVersion,
     resourceType: resType,
-    title: rawItem?.title || rawItem?.description || cleanId,
+    // Dedicated, correctly normalized title: never confused with channel name, description, or video ID
+    title: normalizeTitle(rawItem?.title, UNTITLED_VIDEO_PLACEHOLDER),
     description: rawItem?.description ?? undefined,
     url: rawItem?.url || "",
     thumbnail: rawItem?.thumbnail ?? undefined,

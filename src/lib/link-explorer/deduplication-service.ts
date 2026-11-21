@@ -11,6 +11,7 @@
 import type { ApiVersion, DiscoveryItem } from "@/lib/discovery/types";
 import { discoveryCompositeKey } from "@/lib/resources/dailymotion-resource-taxonomy";
 import { computeCatalogChecksum } from "./link-explorer-service";
+import { mergeTitles } from "@/lib/titles/title-normalization";
 
 export interface SourceObservation {
   apiVersion: ApiVersion;
@@ -73,10 +74,9 @@ export function mergeMetadata(
 ): DiscoveryItem {
   const merged: DiscoveryItem = { ...existing };
 
-  // 1. Title: preserve existing unless existing is empty
-  if (!merged.title && incoming.title) {
-    merged.title = incoming.title;
-  }
+  // 1. Title: Non-destructive title merge. Preserves existing valid title if incoming is empty/missing,
+  // updates placeholder/untitled with meaningful incoming, and never replaces title with null/empty/ID.
+  merged.title = mergeTitles(existing.title, incoming.title);
 
   // 2. Description: never overwrite existing with null/empty
   if (!merged.description && incoming.description) {
