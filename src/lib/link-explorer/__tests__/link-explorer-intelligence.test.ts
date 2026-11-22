@@ -786,7 +786,7 @@ describe("Link Explorer Intelligence & Capability Architecture (2026)", () => {
         "lemonde"
       );
 
-      const m2023Desc = periodsDesc.filter((p) => p.startIso.startsWith("2023"));
+      const m2023Desc = periodsDesc.filter((p) => p.startIso?.startsWith("2023"));
       expect(m2023Desc.length).toBe(3);
       expect(m2023Desc[0].label).toBe("December 2023");
       expect(m2023Desc[1].label).toBe("November 2023");
@@ -802,7 +802,7 @@ describe("Link Explorer Intelligence & Capability Architecture (2026)", () => {
         "lemonde"
       );
 
-      const m2023Asc = periodsAsc.filter((p) => p.startIso.startsWith("2023"));
+      const m2023Asc = periodsAsc.filter((p) => p.startIso?.startsWith("2023"));
       expect(m2023Asc.length).toBe(3);
       expect(m2023Asc[0].label).toBe("January 2023");
       expect(m2023Asc[1].label).toBe("February 2023");
@@ -906,8 +906,8 @@ describe("Link Explorer Intelligence & Capability Architecture (2026)", () => {
       const oct2024 = generateMonthPeriod(2024, 10, "v1", "test");
       const nov2024 = generateMonthPeriod(2024, 11, "v1", "test");
 
-      const octEnd = new Date(oct2024.endIso).getTime();
-      const novStart = new Date(nov2024.startIso).getTime();
+      const octEnd = new Date(oct2024.endIso!).getTime();
+      const novStart = new Date(nov2024.startIso!).getTime();
 
       // Nov 1 starts exactly 1 millisecond after Oct 31 23:59:59.999Z
       expect(novStart - octEnd).toBe(1);

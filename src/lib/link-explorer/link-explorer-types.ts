@@ -33,6 +33,21 @@ export type {
   ScanCheckpointRecord,
 };
 
+export type DateDomain =
+  | "video-created-at"
+  | "playlist-created-at"
+  | "playlist-membership-added-at"
+  | "unknown";
+
+export interface HistoricalYearRecord {
+  sourceId: string;
+  resourceType: DailymotionResourceKind;
+  dateDomain: DateDomain;
+  year: number;
+  discoveredCount: number;
+  status: "discovered" | "pending" | "fetching" | "completed" | "failed";
+}
+
 export type ScanStrategy = "quick" | "standard" | "deep" | "resume" | "custom";
 
 export type ScanCompletenessStatus =
@@ -43,12 +58,16 @@ export type ScanCompletenessStatus =
   | "splitting_date_ranges"
   | "paused"
   | "interrupted"
+  | "cancelled"
+  | "paused"
+  | "pagination_stalled"
   | "standard_scan_completed"
   | "more_results_available"
   | "partial"
   | "capped_window"
   | "date_partitioning_required"
   | "completed_with_known_limitations"
+  | "completed_with_unavailable_references"
   | "complete_within_verified_scope"
   | "coverage_unknown"
   | "completed"
@@ -137,6 +156,17 @@ export interface CatalogRetrievalMetrics {
 }
 
 export interface ResourceIntelligenceData {
+  dateDomain?: DateDomain;
+  playlistCreatedDate?: string | null;
+  membershipDateAvailable?: boolean;
+  membershipDateNotice?: string;
+  historicalYears?: HistoricalYearRecord[];
+  oldestObservedAt?: string | null;
+  newestObservedAt?: string | null;
+  rangeScanStartedAt?: string | null;
+  lastObservedAt?: string | null;
+  completedThrough?: string | null;
+  discoveryCompletedAt?: string | null;
   profile: {
     name: string;
     id: string;
@@ -153,6 +183,7 @@ export interface ResourceIntelligenceData {
     retrievedAt: string;
     catalogStatus: ScanCompletenessStatus;
     targetIdentity?: TargetIdentity;
+    dateDomain?: DateDomain;
   };
   statistics: {
     providerReportedVideos: number | null;
@@ -172,6 +203,10 @@ export interface ResourceIntelligenceData {
     duplicatesSkipped?: number;
     pagesRetrieved?: number;
     pagesRemaining?: number | null;
+    dateDomain?: DateDomain;
+    playlistCreatedDate?: string | null;
+    membershipDateAvailable?: boolean;
+    membershipDateNotice?: string;
   };
   chronology: {
     earliestPublicationDate: string | null;
@@ -180,11 +215,23 @@ export interface ResourceIntelligenceData {
     newestVideo: VideoChronologyRef | null;
     isRecentlyActive: boolean;
     lastActivityRelative: string | null;
+    oldestObservedTimestamp?: string | null;
+    newestObservedTimestamp?: string | null;
+    oldestObservedYear?: number | null;
+    newestObservedYear?: number | null;
+    isRangeProvisional?: boolean;
+    oldestObservedAt?: string | null;
+    newestObservedAt?: string | null;
+    rangeScanStartedAt?: string | null;
+    lastObservedAt?: string | null;
+    completedThrough?: string | null;
+    discoveryCompletedAt?: string | null;
   };
   distribution: {
     byYear: Array<{ year: number; count: number; percentage: number }>;
     byMonth: Array<{ month: string; count: number }>;
     byResourceType: Record<string, number>;
+    historicalYears?: HistoricalYearRecord[];
   };
   diagnostics?: RetrievalDiagnostics;
   metrics?: CatalogRetrievalMetrics;
@@ -457,7 +504,7 @@ export function computeResourceIntelligence(
     }
   }
 
-  // Year & Month distributions
+  // Year & Month distributions (Real discovered years from actual records only — never invented)
   const yearCounts = new Map<number, number>();
   const monthCounts = new Map<string, number>();
 
@@ -483,6 +530,38 @@ export function computeResourceIntelligence(
     .sort((a, b) => b.month.localeCompare(a.month))
     .slice(0, 12); // Last 12 active months
 
+  // Separate date domains for playlists vs profiles (Section 4)
+  const isPlaylistResource = analyzed.kind === "playlist";
+  const effectiveDateDomain: DateDomain = isPlaylistResource ? "video-created-at" : "video-created-at";
+  const playlistCreatedDate = isPlaylistResource ? (mainItem?.createdAt || createdDate || null) : null;
+  const membershipDateAvailable = false;
+  const membershipDateNotice = isPlaylistResource
+    ? "Dailymotion API does not expose membership-added timestamps for playlist entries. Individual video upload dates are displayed."
+    : undefined;
+
+  const historicalYears: HistoricalYearRecord[] = Array.from(yearCounts.entries())
+    .map(([year, count]) => ({
+      sourceId: profileId,
+      resourceType: analyzed.kind,
+      dateDomain: effectiveDateDomain,
+      year,
+      discoveredCount: count,
+      status: "discovered" as const,
+    }))
+    .sort((a, b) => b.year - a.year);
+
+  const oldestObservedTimestamp = oldest?.createdAt || null;
+  const newestObservedTimestamp = newest?.createdAt || null;
+  const oldestObservedYear = oldest?.createdAt ? new Date(oldest.createdAt).getUTCFullYear() : null;
+  const newestObservedYear = newest?.createdAt ? new Date(newest.createdAt).getUTCFullYear() : null;
+  const isRangeProvisional = coverageStatus === "in_progress" || coverageStatus === "discovering" || coverageStatus === "partial";
+  const oldestObservedAt = oldestObservedTimestamp;
+  const newestObservedAt = newestObservedTimestamp;
+  const rangeScanStartedAt = extraStats?.diagnostics?.startedAt || null;
+  const lastObservedAt = newestObservedTimestamp || oldestObservedTimestamp || null;
+  const completedThrough = newestObservedTimestamp || null;
+  const discoveryCompletedAt = extraStats?.diagnostics?.completedAt || (coverageStatus.includes("complete") ? new Date().toISOString() : null);
+
   const metrics: CatalogRetrievalMetrics = extraStats?.metrics ?? {
     providerReportedTotalPerQuery: providerReportedQueryTotal,
     providerReportedTotalLifetime: providerReportedLifetime,
@@ -500,6 +579,17 @@ export function computeResourceIntelligence(
   };
 
   return {
+    dateDomain: effectiveDateDomain,
+    playlistCreatedDate,
+    membershipDateAvailable,
+    membershipDateNotice,
+    historicalYears,
+    oldestObservedAt,
+    newestObservedAt,
+    rangeScanStartedAt,
+    lastObservedAt,
+    completedThrough,
+    discoveryCompletedAt,
     profile: {
       name: profileName,
       id: profileId,
@@ -516,6 +606,7 @@ export function computeResourceIntelligence(
       retrievedAt: new Date().toISOString(),
       catalogStatus: coverageStatus,
       targetIdentity: extraStats?.targetIdentity,
+      dateDomain: effectiveDateDomain,
     },
     statistics: {
       providerReportedVideos,
@@ -535,6 +626,10 @@ export function computeResourceIntelligence(
       duplicatesSkipped: extraStats?.duplicatesSkipped ?? 0,
       pagesRetrieved: extraStats?.pagesRetrieved ?? 1,
       pagesRemaining: extraStats?.pagesRemaining ?? null,
+      dateDomain: effectiveDateDomain,
+      playlistCreatedDate,
+      membershipDateAvailable,
+      membershipDateNotice,
     },
     chronology: {
       earliestPublicationDate: oldest?.createdAt || null,
@@ -543,11 +638,23 @@ export function computeResourceIntelligence(
       newestVideo: newestVideoRef,
       isRecentlyActive,
       lastActivityRelative,
+      oldestObservedTimestamp,
+      newestObservedTimestamp,
+      oldestObservedYear,
+      newestObservedYear,
+      isRangeProvisional,
+      oldestObservedAt,
+      newestObservedAt,
+      rangeScanStartedAt,
+      lastObservedAt,
+      completedThrough,
+      discoveryCompletedAt,
     },
     distribution: {
       byYear,
       byMonth,
       byResourceType: typeCounts,
+      historicalYears,
     },
     diagnostics: extraStats?.diagnostics,
     metrics,

@@ -1,8 +1,8 @@
 # Dailymotion Discovery Platform Ledger
 
-Updated: 2026-11-21
+Updated: 2026-11-22
 Repo path: `E:\discovery\dailymotion-discovery`
-Scope: Project source-of-truth ledger, updated after Link Explorer V1/V2 Separation Repair, Dedicated Video Title Persistence, Complete Catalog Fetching (No Artificial Loop Caps), Durable Local Storage & Owner-Scoped Cloudflare R2 Architecture (`admins/{adminId}/dailymotion/...`). 100% Vitest / TypeScript verification.
+Scope: Project source-of-truth ledger, updated after Correct API-Driven Sorting, Real Historical Date Discovery, Playlist-Aware Fetching, Date-Range Filtering, Pause/Resume/Cancel Lifecycle, Durable Checkpoints, and Deployment Verification. 100% Vitest (279/279 tests) and TypeScript verification.
 
 ## Table of Contents
 
@@ -23,6 +23,53 @@ Scope: Project source-of-truth ledger, updated after Link Explorer V1/V2 Separat
 - [Known Limitations](#known-limitations)
 - [Future Roadmap](#future-roadmap)
 - [Agent Instructions](#agent-instructions)
+
+## 2026-11-22 Production Engineering: API-Driven Sorting, Real Historical Date Discovery, Playlist Semantics, Date Ranges & Execution Lifecycle
+
+**User intent addressed**
+- **Sorting Directly Controls Serialized API Requests**:
+  - `Newest to Oldest` and `Oldest to Newest` now directly alter the outgoing network query string across all channels, profiles, and playlists.
+  - In Dailymotion API v2: `Newest to Oldest` -> `sort=-created_at`; `Oldest to Newest` -> `sort=created_at`.
+  - In Dailymotion API v1: `Newest to Oldest` -> `sort=recent`; `Oldest to Newest` -> `sort=old`.
+  - Mapped via `resolveApiSortParameter(version, direction, resourceKind)` in `src/lib/link-explorer/link-explorer-service.ts`.
+  - Passed across all endpoints: `/api/discovery/v2/channels`, `/api/discovery/v2/playlists`, `/api/discovery/v1/channels`, `/api/discovery/v1/playlists`.
+- **Real Historical Date Discovery (Zero Fabricated Years)**:
+  - Eliminated hardcoded 2005..2026 dummy year generation when inspecting channels created in recent years (e.g. 2016 channel like LittleKuriboh).
+  - When earliest content date is not yet known, the partition engine initializes a single `Primary Discovery Window` (`entire_range`).
+  - As actual records arrive, `computeResourceIntelligence` populates `historicalYears` and `distribution.byYear` strictly from observed item timestamps.
+- **Strict Playlist Date Semantics & Complete Ingestion**:
+  - Strictly separated three date domains:
+    1. `video.created_at`: The original upload date of an individual video.
+    2. `playlist.created_at`: The date the playlist entity was created.
+    3. `playlist-membership-added-at`: Not exposed by Dailymotion API (explicitly labeled with `membershipDateNotice`).
+  - For playlists, `initializeStrategyPeriods` creates a single `entire_range` period ("Playlist Membership (Complete Ingestion)") so constituent videos spanning different years are never artificially partitioned or dropped.
+- **Real Date-Range Filtering (`custom_range`)**:
+  - `Fetch From` -> `Fetch To` controls (`startDate` and `endDate`) in `CatalogRetrievalStrategyPanel` are fully hooked into `partitionCustomDateRange`.
+  - Supports granularity: `entire_range`, `year`, `month`, `week`, `day`, with boundary enforcement (UTC midnight to 23:59:59.999Z).
+- **Reactive Pause, Resume, and Cancel Lifecycle**:
+  - `handlePauseScan`: sets `isPausedRef.current = true`, halts active fetch loops immediately, sets progress to `"paused"`, updates IndexedDB checkpoint status to `"paused"` with `canResume: true`.
+  - `handleResumeScan`: resets `isPausedRef.current = false`, transitions progress to `"fetching_pages"`, resumes remaining partitions from checkpoint via `handleContinueRetrieval("all_remaining")`.
+  - `handleCancelScan`: aborts `AbortController`, terminates loops immediately, sets progress to `"cancelled"`, persists `"cancelled"` checkpoint with `canResume: false`, and releases concurrency scan leases.
+- **Durable Checkpoints & Lease Management**:
+  - Checkpoint storage in IndexedDB persists active period, visited pages, cursors, and cumulative items progress.
+  - Multi-tab lease protection via `acquireScanLease` and `releaseScanLease` prevents dual-crawler race conditions.
+- **Cursor Resilience & Pagination Stall Detection**:
+  - In both channel and playlist loops, V2 cursor pagination continues through isolated empty pages while `currentNextCursor` is valid.
+  - Detects repeated cursors or unadvancing loops (`visitedCursors.has(currentNextCursor)`), sets `isPaginationStalled = true`, transitions status to `"pagination_stalled"`, saves safe checkpoints, and avoids declaring false completion.
+  - Exposes `oldestObservedAt`, `newestObservedAt`, `rangeScanStartedAt`, `lastObservedAt`, `completedThrough`, and `discoveryCompletedAt` on `ResourceIntelligenceData` and `chronology`.
+- **Cloudflare R2 Verification & Deletion Safety**:
+  - Hardened `verifyLocalItemForSafeDeletion` in `owner-scoped-r2-service.ts` to verify SHA-256 integrity and index registration before deletion clearance.
+  - Cloudflare Worker (`dailymotion-discovery-api.elmahdyabdulla209.workers.dev`) verified live and healthy via `/health`.
+- **Database Status & Migrations**:
+  - Audited 3 canonical migrations:
+    1. `20260506_channel_deep_fetch_history_persistence_foundation`
+    2. `20261011183739_workspace_cloud_persistence`
+    3. `20261112000000_r2_generations_and_presets`
+  - Verified no schema migration was required for this task as client-side Link Explorer and crawler utilize IndexedDB v5 and existing API route contracts.
+- **Verification**:
+  - 100% Vitest pass rate: 47 test files passed, 279 tests passed, 0 failures.
+  - 100% TypeScript typecheck pass: `tsc --noEmit` exited with code 0 (zero errors).
+
 
 ## 2026-11-21 Link Explorer V1/V2 Separation, Video Title Persistence, Complete Fetching & Owner-Scoped R2 Architecture
 

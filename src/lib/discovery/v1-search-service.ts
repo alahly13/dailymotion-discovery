@@ -173,15 +173,26 @@ export async function v1GetPlaylist(id: string, fields?: string): Promise<Discov
   return pageResult("playlists", "GET /playlist/{id}", item ? [item] : [], 1, 1, item ? 1 : 0, false);
 }
 
-/** Playlist contents: GET /playlist/{id}/videos. */
-export async function v1PlaylistVideos(id: string, page = 1, limit = 100, fields?: string): Promise<DiscoveryOutcome> {
+/** Playlist contents: GET /playlist/{id}/videos. Supports pagination and server sort. */
+export async function v1PlaylistVideos(
+  id: string,
+  page = 1,
+  limit = 100,
+  fields?: string,
+  sort?: string | null
+): Promise<DiscoveryOutcome> {
   const trimmed = id.trim();
   if (!trimmed) return failure("playlists", "GET /playlist/{id}/videos", "Enter a playlist ID.", "user_input_error", 400, false);
   const endpoint = "GET /playlist/{id}/videos";
-  const outcome = await v1List<V1RawVideo>(`/playlist/${encodeURIComponent(trimmed)}/videos`, {
-    page: String(clampPage(page)), limit: String(clampLimit(limit)),
+  const params: Record<string, string> = {
+    page: String(clampPage(page)),
+    limit: String(clampLimit(limit)),
     fields: fields?.trim() || "id,title,description,thumbnail_480_url,duration,views_total,created_time,channel,owner,owner.screenname,url",
-  });
+  };
+  if (sort?.trim()) {
+    params.sort = sort.trim();
+  }
+  const outcome = await v1List<V1RawVideo>(`/playlist/${encodeURIComponent(trimmed)}/videos`, params);
   if (!outcome.ok) return failure("playlists", endpoint, outcome.failure.error, outcome.failure.reason, outcome.failure.status, outcome.failure.retryable);
   const { data } = outcome;
   return pageResult("playlists", endpoint, normalizeV1Videos(data.list ?? []), data.page ?? clampPage(page), data.limit ?? clampLimit(limit), data.total ?? null, data.has_more === true);

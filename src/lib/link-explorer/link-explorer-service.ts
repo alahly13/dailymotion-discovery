@@ -73,6 +73,31 @@ export const DEFAULT_SCAN_CONFIG: ScanBudgetConfig = {
 };
 
 /**
+ * Maps the user's selected retrieval direction ("newest_to_oldest" vs "oldest_to_newest")
+ * to the exact canonical Dailymotion API sort parameter for the active API version.
+ *
+ * For API v2 (official REST specification):
+ * - Newest to Oldest -> "sort=-created_at"
+ * - Oldest to Newest -> "sort=created_at"
+ * Supported across /v2/profiles/{id}/videos, /v2/playlists/{id}/videos, /v2/profiles/{id}/playlists.
+ *
+ * For API v1 (legacy specification):
+ * - Newest to Oldest -> "sort=recent"
+ * - Oldest to Newest -> "sort=old"
+ */
+export function resolveApiSortParameter(
+  version: ApiVersion,
+  direction?: RetrievalDirection,
+  _resourceKind?: DailymotionResourceKind
+): string {
+  const dir = direction || "newest_to_oldest";
+  if (version === "v2") {
+    return dir === "oldest_to_newest" ? "created_at" : "-created_at";
+  }
+  return dir === "oldest_to_newest" ? "old" : "recent";
+}
+
+/**
  * Builds sparse field query string according to active API version and selected profile.
  */
 export function resolveFieldSelection(
@@ -166,7 +191,8 @@ export async function resolveLinkExplorerInput(
     cumulativeItems: DiscoveryItem[];
     period?: RetrievalPeriod;
     checkpoint?: any;
-  }) => Promise<void> | void
+  }) => Promise<void> | void,
+  isPaused?: () => boolean
 ): Promise<LinkExplorerResolution> {
   const analyzed = analyzeDailymotionUrlOrId(input);
   const effectiveKind =
@@ -274,8 +300,8 @@ export async function resolveLinkExplorerInput(
       activePeriod.status = "in_progress";
     }
     // Set date boundaries from the active period
-    config.dateFrom = activePeriod.startIso;
-    config.dateTo = activePeriod.endIso;
+    config.dateFrom = activePeriod.startIso || undefined;
+    config.dateTo = activePeriod.endIso || undefined;
   }
 
   const isDatePartition = Boolean(continuationState?.dateBefore || activePeriod);
@@ -598,6 +624,7 @@ export async function resolveLinkExplorerInput(
       let consecutiveEmptyPages = 0;
       let reachedWindowCap = false;
       let pagesFetchedThisRun = 0;
+      let isPaginationStalled = false;
       let lastPageItems: DiscoveryItem[] = [];
       const initialWindowUniqueStart = items.length;
       // In deep scan mode, remove artificial 200-page limit so complete catalog ingestion can proceed
@@ -605,19 +632,26 @@ export async function resolveLinkExplorerInput(
 
       while (keepFetching) {
         if (abortSignal?.aborted) {
-          updateProgress({ status: "interrupted" });
+          updateProgress({ status: "cancelled" });
+          break;
+        }
+
+        if (isPaused?.()) {
+          updateProgress({ status: "paused" });
           break;
         }
 
         // Loop prevention: stop if visited page number without cursor or visited cursor
         if (visitedPages.has(page) && !currentNextCursor) {
-          updateProgress({ status: "completed_with_known_limitations" });
+          isPaginationStalled = true;
+          updateProgress({ status: "pagination_stalled" });
           break;
         }
         visitedPages.add(page);
 
         if (currentNextCursor && visitedCursors.has(currentNextCursor)) {
-          updateProgress({ status: "completed_with_known_limitations" });
+          isPaginationStalled = true;
+          updateProgress({ status: "pagination_stalled" });
           break;
         }
         if (currentNextCursor) {
@@ -765,8 +799,8 @@ export async function resolveLinkExplorerInput(
         // Check exit conditions: do not abort prematurely on an isolated empty page if hasMore or cursor is active
         if (!hasMore && !currentNextCursor) {
           keepFetching = false;
-        } else if (consecutiveEmptyPages >= 5) {
-          // Break only after 5 consecutive empty pages despite provider reporting hasMore
+        } else if (consecutiveEmptyPages >= 5 && !currentNextCursor) {
+          // Break after 5 consecutive empty pages only if no cursor is active
           keepFetching = false;
         } else if (targetMaxPages > 0 && pagesFetchedThisRun >= targetMaxPages) {
           keepFetching = false;
@@ -928,7 +962,7 @@ export async function resolveLinkExplorerInput(
         const currentYear = new Date().getUTCFullYear();
 
         for (let yr = currentYear; yr >= startYear; yr--) {
-          if (abortSignal?.aborted) break;
+          if (abortSignal?.aborted || isPaused?.()) break;
           if (targetMaxPages > 0 && pagesFetchedThisRun >= targetMaxPages) break;
 
           const yearStart = `${yr}-01-01`;
@@ -946,7 +980,7 @@ export async function resolveLinkExplorerInput(
           const yearUniqueStart = items.length;
 
           while (yearHasMore && (!targetMaxPages || pagesFetchedThisRun < targetMaxPages)) {
-            if (abortSignal?.aborted) break;
+            if (abortSignal?.aborted || isPaused?.()) break;
 
             const qp = new URLSearchParams();
             qp.set("mode", "videos");
@@ -1027,7 +1061,7 @@ export async function resolveLinkExplorerInput(
             });
 
             for (let m = 12; m >= 1; m--) {
-              if (abortSignal?.aborted) break;
+              if (abortSignal?.aborted || isPaused?.()) break;
               if (targetMaxPages > 0 && pagesFetchedThisRun >= targetMaxPages) break;
 
               const mStr = String(m).padStart(2, "0");
@@ -1042,7 +1076,7 @@ export async function resolveLinkExplorerInput(
               const mUniqueStart = items.length;
 
               while (mHasMore && (!targetMaxPages || pagesFetchedThisRun < targetMaxPages)) {
-                if (abortSignal?.aborted) break;
+                if (abortSignal?.aborted || isPaused?.()) break;
 
                 const mQp = new URLSearchParams();
                 mQp.set("mode", "videos");
@@ -1120,8 +1154,14 @@ export async function resolveLinkExplorerInput(
       let coverageEvidence = "";
 
       if (abortSignal?.aborted) {
-        finalStatus = "interrupted";
-        coverageEvidence = "Catalog crawl was interrupted by user.";
+        finalStatus = "cancelled";
+        coverageEvidence = "Catalog crawl was cancelled by user.";
+      } else if (isPaused?.()) {
+        finalStatus = "paused";
+        coverageEvidence = "Catalog crawl was paused by user.";
+      } else if (isPaginationStalled) {
+        finalStatus = "pagination_stalled";
+        coverageEvidence = "Pagination cursor stalled or repeated without advancing catalog state.";
       } else if (
         config.strategy === "standard" &&
         (hasMore || (providerReportedLifetimeTotal !== null && items.length < providerReportedLifetimeTotal))
@@ -1211,6 +1251,7 @@ export async function resolveLinkExplorerInput(
       let keepFetching = true;
       let consecutiveEmptyPages = 0;
       let pagesFetchedThisRun = 0;
+      let isPaginationStalled = false;
       let lastPageItems: DiscoveryItem[] = [];
       const initialWindowUniqueStart = items.length;
       // In deep scan mode, remove artificial 200-page limit so complete catalog ingestion can proceed
@@ -1218,19 +1259,26 @@ export async function resolveLinkExplorerInput(
 
       while (keepFetching) {
         if (abortSignal?.aborted) {
-          updateProgress({ status: "interrupted" });
+          updateProgress({ status: "cancelled" });
           break;
         }
 
-        // Loop prevention
+        if (isPaused?.()) {
+          updateProgress({ status: "paused" });
+          break;
+        }
+
+        // Loop prevention: stop if visited page number without cursor or repeated cursor (Section 8: pagination stall detection)
         if (visitedPages.has(page) && !currentNextCursor) {
-          updateProgress({ status: "completed_with_known_limitations" });
+          isPaginationStalled = true;
+          updateProgress({ status: "pagination_stalled" });
           break;
         }
         visitedPages.add(page);
 
         if (currentNextCursor && visitedCursors.has(currentNextCursor)) {
-          updateProgress({ status: "completed_with_known_limitations" });
+          isPaginationStalled = true;
+          updateProgress({ status: "pagination_stalled" });
           break;
         }
         if (currentNextCursor) {
@@ -1251,6 +1299,7 @@ export async function resolveLinkExplorerInput(
           queryParams.set("nextUrl", currentNextCursor);
         }
         if (fieldsParam) queryParams.set("fields", fieldsParam);
+        if (config.serverSort) queryParams.set("sort", config.serverSort);
 
         const videosRes = await fetch(
           `/api/discovery/${version}/playlists?${queryParams.toString()}`,
@@ -1329,7 +1378,7 @@ export async function resolveLinkExplorerInput(
 
         if (!hasMore && !currentNextCursor) {
           keepFetching = false;
-        } else if (consecutiveEmptyPages >= 5) {
+        } else if (consecutiveEmptyPages >= 5 && !currentNextCursor) {
           keepFetching = false;
         } else if (targetMaxPages > 0 && pagesFetchedThisRun >= targetMaxPages) {
           keepFetching = false;
@@ -1360,7 +1409,21 @@ export async function resolveLinkExplorerInput(
         status: hasMore ? "unresolved" : "completed",
       });
 
-      updateProgress({ status: abortSignal?.aborted ? "interrupted" : "completed" });
+      let playlistFinalStatus: ScanCompletenessStatus = "completed";
+      if (abortSignal?.aborted) {
+        playlistFinalStatus = "cancelled";
+      } else if (isPaused?.()) {
+        playlistFinalStatus = "paused";
+      } else if (isPaginationStalled) {
+        playlistFinalStatus = "pagination_stalled";
+      } else if (hasMore || Boolean(currentNextCursor)) {
+        playlistFinalStatus = "partial";
+      } else if (omittedOrUnavailableReferences > 0) {
+        playlistFinalStatus = "completed_with_unavailable_references";
+      } else {
+        playlistFinalStatus = "complete_within_verified_scope";
+      }
+      updateProgress({ status: playlistFinalStatus });
     }
 
     // ==========================================

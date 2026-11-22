@@ -48,6 +48,7 @@ import {
 } from "@/lib/platforms/dailymotion/dailymotion-url-analyzer";
 import {
   DEFAULT_SCAN_CONFIG,
+  resolveApiSortParameter,
   resolveLinkExplorerInput,
 } from "@/lib/link-explorer/link-explorer-service";
 import {
@@ -139,6 +140,7 @@ export function LinkExplorerWorkspace() {
   const [scanConfig, setScanConfig] = useState<ScanBudgetConfig>(DEFAULT_SCAN_CONFIG);
   const [scanProgress, setScanProgress] = useState<ScanProgressState | null>(null);
   const [isPaused, setIsPaused] = useState(false);
+  const isPausedRef = useRef(false);
   const abortControllerRef = useRef<AbortController | null>(null);
 
   // Time-Partitioned Catalog Retrieval Strategy State (2026)
@@ -333,21 +335,25 @@ export function LinkExplorerWorkspace() {
     setLoading(true);
     setRestoredFromHistory(false);
     setIsPaused(false);
+    isPausedRef.current = false;
     setCurrentPage(1);
     setActiveYearFilter(null);
     setLoadMoreError(null);
     setLastAppendedToast(null);
 
+    const selectedKind = overrideKind === "auto" ? undefined : overrideKind;
+    const computedSort = resolveApiSortParameter(targetVersion, retrievalDirection, selectedKind);
+
     const effectiveBudgetConfig: ScanBudgetConfig = {
       ...scanConfig,
       retrievalStrategy,
       retrievalDirection,
+      serverSort: computedSort,
       customRangeConfig: retrievalStrategy === "custom_range" ? customRangeConfig : undefined,
       ...overrideConfig,
     };
 
     try {
-      const selectedKind = overrideKind === "auto" ? undefined : overrideKind;
       const owner = await getClientOwnerId();
       const checkpointKey = buildCheckpointKey(owner, targetVersion, selectedKind || "video", clean);
 
@@ -385,7 +391,8 @@ export function LinkExplorerWorkspace() {
           } catch (commitErr) {
             console.warn("[LinkExplorer] Progressive batch commit failed:", commitErr);
           }
-        }
+        },
+        () => isPausedRef.current
       );
 
       setResolution(res);
@@ -619,12 +626,13 @@ export function LinkExplorerWorkspace() {
           (ledger?.activePeriodId ? ledger.periods.find((p) => p.periodId === ledger.activePeriodId) : null);
         const nextPage = (activePeriod?.nextPage || currentPage) + 1;
         const nextCursor = activePeriod?.nextCursor || currentRes.nextCursor || null;
+        const computedSort = resolveApiSortParameter(version, retrievalDirection, selectedKind);
 
         const res = await resolveLinkExplorerInput(
           input.trim(),
           version,
           selectedKind,
-          { ...scanConfig, maxPages: 1 },
+          { ...scanConfig, serverSort: computedSort, maxPages: 1 },
           (progress) => setScanProgress(progress),
           abortControllerRef.current?.signal,
           {
@@ -642,7 +650,8 @@ export function LinkExplorerWorkspace() {
             currentPeriod: activePeriod || undefined,
             targetPeriodId: activePeriod?.periodId,
           },
-          onProgressiveCommit
+          onProgressiveCommit,
+          () => isPausedRef.current
         );
 
         if (!res.ok) {
@@ -674,12 +683,13 @@ export function LinkExplorerWorkspace() {
 
         ledger.activePeriodId = nextPeriod.periodId;
         nextPeriod.status = "in_progress";
+        const computedSort = resolveApiSortParameter(version, retrievalDirection, selectedKind);
 
         const res = await resolveLinkExplorerInput(
           input.trim(),
           version,
           selectedKind,
-          { ...scanConfig, maxPages: 1 },
+          { ...scanConfig, serverSort: computedSort, maxPages: 1 },
           (progress) => setScanProgress(progress),
           abortControllerRef.current?.signal,
           {
@@ -695,7 +705,8 @@ export function LinkExplorerWorkspace() {
             currentPeriod: nextPeriod,
             targetPeriodId: nextPeriod.periodId,
           },
-          onProgressiveCommit
+          onProgressiveCommit,
+          () => isPausedRef.current
         );
 
         if (!res.ok) {
@@ -734,12 +745,13 @@ export function LinkExplorerWorkspace() {
         if (!ledger || !targetPeriodParam) return;
         ledger.activePeriodId = targetPeriodParam.periodId;
         targetPeriodParam.status = "in_progress";
+        const computedSort = resolveApiSortParameter(version, retrievalDirection, selectedKind);
 
         const res = await resolveLinkExplorerInput(
           input.trim(),
           version,
           selectedKind,
-          { ...scanConfig, maxPages: 1 },
+          { ...scanConfig, serverSort: computedSort, maxPages: 1 },
           (progress) => setScanProgress(progress),
           abortControllerRef.current?.signal,
           {
@@ -755,7 +767,8 @@ export function LinkExplorerWorkspace() {
             currentPeriod: targetPeriodParam,
             targetPeriodId: targetPeriodParam.periodId,
           },
-          onProgressiveCommit
+          onProgressiveCommit,
+          () => isPausedRef.current
         );
 
         if (!res.ok) {
@@ -780,7 +793,10 @@ export function LinkExplorerWorkspace() {
         const maxBatches = 60; // Safe bounded circuit breaker
 
         while (keepRunning && batchCount < maxBatches) {
-          if (abortControllerRef.current?.signal.aborted) break;
+          if (isPausedRef.current || abortControllerRef.current?.signal.aborted) {
+            keepRunning = false;
+            break;
+          }
           batchCount++;
 
           const curLedger = currentRes.retrievalLedger;
@@ -806,11 +822,13 @@ export function LinkExplorerWorkspace() {
             targetCursor = null;
           }
 
+          const computedSort = resolveApiSortParameter(version, retrievalDirection, selectedKind);
+
           const res = await resolveLinkExplorerInput(
             input.trim(),
             version,
             selectedKind,
-            { ...scanConfig, maxPages: 1 },
+            { ...scanConfig, serverSort: computedSort, maxPages: 1 },
             (progress) => setScanProgress(progress),
             abortControllerRef.current?.signal,
             {
@@ -826,7 +844,8 @@ export function LinkExplorerWorkspace() {
               currentPeriod: targetP,
               targetPeriodId: targetP.periodId,
             },
-            onProgressiveCommit
+            onProgressiveCommit,
+            () => isPausedRef.current
           );
 
           if (!res.ok) {
@@ -891,20 +910,60 @@ export function LinkExplorerWorkspace() {
     }
   };
 
-  const handlePauseScan = () => {
+  const handlePauseScan = async () => {
+    isPausedRef.current = true;
     setIsPaused(true);
+    setScanProgress((prev) => (prev ? { ...prev, status: "paused", canResume: true } : null));
+    if (resolution && resolution.ok) {
+      try {
+        const owner = await getClientOwnerId();
+        const chk = await getScanCheckpoint(owner, version, resolution.effectiveKind, resolution.analyzed.identifier);
+        if (chk) {
+          chk.status = "paused";
+          chk.canResume = true;
+          chk.updatedAt = new Date().toISOString();
+          await saveScanCheckpoint(chk);
+        }
+      } catch {
+        // Non-blocking checkpoint save
+      }
+    }
   };
 
-  const handleResumeScan = () => {
+  const handleResumeScan = async () => {
+    isPausedRef.current = false;
     setIsPaused(false);
+    setScanProgress((prev) => (prev ? { ...prev, status: "fetching_pages" } : null));
+    if (resolution && resolution.ok) {
+      void handleContinueRetrieval("all_remaining");
+    }
   };
 
-  const handleCancelScan = () => {
+  const handleCancelScan = async () => {
+    isPausedRef.current = false;
+    setIsPaused(false);
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
     }
     setLoading(false);
-    setScanProgress((prev) => (prev ? { ...prev, status: "interrupted" } : null));
+    setLoadingMore(false);
+    setIsContinuingDeep(false);
+    setScanProgress((prev) => (prev ? { ...prev, status: "cancelled", canResume: false } : null));
+    if (resolution && resolution.ok) {
+      try {
+        const owner = await getClientOwnerId();
+        const chk = await getScanCheckpoint(owner, version, resolution.effectiveKind, resolution.analyzed.identifier);
+        if (chk) {
+          chk.status = "cancelled";
+          chk.canResume = false;
+          chk.updatedAt = new Date().toISOString();
+          await saveScanCheckpoint(chk);
+          await releaseScanLease(chk, tabIdRef.current);
+        }
+      } catch {
+        // Non-blocking cleanup
+      }
+    }
   };
 
   // Export Manifest as JSON
@@ -1179,7 +1238,13 @@ export function LinkExplorerWorkspace() {
         }}
         onChangeDirection={(nextDir) => {
           setRetrievalDirection(nextDir);
-          setScanConfig((prev) => ({ ...prev, retrievalDirection: nextDir }));
+          const effectiveKindForSort = overrideKind === "auto" ? resolution?.effectiveKind : overrideKind;
+          const computedSort = resolveApiSortParameter(version, nextDir, effectiveKindForSort);
+          setScanConfig((prev) => ({
+            ...prev,
+            retrievalDirection: nextDir,
+            serverSort: computedSort,
+          }));
         }}
         onChangeCustomRange={(nextRange) => {
           setCustomRangeConfig(nextRange);

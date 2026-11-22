@@ -38,35 +38,41 @@ export function ScanProgressBar({
   onResume,
   onCancel,
 }: ScanProgressBarProps) {
+  const isPausedState = isPaused || progress.status === "paused";
   const isRunning =
     progress.status === "discovering" ||
     progress.status === "fetching_pages" ||
-    progress.status === "splitting_date_ranges";
+    progress.status === "splitting_date_ranges" ||
+    isPausedState;
 
   const isFinished =
     progress.status === "completed" ||
+    progress.status === "complete_within_verified_scope" ||
     progress.status === "completed_with_known_limitations";
 
   const isFailed = progress.status === "failed";
-  const isInterrupted = progress.status === "interrupted";
+  const isCancelled =
+    progress.status === "cancelled" || progress.status === "interrupted";
 
   return (
     <div
       className={cn(
         "rounded-xl border p-4 space-y-3 transition-all shadow-sm",
-        isRunning && "border-primary/40 bg-primary/5",
+        isPausedState && "border-amber-500/40 bg-amber-500/10",
+        isRunning && !isPausedState && "border-primary/40 bg-primary/5",
         isFinished && "border-emerald-500/30 bg-emerald-500/5",
         isFailed && "border-rose-500/30 bg-rose-500/5",
-        isInterrupted && "border-amber-500/30 bg-amber-500/5"
+        isCancelled && "border-neutral-500/30 bg-neutral-500/5"
       )}
     >
       {/* Top row: Status pill & controls */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2.5">
-          {isRunning && <Loader2 className="h-4 w-4 animate-spin text-primary shrink-0" />}
+          {isRunning && !isPausedState && <Loader2 className="h-4 w-4 animate-spin text-primary shrink-0" />}
+          {isPausedState && <Pause className="h-4 w-4 text-amber-500 shrink-0" />}
           {isFinished && <CheckCircle2 className="h-4 w-4 text-emerald-500 shrink-0" />}
           {isFailed && <AlertCircle className="h-4 w-4 text-rose-500 shrink-0" />}
-          {isInterrupted && <StopCircle className="h-4 w-4 text-amber-500 shrink-0" />}
+          {isCancelled && <StopCircle className="h-4 w-4 text-rose-500 shrink-0" />}
 
           <span className="text-xs font-black uppercase tracking-wider text-foreground">
             {progress.status.replace(/_/g, " ")}
@@ -87,7 +93,7 @@ export function ScanProgressBar({
         <div className="flex items-center gap-2">
           {isRunning && (
             <>
-              {isPaused ? (
+              {isPausedState ? (
                 <button
                   type="button"
                   onClick={onResume}

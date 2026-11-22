@@ -122,9 +122,10 @@ export async function GET(request: Request, context: { params: Promise<{ resourc
       }
       case "playlists": {
         const nextUrl = str(url.searchParams.get("nextUrl")) || str(url.searchParams.get("next")) || null;
+        const sort = str(url.searchParams.get("sort"));
         if (mode === "lookup") return NextResponse.json(await v2GetPlaylist(id, str(url.searchParams.get("fields"))));
-        if (mode === "videos") return NextResponse.json(await v2PlaylistVideos(id, page ?? 1, pageSize ?? 100, str(url.searchParams.get("fields")), nextUrl));
-        return NextResponse.json(await v2ProfilePlaylists(profileId, page ?? 1, pageSize ?? 100, str(url.searchParams.get("fields"))));
+        if (mode === "videos") return NextResponse.json(await v2PlaylistVideos(id, page ?? 1, pageSize ?? 100, str(url.searchParams.get("fields")), nextUrl, sort));
+        return NextResponse.json(await v2ProfilePlaylists(profileId, page ?? 1, pageSize ?? 100, str(url.searchParams.get("fields")), sort, iso(url.searchParams.get("createdAfter"), false), iso(url.searchParams.get("createdBefore"), true)));
       }
       case "users": {
         if (mode === "me") {

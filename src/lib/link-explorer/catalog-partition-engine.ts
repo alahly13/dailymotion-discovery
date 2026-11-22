@@ -43,10 +43,11 @@ export interface RetrievalPeriod {
   childPeriodIds?: string[];
   granularity: PeriodGranularity;
   label: string;
-  startIso: string; // UTC ISO 8601 (e.g. 2024-10-01T00:00:00.000Z)
-  endIso: string;   // UTC ISO 8601 (e.g. 2024-10-31T23:59:59.999Z)
-  startUnix: number; // Unix timestamp in seconds for V1 API
-  endUnix: number;   // Unix timestamp in seconds for V1 API
+  isUnbounded?: boolean;
+  startIso: string | null; // UTC ISO 8601 (e.g. 2024-10-01T00:00:00.000Z) or null if unbounded
+  endIso: string | null;   // UTC ISO 8601 (e.g. 2024-10-31T23:59:59.999Z) or null if unbounded
+  startUnix: number | null; // Unix timestamp in seconds for V1 API or null if unbounded
+  endUnix: number | null;   // Unix timestamp in seconds for V1 API or null if unbounded
   apiVersion: ApiVersion;
   resourceIdentity: string;
   status: PeriodStatus;
@@ -385,9 +386,17 @@ export function partitionCustomDateRange(
 
   // Sort periods according to selected direction
   if (direction === "newest_to_oldest") {
-    periods.sort((a, b) => new Date(b.startIso).getTime() - new Date(a.startIso).getTime());
+    periods.sort((a, b) => {
+      const aTime = a.startIso ? new Date(a.startIso).getTime() : 0;
+      const bTime = b.startIso ? new Date(b.startIso).getTime() : 0;
+      return bTime - aTime;
+    });
   } else {
-    periods.sort((a, b) => new Date(a.startIso).getTime() - new Date(b.startIso).getTime());
+    periods.sort((a, b) => {
+      const aTime = a.startIso ? new Date(a.startIso).getTime() : 0;
+      const bTime = b.startIso ? new Date(b.startIso).getTime() : 0;
+      return aTime - bTime;
+    });
   }
 
   return periods;
@@ -395,6 +404,8 @@ export function partitionCustomDateRange(
 
 /**
  * Initializes a full set of periods based on selected retrieval strategy, direction, and known catalog dates.
+ * Discovers real historical years from actual resource dates — never invents dummy years.
+ * For playlists, preserves complete membership ingestion without artificial date partitioning.
  */
 export function initializeStrategyPeriods(
   strategy: RetrievalStrategy,
@@ -403,13 +414,56 @@ export function initializeStrategyPeriods(
   latestDateIso: string | null,
   apiVersion: ApiVersion = "v1",
   resourceIdentity: string = "",
-  customConfig?: CustomDateRangeConfig
+  customConfig?: CustomDateRangeConfig,
+  resourceType?: DailymotionResourceKind
 ): RetrievalPeriod[] {
   const currentUtcYear = new Date().getUTCFullYear();
   const currentUtcMonth = new Date().getUTCMonth() + 1;
 
-  // Determine earliest year (default: 2005 for Dailymotion launch)
-  let earliestYear = 2005;
+  // For a specific playlist: retrieve all membership entries without artificial date partitioning
+  if (resourceType === "playlist") {
+    const playlistPeriod: RetrievalPeriod = {
+      periodId: `period:playlist:${resourceIdentity || "target"}:${apiVersion}`,
+      granularity: "entire_range",
+      label: "Playlist Membership (Complete Ingestion)",
+      isUnbounded: true,
+      startIso: null,
+      endIso: null,
+      startUnix: null,
+      endUnix: null,
+      apiVersion,
+      resourceIdentity,
+      status: "pending",
+      pagesFetched: 0,
+      rawItemsReceived: 0,
+      uniqueItemsRetained: 0,
+      duplicatesDetected: 0,
+      isCapped: false,
+      nextPage: 1,
+      nextCursor: null,
+      hasMore: true,
+    };
+    return [playlistPeriod];
+  }
+
+  // Custom date range explicitly specified by user
+  if (strategy === "custom_range") {
+    if (!customConfig?.startDate || !customConfig?.endDate) {
+      const fallbackYear = generateYearPeriod(currentUtcYear, apiVersion, resourceIdentity);
+      return [fallbackYear];
+    }
+    return partitionCustomDateRange(
+      customConfig.startDate,
+      customConfig.endDate,
+      customConfig.granularity || "month",
+      direction,
+      apiVersion,
+      resourceIdentity
+    );
+  }
+
+  // Determine real earliest and latest years from verified content dates
+  let earliestYear = currentUtcYear;
   if (earliestDateIso) {
     const parsedYr = new Date(earliestDateIso).getUTCFullYear();
     if (!Number.isNaN(parsedYr) && parsedYr >= 2005 && parsedYr <= currentUtcYear) {
@@ -417,13 +471,40 @@ export function initializeStrategyPeriods(
     }
   }
 
-  // Determine latest year
   let latestYear = currentUtcYear;
   if (latestDateIso) {
     const parsedLatest = new Date(latestDateIso).getUTCFullYear();
     if (!Number.isNaN(parsedLatest) && parsedLatest >= earliestYear) {
       latestYear = Math.min(currentUtcYear, parsedLatest);
     }
+  }
+
+  // If no content date has been discovered yet, start with a Primary Discovery Window
+  // rather than inventing 20+ years of empty periods. Real years are added progressively
+  // as actual records arrive.
+  if (!earliestDateIso && (strategy === "automatic_maximum_coverage" || strategy === "year_by_year")) {
+    const primaryDiscoveryPeriod: RetrievalPeriod = {
+      periodId: `period:primary:${resourceIdentity || "target"}:${apiVersion}`,
+      granularity: "entire_range",
+      label: "Primary Discovery Window",
+      isUnbounded: true,
+      startIso: null,
+      endIso: null,
+      startUnix: null,
+      endUnix: null,
+      apiVersion,
+      resourceIdentity,
+      status: "pending",
+      pagesFetched: 0,
+      rawItemsReceived: 0,
+      uniqueItemsRetained: 0,
+      duplicatesDetected: 0,
+      isCapped: false,
+      nextPage: 1,
+      nextCursor: null,
+      hasMore: true,
+    };
+    return [primaryDiscoveryPeriod];
   }
 
   if (strategy === "month_by_month") {
@@ -448,56 +529,49 @@ export function initializeStrategyPeriods(
       }
     }
 
-    if (direction === "newest_to_oldest") {
-      periods.sort((a, b) => new Date(b.startIso).getTime() - new Date(a.startIso).getTime());
-    } else {
-      periods.sort((a, b) => new Date(a.startIso).getTime() - new Date(b.startIso).getTime());
-    }
+    const sortPeriods = (a: RetrievalPeriod, b: RetrievalPeriod) => {
+      if (!a.startIso) return 1;
+      if (!b.startIso) return -1;
+      return direction === "newest_to_oldest"
+        ? new Date(b.startIso).getTime() - new Date(a.startIso).getTime()
+        : new Date(a.startIso).getTime() - new Date(b.startIso).getTime();
+    };
+    periods.sort(sortPeriods);
     return periods;
   }
 
+  // Strategy B: Year by Year (Using only discovered years)
   if (strategy === "year_by_year") {
     const periods: RetrievalPeriod[] = [];
     for (let yr = earliestYear; yr <= latestYear; yr++) {
       periods.push(generateYearPeriod(yr, apiVersion, resourceIdentity));
     }
 
-    if (direction === "newest_to_oldest") {
-      periods.sort((a, b) => new Date(b.startIso).getTime() - new Date(a.startIso).getTime());
-    } else {
-      periods.sort((a, b) => new Date(a.startIso).getTime() - new Date(b.startIso).getTime());
-    }
+    const sortPeriods = (a: RetrievalPeriod, b: RetrievalPeriod) => {
+      if (!a.startIso) return 1;
+      if (!b.startIso) return -1;
+      return direction === "newest_to_oldest"
+        ? new Date(b.startIso).getTime() - new Date(a.startIso).getTime()
+        : new Date(a.startIso).getTime() - new Date(b.startIso).getTime();
+    };
+    periods.sort(sortPeriods);
     return periods;
   }
 
-  if (strategy === "custom_range") {
-    if (!customConfig?.startDate || !customConfig?.endDate) {
-      // Fallback to current year if not specified
-      const fallbackYear = generateYearPeriod(currentUtcYear, apiVersion, resourceIdentity);
-      return [fallbackYear];
-    }
-    return partitionCustomDateRange(
-      customConfig.startDate,
-      customConfig.endDate,
-      customConfig.granularity || "month",
-      direction,
-      apiVersion,
-      resourceIdentity
-    );
-  }
-
-  // Strategy A: Automatic Maximum Coverage (DEFAULT)
-  // Starts with yearly partitions across the channel lifetime, which will be adaptively subdivided if capped!
+  // Strategy A: Automatic Maximum Coverage
   const periods: RetrievalPeriod[] = [];
   for (let yr = earliestYear; yr <= latestYear; yr++) {
     periods.push(generateYearPeriod(yr, apiVersion, resourceIdentity));
   }
 
-  if (direction === "newest_to_oldest") {
-    periods.sort((a, b) => new Date(b.startIso).getTime() - new Date(a.startIso).getTime());
-  } else {
-    periods.sort((a, b) => new Date(a.startIso).getTime() - new Date(b.startIso).getTime());
-  }
+  const sortPeriods = (a: RetrievalPeriod, b: RetrievalPeriod) => {
+    if (!a.startIso) return 1;
+    if (!b.startIso) return -1;
+    return direction === "newest_to_oldest"
+      ? new Date(b.startIso).getTime() - new Date(a.startIso).getTime()
+      : new Date(a.startIso).getTime() - new Date(b.startIso).getTime();
+  };
+  periods.sort(sortPeriods);
   return periods;
 }
 
@@ -513,6 +587,9 @@ export function subdivideSaturatedPeriod(
   period: RetrievalPeriod,
   direction: RetrievalDirection = "newest_to_oldest"
 ): RetrievalPeriod[] {
+  if (!period.startIso || !period.endIso || period.granularity === "entire_range") {
+    return [];
+  }
   const startDate = new Date(period.startIso);
   const endDate = new Date(period.endIso);
   const yr = startDate.getUTCFullYear();
@@ -589,9 +666,17 @@ export function subdivideSaturatedPeriod(
 
   // Sort child periods according to the ledger's retrieval direction
   if (direction === "newest_to_oldest") {
-    childPeriods.sort((a, b) => new Date(b.startIso).getTime() - new Date(a.startIso).getTime());
+    childPeriods.sort((a, b) => {
+      const aTime = a.startIso ? new Date(a.startIso).getTime() : 0;
+      const bTime = b.startIso ? new Date(b.startIso).getTime() : 0;
+      return bTime - aTime;
+    });
   } else {
-    childPeriods.sort((a, b) => new Date(a.startIso).getTime() - new Date(b.startIso).getTime());
+    childPeriods.sort((a, b) => {
+      const aTime = a.startIso ? new Date(a.startIso).getTime() : 0;
+      const bTime = b.startIso ? new Date(b.startIso).getTime() : 0;
+      return aTime - bTime;
+    });
   }
 
   return childPeriods;
@@ -621,7 +706,8 @@ export function createPartitionLedger(params: {
     params.latestContentDate || null,
     params.apiVersion,
     params.resourceId,
-    params.customConfig
+    params.customConfig,
+    params.resourceType
   );
 
   const activePeriodId = initialPeriods[0]?.periodId || null;

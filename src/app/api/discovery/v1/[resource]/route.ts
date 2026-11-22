@@ -106,7 +106,7 @@ export async function GET(request: Request, context: { params: Promise<{ resourc
       case "playlists": {
         const fields = str(url.searchParams.get("fields"));
         if (mode === "lookup") return NextResponse.json(await v1GetPlaylist(url.searchParams.get("id") ?? "", fields));
-        if (mode === "videos") return NextResponse.json(await v1PlaylistVideos(url.searchParams.get("id") ?? "", num(url.searchParams.get("page")) ?? 1, num(url.searchParams.get("pageSize")) ?? 100, fields));
+        if (mode === "videos") return NextResponse.json(await v1PlaylistVideos(url.searchParams.get("id") ?? "", num(url.searchParams.get("page")) ?? 1, num(url.searchParams.get("pageSize")) ?? 100, fields, str(url.searchParams.get("sort"))));
         return NextResponse.json(await v1OwnerPlaylists({ owner: str(url.searchParams.get("owner")), sort: str(url.searchParams.get("sort")), limit: num(url.searchParams.get("pageSize")) ?? 100, page: num(url.searchParams.get("page")), fields }));
       }
       case "users": {

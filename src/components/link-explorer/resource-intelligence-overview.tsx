@@ -193,8 +193,14 @@ export function ResourceIntelligenceOverview({
                 {profile.createdDate && (
                   <span className="flex items-center gap-1 font-sans">
                     <Calendar className="h-3.5 w-3.5" />
-                    Joined {new Date(profile.createdDate).toLocaleDateString()}
+                    {targetId?.resolvedKind === "playlist" ? "Playlist Created" : "Joined"} {new Date(profile.createdDate).toLocaleDateString()}
                   </span>
+                )}
+                {data.membershipDateNotice && (
+                  <div className="w-full mt-2 rounded-lg bg-surface/70 border border-border/80 px-3 py-1.5 text-[11px] text-muted-foreground flex items-center gap-2 font-sans">
+                    <AlertCircle className="h-3.5 w-3.5 text-amber-500 shrink-0" />
+                    <span>{data.membershipDateNotice}</span>
+                  </div>
                 )}
               </div>
 
@@ -643,10 +649,14 @@ export function ResourceIntelligenceOverview({
             <div>
               <h4 className="text-xs font-black uppercase tracking-wider text-foreground flex items-center gap-2">
                 <Calendar className="h-4 w-4 text-primary" />
-                Catalog Distribution by Year
+                {targetId?.resolvedKind === "playlist"
+                  ? "Constituent Video Upload Years"
+                  : "Catalog Distribution by Year"}
               </h4>
               <p className="text-[11px] text-muted-foreground">
-                Click any year to filter retrieved items in the workspace below without network calls.
+                {targetId?.resolvedKind === "playlist"
+                  ? "Distribution of constituent video upload dates inside this playlist. Click any year to filter items locally."
+                  : "Click any year to filter retrieved items in the workspace below without network calls."}
               </p>
             </div>
             {activeYearFilter !== null && (

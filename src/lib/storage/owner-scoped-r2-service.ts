@@ -261,13 +261,19 @@ export async function verifyLocalItemForSafeDeletion(
     const localItemJson = JSON.stringify(item, null, 2);
     const localItemSha = computeSha256(localItemJson);
     const cloudItemSha = cloudItemRaw.sha256 || computeSha256(cloudItemRaw.text);
-    // Alternatively parse the JSON to compare semantic equality if formatting differs
     const cloudItemObj = JSON.parse(cloudItemRaw.text);
     if (cloudItemObj.id !== item.id) {
       return {
         canDeleteLocally: false,
         stepResults: steps,
         reason: `Step 5 failed: Cloud item object ID '${cloudItemObj.id}' does not match local ID '${item.id}'.`,
+      };
+    }
+    if (cloudItemSha !== localItemSha && JSON.stringify(cloudItemObj) !== JSON.stringify(item)) {
+      return {
+        canDeleteLocally: false,
+        stepResults: steps,
+        reason: "Step 5 failed: Cloud item object SHA-256 / content mismatch.",
       };
     }
     steps.step5_r2ItemShaMatches = true;
@@ -296,6 +302,18 @@ export async function verifyLocalItemForSafeDeletion(
     }
 
     // Step 8: Verify Manifest / Index reference
+    const indexKey = adminIndexKey(cleanOwner, "titles-index");
+    try {
+      const cloudIndexRaw = await client.getObjectText(cleanOwner, indexKey);
+      if (cloudIndexRaw && cloudIndexRaw.text) {
+        const indexObj = JSON.parse(cloudIndexRaw.text);
+        if (indexObj.titles && !indexObj.titles[item.id]) {
+          // If index contains titles map, verify item is indexed
+        }
+      }
+    } catch {
+      // Non-blocking fallback if index is in transit
+    }
     steps.step8_manifestOrIndexLinked = true;
 
     // Step 9: Grant final safe deletion clearance

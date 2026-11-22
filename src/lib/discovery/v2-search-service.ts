@@ -124,14 +124,29 @@ export async function v2GetUser(id: string): Promise<DiscoveryOutcome> {
   return { ok: true, result: { items: [item], page: 1, pageSize: 1, total: 1, hasMore: false, nextCursor: null, capped: false, apiVersion: "v2", resource: "users", endpoint } };
 }
 
-/** Profile playlist listing: GET /profiles/{id}/playlists. */
-export async function v2ProfilePlaylists(profileId: string, page = 1, pageSize = 100, fields?: string): Promise<DiscoveryOutcome> {
+/** Profile playlist listing: GET /profiles/{id}/playlists. Supports sort (-created_at / created_at) and date range. */
+export async function v2ProfilePlaylists(
+  profileId: string,
+  page = 1,
+  pageSize = 100,
+  fields?: string,
+  sort?: string | null,
+  createdAfterIso?: string | null,
+  createdBeforeIso?: string | null
+): Promise<DiscoveryOutcome> {
   const endpoint = "GET /profiles/{profile_id}/playlists";
   const missing = requireProfileId(profileId, "playlists", endpoint);
   if (missing) return missing;
-  const outcome = await v2List<V2RawPlaylist>(`/profiles/${encodeURIComponent(profileId.trim())}/playlists`, {
-    page: String(clampPage(page)), page_size: String(clampLimit(pageSize)), fields: fields?.trim() || "playlist_id,title,description,created_at",
-  });
+  const params: Record<string, string> = {
+    page: String(clampPage(page)),
+    page_size: String(clampLimit(pageSize)),
+    fields: fields?.trim() || "playlist_id,title,description,created_at",
+  };
+  if (sort?.trim()) params.sort = sort.trim();
+  if (createdAfterIso?.trim()) params.created_after = createdAfterIso.trim();
+  if (createdBeforeIso?.trim()) params.created_before = createdBeforeIso.trim();
+
+  const outcome = await v2List<V2RawPlaylist>(`/profiles/${encodeURIComponent(profileId.trim())}/playlists`, params);
   if (!outcome.ok) return withRemedy(outcome.failure, "playlists", endpoint);
   const pagination = outcome.data.pagination ?? {};
   const items = (outcome.data.data ?? []).map(normalizeV2Playlist).filter((i): i is DiscoveryItem => i !== null);
@@ -148,14 +163,26 @@ export async function v2GetPlaylist(id: string, fields?: string): Promise<Discov
   return { ok: true, result: { items: item ? [item] : [], page: 1, pageSize: 1, total: item ? 1 : 0, hasMore: false, nextCursor: null, capped: false, apiVersion: "v2", resource: "playlists", endpoint } };
 }
 
-/** Playlist contents: GET /playlists/{id}/videos. */
-export async function v2PlaylistVideos(id: string, page = 1, pageSize = 100, fields?: string, nextUrl?: string | null): Promise<DiscoveryOutcome> {
+/** Playlist contents: GET /playlists/{id}/videos. Supports pagination and sorting by created_at (-created_at / created_at). */
+export async function v2PlaylistVideos(
+  id: string,
+  page = 1,
+  pageSize = 100,
+  fields?: string,
+  nextUrl?: string | null,
+  sort?: string | null
+): Promise<DiscoveryOutcome> {
   const endpoint = "GET /playlists/{playlist_id}/videos";
   if (!id.trim()) return { ok: false, error: "Enter a playlist ID.", reason: "user_input_error", status: 400, apiVersion: "v2", resource: "playlists", endpoint, remedy: null, retryable: false };
   const path = nextUrl?.trim() || `/playlists/${encodeURIComponent(id.trim())}/videos`;
   const params: Record<string, string> = nextUrl?.trim() ? {} : {
-    page: String(clampPage(page)), page_size: String(clampLimit(pageSize)), fields: fields?.trim() || V2_VIDEO_FIELDS,
+    page: String(clampPage(page)),
+    page_size: String(clampLimit(pageSize)),
+    fields: fields?.trim() || V2_VIDEO_FIELDS,
   };
+  if (!nextUrl?.trim() && sort?.trim()) {
+    params.sort = sort.trim();
+  }
   const outcome = await v2List<V2RawVideo>(path, params);
   if (!outcome.ok) return withRemedy(outcome.failure, "playlists", endpoint);
   const pagination = outcome.data.pagination ?? {};
