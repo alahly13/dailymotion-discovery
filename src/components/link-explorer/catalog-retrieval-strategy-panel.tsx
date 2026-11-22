@@ -29,15 +29,19 @@ import type {
   RetrievalDirection,
   RetrievalStrategy,
 } from "@/lib/link-explorer/link-explorer-types";
+import type { DailymotionResourceKind } from "@/lib/platforms/dailymotion/dailymotion-url-analyzer";
 import { cn } from "@/lib/utils/cn";
 
 export interface CatalogRetrievalStrategyPanelProps {
   strategy: RetrievalStrategy;
   direction: RetrievalDirection;
   customRangeConfig?: CustomDateRangeConfig;
+  catalogTarget?: "videos" | "playlists";
+  targetKind?: DailymotionResourceKind;
   onChangeStrategy: (strategy: RetrievalStrategy) => void;
   onChangeDirection: (direction: RetrievalDirection) => void;
   onChangeCustomRange: (config: CustomDateRangeConfig) => void;
+  onChangeCatalogTarget?: (target: "videos" | "playlists") => void;
   disabled?: boolean;
 }
 
@@ -88,12 +92,38 @@ export function CatalogRetrievalStrategyPanel({
   strategy,
   direction,
   customRangeConfig,
+  catalogTarget = "videos",
+  targetKind,
   onChangeStrategy,
   onChangeDirection,
   onChangeCustomRange,
+  onChangeCatalogTarget,
   disabled = false,
 }: CatalogRetrievalStrategyPanelProps) {
   const panelId = useId();
+
+  const isPlaylistMembership = targetKind === "playlist";
+  const isPlaylistsCatalog = !isPlaylistMembership && catalogTarget === "playlists";
+
+  const panelTitle = isPlaylistMembership
+    ? "Playlist Membership (Complete Ingestion)"
+    : isPlaylistsCatalog
+    ? "Channel Playlist Catalog Discovery"
+    : "Catalog Retrieval Strategy";
+
+  const panelSubtitle = isPlaylistMembership
+    ? "Retrieving all constituent playlist entries regardless of video upload date. Videos maintain their original upload dates."
+    : isPlaylistsCatalog
+    ? "Choose how the channel playlist catalog is divided into time periods based on playlist creation date (playlist.created_at)."
+    : "Choose how the channel video catalog is divided into time periods based on video upload date (video.created_at).";
+
+  const startDateLabel = isPlaylistsCatalog
+    ? "Playlist Creation Date — Fetch From (YYYY-MM-DD):"
+    : "Video Upload Date — Fetch From (YYYY-MM-DD):";
+
+  const endDateLabel = isPlaylistsCatalog
+    ? "Playlist Creation Date — Fetch To (YYYY-MM-DD):"
+    : "Video Upload Date — Fetch To (YYYY-MM-DD):";
 
   const handleStartDateChange = (val: string) => {
     onChangeCustomRange({
@@ -136,48 +166,84 @@ export function CatalogRetrievalStrategyPanel({
           </div>
           <div>
             <h3 className="text-sm font-black tracking-tight text-foreground flex items-center gap-2">
-              Catalog Retrieval Strategy
+              {panelTitle}
               <span className="rounded-md bg-emerald-500/15 border border-emerald-500/20 px-2 py-0.5 text-[10px] font-black text-emerald-600 dark:text-emerald-400 uppercase">
                 Active: {strategy.replace(/_/g, " ")}
               </span>
             </h3>
             <p className="text-xs text-muted-foreground">
-              Choose how the channel or playlist catalog is divided into time periods and traversed.
+              {panelSubtitle}
             </p>
           </div>
         </div>
 
-        {/* Direction Switcher */}
-        <div className="flex items-center gap-2 rounded-xl border border-border bg-surface p-1">
-          <span className="px-2 text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
-            Direction:
-          </span>
-          <button
-            type="button"
-            disabled={disabled}
-            onClick={() => onChangeDirection("newest_to_oldest")}
-            className={cn(
-              "rounded-lg px-2.5 py-1 text-xs font-bold transition-all cursor-pointer",
-              direction === "newest_to_oldest"
-                ? "bg-primary text-primary-foreground shadow-xs"
-                : "text-muted-foreground hover:text-foreground hover:bg-surface-muted"
-            )}
-          >
-            Newest to Oldest
-          </button>
-          <button
-            type="button"
-            disabled={disabled}
-            onClick={() => onChangeDirection("oldest_to_newest")}
-            className={cn(
-              "rounded-lg px-2.5 py-1 text-xs font-bold transition-all cursor-pointer",
-              direction === "oldest_to_newest"
-                ? "bg-primary text-primary-foreground shadow-xs"
-                : "text-muted-foreground hover:text-foreground hover:bg-surface-muted"
-            )}
-          >
-            Oldest to Newest
-          </button>
+        {/* Controls: Target Toggle & Direction Switcher */}
+        <div className="flex flex-wrap items-center gap-2">
+          {onChangeCatalogTarget && !isPlaylistMembership && (
+            <div className="flex items-center gap-1 rounded-xl border border-border bg-surface p-1">
+              <span className="px-2 text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
+                Target:
+              </span>
+              <button
+                type="button"
+                disabled={disabled}
+                onClick={() => onChangeCatalogTarget("videos")}
+                className={cn(
+                  "rounded-lg px-2.5 py-1 text-xs font-bold transition-all cursor-pointer",
+                  catalogTarget !== "playlists"
+                    ? "bg-primary text-primary-foreground shadow-xs"
+                    : "text-muted-foreground hover:text-foreground hover:bg-surface-muted"
+                )}
+              >
+                Videos
+              </button>
+              <button
+                type="button"
+                disabled={disabled}
+                onClick={() => onChangeCatalogTarget("playlists")}
+                className={cn(
+                  "rounded-lg px-2.5 py-1 text-xs font-bold transition-all cursor-pointer",
+                  catalogTarget === "playlists"
+                    ? "bg-primary text-primary-foreground shadow-xs"
+                    : "text-muted-foreground hover:text-foreground hover:bg-surface-muted"
+                )}
+              >
+                Playlists
+              </button>
+            </div>
+          )}
+
+          <div className="flex items-center gap-2 rounded-xl border border-border bg-surface p-1">
+            <span className="px-2 text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
+              Direction:
+            </span>
+            <button
+              type="button"
+              disabled={disabled}
+              onClick={() => onChangeDirection("newest_to_oldest")}
+              className={cn(
+                "rounded-lg px-2.5 py-1 text-xs font-bold transition-all cursor-pointer",
+                direction === "newest_to_oldest"
+                  ? "bg-primary text-primary-foreground shadow-xs"
+                  : "text-muted-foreground hover:text-foreground hover:bg-surface-muted"
+              )}
+            >
+              Newest to Oldest
+            </button>
+            <button
+              type="button"
+              disabled={disabled}
+              onClick={() => onChangeDirection("oldest_to_newest")}
+              className={cn(
+                "rounded-lg px-2.5 py-1 text-xs font-bold transition-all cursor-pointer",
+                direction === "oldest_to_newest"
+                  ? "bg-primary text-primary-foreground shadow-xs"
+                  : "text-muted-foreground hover:text-foreground hover:bg-surface-muted"
+              )}
+            >
+              Oldest to Newest
+            </button>
+          </div>
         </div>
       </div>
 
@@ -252,7 +318,7 @@ export function CatalogRetrievalStrategyPanel({
             {/* Start Date */}
             <div className="space-y-1">
               <label htmlFor={`${panelId}-start`} className="text-[11px] font-bold text-muted-foreground">
-                Start Date (YYYY-MM-DD):
+                {startDateLabel}
               </label>
               <input
                 id={`${panelId}-start`}
@@ -266,7 +332,7 @@ export function CatalogRetrievalStrategyPanel({
             {/* End Date */}
             <div className="space-y-1">
               <label htmlFor={`${panelId}-end`} className="text-[11px] font-bold text-muted-foreground">
-                End Date (YYYY-MM-DD):
+                {endDateLabel}
               </label>
               <input
                 id={`${panelId}-end`}

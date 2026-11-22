@@ -1232,6 +1232,8 @@ export function LinkExplorerWorkspace() {
         strategy={retrievalStrategy}
         direction={retrievalDirection}
         customRangeConfig={customRangeConfig}
+        catalogTarget={scanConfig.catalogTarget || "videos"}
+        targetKind={resolution?.effectiveKind || (overrideKind !== "auto" ? overrideKind : analyzedPreview?.kind)}
         onChangeStrategy={(nextStrat) => {
           setRetrievalStrategy(nextStrat);
           setScanConfig((prev) => ({ ...prev, retrievalStrategy: nextStrat }));
@@ -1249,6 +1251,9 @@ export function LinkExplorerWorkspace() {
         onChangeCustomRange={(nextRange) => {
           setCustomRangeConfig(nextRange);
           setScanConfig((prev) => ({ ...prev, customRangeConfig: nextRange }));
+        }}
+        onChangeCatalogTarget={(nextTarget) => {
+          setScanConfig((prev) => ({ ...prev, catalogTarget: nextTarget }));
         }}
         disabled={loading || loadingMore}
       />

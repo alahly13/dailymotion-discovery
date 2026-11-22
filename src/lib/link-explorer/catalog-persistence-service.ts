@@ -41,6 +41,9 @@ export interface CatalogItemRecord {
   periodId?: string | null;
   page: number;
   createdAt?: string | null;
+  playlistCreatedAt?: string | null;
+  videoCreatedAt?: string | null;
+  membershipAddedAt?: string | null;
   savedAt: string;
   updatedAt: string;
 }
@@ -135,6 +138,9 @@ export async function persistProgressiveBatch(params: PersistBatchParams): Promi
       periodId,
       page,
       createdAt: finalItem.createdAt || null,
+      playlistCreatedAt: finalItem.playlistCreatedAt ?? (finalItem.kind === "playlist" ? finalItem.createdAt : null),
+      videoCreatedAt: finalItem.videoCreatedAt ?? (finalItem.kind === "video" ? finalItem.createdAt : null),
+      membershipAddedAt: finalItem.membershipAddedAt ?? null,
       savedAt: originalSavedAt,
       updatedAt: now,
     };

@@ -1,8 +1,8 @@
 # Dailymotion Discovery Platform Ledger
 
-Updated: 2026-11-22
+Updated: 2026-11-23
 Repo path: `E:\discovery\dailymotion-discovery`
-Scope: Project source-of-truth ledger, updated after Correct API-Driven Sorting, Real Historical Date Discovery, Playlist-Aware Fetching, Date-Range Filtering, Pause/Resume/Cancel Lifecycle, Durable Checkpoints, and Deployment Verification. 100% Vitest (279/279 tests) and TypeScript verification.
+Scope: Project source-of-truth ledger, updated after Strict Separation of Playlist Creation Date from Video Upload Date, Dual-Domain Catalog Partitioning, Complete Playlist Membership Ingestion, 100% Vitest (283/283 tests) and TypeScript verification.
 
 ## Table of Contents
 
@@ -23,6 +23,39 @@ Scope: Project source-of-truth ledger, updated after Correct API-Driven Sorting,
 - [Known Limitations](#known-limitations)
 - [Future Roadmap](#future-roadmap)
 - [Agent Instructions](#agent-instructions)
+
+## 2026-11-23 Production Release: Strict Separation of Playlist Creation Date vs Video Upload Date, Dual-Domain Catalog Partitioning & Membership Ingestion
+
+**User intent addressed**
+- **Strict Separation of Playlist Creation Date vs Video Upload Date**:
+  - Enforced two completely separate date domains across the entire application:
+    1. **Playlist Catalog Discovery**: When retrieving playlists belonging to a channel, profile, or user, all date-range filtering (`Fetch From` / `Fetch To`) and date-based partitioning strictly use `playlist.created_at` (`playlistCreatedAt`).
+       - Dailymotion API v2: Server-side date filtering via `created_after` and `created_before` on `/v2/profiles/{profile_id}/playlists`.
+       - Dailymotion API v1: Because Dailymotion v1 `/user/{id}/playlists` rejects or ignores date parameters, upstream request avoids invalid query params and executes an explicit, verified client-side date filter `isPlaylistWithinCreationBounds` using `playlist.created_at`.
+       - Constituent video upload dates are never used to decide whether a playlist belongs to a selected date range.
+    2. **Playlist Membership Retrieval**: When retrieving videos inside one selected playlist, the engine retrieves its complete membership regardless of constituent video upload dates.
+       - Never applies the parent playlist creation date or date partitions to constituent videos.
+       - Retains videos across arbitrary years (e.g. 2010 and 2026 videos inside a 2020 playlist are both preserved and ingested in full).
+       - Exposes explicit notice that Dailymotion API does not provide `membershipAddedAt` timestamps.
+- **Architectural Type Definitions & Persistence**:
+  - `src/lib/discovery/types.ts`: Added semantic fields `playlistCreatedAt?: string | null; videoCreatedAt?: string | null; membershipAddedAt?: string | null;` to `DiscoveryItem`.
+  - `src/lib/discovery/v1-normalize.ts`: `normalizeV1Video` sets `videoCreatedAt` and nulls `playlistCreatedAt` / `membershipAddedAt`. `normalizeV1Playlist` sets `playlistCreatedAt` and nulls `videoCreatedAt` / `membershipAddedAt`.
+  - `src/lib/discovery/v2-normalize.ts`: `normalizeV2Video` sets `videoCreatedAt` and nulls `playlistCreatedAt` / `membershipAddedAt`. `normalizeV2Playlist` sets `playlistCreatedAt` and nulls `videoCreatedAt` / `membershipAddedAt`.
+  - `src/lib/link-explorer/catalog-persistence-service.ts`: Persists `playlistCreatedAt`, `videoCreatedAt`, `membershipAddedAt` into IndexedDB store `link_explorer_catalog_items`.
+- **Partition Engine Dual-Domain Slicing (`src/lib/link-explorer/catalog-partition-engine.ts`)**:
+  - Added `DateDomain = "video-created-at" | "playlist-created-at" | "playlist-membership-added-at" | "unknown"`.
+  - `initializeStrategyPeriods`, `generateYearPeriod`, `generateMonthPeriod`, `partitionCustomDateRange`, `subdivideSaturatedPeriod`, and `createPartitionLedger` carry `dateDomain` throughout all partitions and subdivisions.
+  - Playlist catalog partitions receive `period:playlist_catalog:*` IDs and `"Playlist Creation: "` labels.
+- **Dynamic UI Controls & Labels (`src/components/link-explorer/`)**:
+  - `CatalogRetrievalStrategyPanel`:
+    - Channel playlists discovery: Labeled `Playlist Creation Date — Fetch From (YYYY-MM-DD)` / `Playlist Creation Date — Fetch To (YYYY-MM-DD)`.
+    - Channel videos discovery: Labeled `Video Upload Date — Fetch From (YYYY-MM-DD)` / `Video Upload Date — Fetch To (YYYY-MM-DD)`.
+    - Playlist membership retrieval: Labeled `Playlist Membership (Complete Ingestion)`.
+    - Includes interactive `Target: [Videos] [Playlists]` toggle for channels.
+  - `AdvancedFetchSettingsPanel`: Dynamically updates date boundary labels depending on active `catalogTarget`.
+- **Verification**:
+  - 100% Vitest pass rate: 47 test files passed, 283 tests passed (added comprehensive unit & integration tests in `src/lib/link-explorer/__tests__/sorting-and-dates.test.ts`).
+  - 100% TypeScript typecheck pass: `tsc --noEmit` exited with code 0 (zero errors).
 
 ## 2026-11-22 Production Engineering: API-Driven Sorting, Real Historical Date Discovery, Playlist Semantics, Date Ranges & Execution Lifecycle
 

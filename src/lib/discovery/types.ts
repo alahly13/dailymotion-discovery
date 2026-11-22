@@ -38,6 +38,10 @@ export interface DiscoveryItem {
   category: string | null;
   createdAt: string | null;
   year: number | null;
+  // Semantic date domains distinguishing playlist vs video vs membership timestamps
+  playlistCreatedAt?: string | null;
+  videoCreatedAt?: string | null;
+  membershipAddedAt?: string | null;
   tags: string[];
   ownerId: string | null;
   ownerName: string | null;

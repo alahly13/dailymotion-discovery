@@ -323,11 +323,17 @@ export function AdvancedFetchSettingsPanel({
           <div className="space-y-2 pt-2 border-t border-border/60">
             <label className="text-xs font-black uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
               <Calendar className="h-3.5 w-3.5" />
-              Date Boundaries (Optional Range)
+              {config.catalogTarget === "playlists"
+                ? "Playlist Creation Date Boundaries (playlist.created_at)"
+                : "Video Upload Date Boundaries (video.created_at)"}
             </label>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
-                <span className="text-[11px] text-muted-foreground mb-1 block">From Date (Earliest)</span>
+                <span className="text-[11px] text-muted-foreground mb-1 block">
+                  {config.catalogTarget === "playlists"
+                    ? "From Date (Playlist Created After)"
+                    : "From Date (Video Uploaded After)"}
+                </span>
                 <input
                   type="date"
                   value={config.dateFrom || ""}
@@ -338,7 +344,11 @@ export function AdvancedFetchSettingsPanel({
                 />
               </div>
               <div>
-                <span className="text-[11px] text-muted-foreground mb-1 block">To Date (Latest)</span>
+                <span className="text-[11px] text-muted-foreground mb-1 block">
+                  {config.catalogTarget === "playlists"
+                    ? "To Date (Playlist Created Before)"
+                    : "To Date (Video Uploaded Before)"}
+                </span>
                 <input
                   type="date"
                   value={config.dateTo || ""}

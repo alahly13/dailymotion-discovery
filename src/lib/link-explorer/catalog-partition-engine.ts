@@ -22,6 +22,12 @@ export type RetrievalDirection =
   | "newest_to_oldest" // DEFAULT
   | "oldest_to_newest";
 
+export type DateDomain =
+  | "video-created-at"
+  | "playlist-created-at"
+  | "playlist-membership-added-at"
+  | "unknown";
+
 export type PeriodGranularity =
   | "year"
   | "month"
@@ -50,6 +56,7 @@ export interface RetrievalPeriod {
   endUnix: number | null;   // Unix timestamp in seconds for V1 API or null if unbounded
   apiVersion: ApiVersion;
   resourceIdentity: string;
+  dateDomain?: DateDomain;
   status: PeriodStatus;
   pagesFetched: number;
   rawItemsReceived: number;
@@ -82,6 +89,8 @@ export interface CatalogPartitionLedger {
   periods: RetrievalPeriod[];
   earliestContentDate: string | null;
   latestContentDate: string | null;
+  catalogTarget?: "videos" | "playlists";
+  dateDomain?: DateDomain;
   totalRawObserved: number;
   totalUniqueRetained: number;
   totalDuplicatesDetected: number;
@@ -118,7 +127,8 @@ export function generateMonthPeriod(
   month: number,
   apiVersion: ApiVersion = "v1",
   resourceIdentity: string = "",
-  parentPeriodId: string | null = null
+  parentPeriodId: string | null = null,
+  dateDomain: DateDomain = "video-created-at"
 ): RetrievalPeriod {
   const mStr = String(month).padStart(2, "0");
   const lastDay = getDaysInUtcMonth(year, month);
@@ -133,8 +143,10 @@ export function generateMonthPeriod(
     "January", "February", "March", "April", "May", "June",
     "July", "August", "September", "October", "November", "December"
   ];
-  const label = `${monthNames[month - 1]} ${year}`;
-  const periodId = `period:month:${year}-${mStr}:${apiVersion}:${resourceIdentity || "target"}`;
+  const labelPrefix = dateDomain === "playlist-created-at" ? "Playlist Creation: " : "";
+  const label = `${labelPrefix}${monthNames[month - 1]} ${year}`;
+  const periodPrefix = dateDomain === "playlist-created-at" ? "period:playlist_catalog:month" : "period:month";
+  const periodId = `${periodPrefix}:${year}-${mStr}:${apiVersion}:${resourceIdentity || "target"}`;
 
   return {
     periodId,
@@ -147,6 +159,7 @@ export function generateMonthPeriod(
     endUnix,
     apiVersion,
     resourceIdentity,
+    dateDomain,
     status: "pending",
     pagesFetched: 0,
     rawItemsReceived: 0,
@@ -166,25 +179,29 @@ export function generateYearPeriod(
   year: number,
   apiVersion: ApiVersion = "v1",
   resourceIdentity: string = "",
-  parentPeriodId: string | null = null
+  parentPeriodId: string | null = null,
+  dateDomain: DateDomain = "video-created-at"
 ): RetrievalPeriod {
   const startIso = `${year}-01-01T00:00:00.000Z`;
   const endIso = `${year}-12-31T23:59:59.999Z`;
   const startUnix = Math.floor(new Date(startIso).getTime() / 1000);
   const endUnix = Math.floor(new Date(`${year}-12-31T23:59:59.000Z`).getTime() / 1000);
-  const periodId = `period:year:${year}:${apiVersion}:${resourceIdentity || "target"}`;
+  const labelPrefix = dateDomain === "playlist-created-at" ? "Playlist Creation: " : "";
+  const periodPrefix = dateDomain === "playlist-created-at" ? "period:playlist_catalog:year" : "period:year";
+  const periodId = `${periodPrefix}:${year}:${apiVersion}:${resourceIdentity || "target"}`;
 
   return {
     periodId,
     parentPeriodId,
     granularity: "year",
-    label: `Year ${year}`,
+    label: `${labelPrefix}Year ${year}`,
     startIso,
     endIso,
     startUnix,
     endUnix,
     apiVersion,
     resourceIdentity,
+    dateDomain,
     status: "pending",
     pagesFetched: 0,
     rawItemsReceived: 0,
@@ -207,7 +224,8 @@ export function generateCustomPeriod(
   label: string,
   apiVersion: ApiVersion = "v1",
   resourceIdentity: string = "",
-  parentPeriodId: string | null = null
+  parentPeriodId: string | null = null,
+  dateDomain: DateDomain = "video-created-at"
 ): RetrievalPeriod {
   const startDate = new Date(startUtc);
   const endDate = new Date(endUtc);
@@ -226,7 +244,8 @@ export function generateCustomPeriod(
 
   const cleanStart = startIso.substring(0, 10);
   const cleanEnd = endIso.substring(0, 10);
-  const periodId = `period:${granularity}:${cleanStart}_${cleanEnd}:${apiVersion}:${resourceIdentity || "target"}`;
+  const prefix = dateDomain === "playlist-created-at" ? "period:playlist_catalog" : "period";
+  const periodId = `${prefix}:${granularity}:${cleanStart}_${cleanEnd}:${apiVersion}:${resourceIdentity || "target"}`;
 
   return {
     periodId,
@@ -239,6 +258,7 @@ export function generateCustomPeriod(
     endUnix,
     apiVersion,
     resourceIdentity,
+    dateDomain,
     status: "pending",
     pagesFetched: 0,
     rawItemsReceived: 0,
@@ -260,7 +280,8 @@ export function partitionCustomDateRange(
   granularity: PeriodGranularity,
   direction: RetrievalDirection = "newest_to_oldest",
   apiVersion: ApiVersion = "v1",
-  resourceIdentity: string = ""
+  resourceIdentity: string = "",
+  dateDomain: DateDomain = "video-created-at"
 ): RetrievalPeriod[] {
   // Normalize strings (YYYY-MM-DD)
   const startNorm = startDateStr.length <= 10 ? `${startDateStr}T00:00:00.000Z` : startDateStr;
@@ -276,14 +297,18 @@ export function partitionCustomDateRange(
     throw new Error(`Custom date range invalid: start date (${startDateStr}) is later than end date (${endDateStr}).`);
   }
 
+  const labelPrefix = dateDomain === "playlist-created-at" ? "Playlist Creation: " : "";
+
   if (granularity === "entire_range") {
     const single = generateCustomPeriod(
       startNorm,
       endNorm,
       "entire_range",
-      `Range: ${startDateStr.substring(0, 10)} to ${endDateStr.substring(0, 10)}`,
+      `${labelPrefix}Range ${startDateStr.substring(0, 10)} to ${endDateStr.substring(0, 10)}`,
       apiVersion,
-      resourceIdentity
+      resourceIdentity,
+      null,
+      dateDomain
     );
     return [single];
   }
@@ -302,9 +327,11 @@ export function partitionCustomDateRange(
           yrStartIso,
           yrEndIso,
           "year",
-          `Year ${yr}`,
+          `${labelPrefix}Year ${yr}`,
           apiVersion,
-          resourceIdentity
+          resourceIdentity,
+          null,
+          dateDomain
         )
       );
     }
@@ -330,9 +357,11 @@ export function partitionCustomDateRange(
           mStart,
           mEnd,
           "month",
-          `${monthNames[m - 1]} ${yr}`,
+          `${labelPrefix}${monthNames[m - 1]} ${yr}`,
           apiVersion,
-          resourceIdentity
+          resourceIdentity,
+          null,
+          dateDomain
         )
       );
 
@@ -352,9 +381,11 @@ export function partitionCustomDateRange(
           sIso,
           eIso,
           "week",
-          `Week ${weekIndex} (${sIso.substring(0, 10)})`,
+          `${labelPrefix}Week ${weekIndex} (${sIso.substring(0, 10)})`,
           apiVersion,
-          resourceIdentity
+          resourceIdentity,
+          null,
+          dateDomain
         )
       );
       curStart = curEnd + 1;
@@ -374,9 +405,11 @@ export function partitionCustomDateRange(
           dayStart,
           dayEnd,
           "day",
-          `Day ${curDay.toISOString().substring(0, 10)}`,
+          `${labelPrefix}Day ${curDay.toISOString().substring(0, 10)}`,
           apiVersion,
-          resourceIdentity
+          resourceIdentity,
+          null,
+          dateDomain
         )
       );
 
@@ -415,10 +448,18 @@ export function initializeStrategyPeriods(
   apiVersion: ApiVersion = "v1",
   resourceIdentity: string = "",
   customConfig?: CustomDateRangeConfig,
-  resourceType?: DailymotionResourceKind
+  resourceType?: DailymotionResourceKind,
+  catalogTarget: "videos" | "playlists" = "videos"
 ): RetrievalPeriod[] {
   const currentUtcYear = new Date().getUTCFullYear();
   const currentUtcMonth = new Date().getUTCMonth() + 1;
+
+  const dateDomain: DateDomain =
+    resourceType === "playlist"
+      ? "playlist-membership-added-at"
+      : catalogTarget === "playlists"
+      ? "playlist-created-at"
+      : "video-created-at";
 
   // For a specific playlist: retrieve all membership entries without artificial date partitioning
   if (resourceType === "playlist") {
@@ -433,6 +474,7 @@ export function initializeStrategyPeriods(
       endUnix: null,
       apiVersion,
       resourceIdentity,
+      dateDomain: "playlist-membership-added-at",
       status: "pending",
       pagesFetched: 0,
       rawItemsReceived: 0,
@@ -449,7 +491,7 @@ export function initializeStrategyPeriods(
   // Custom date range explicitly specified by user
   if (strategy === "custom_range") {
     if (!customConfig?.startDate || !customConfig?.endDate) {
-      const fallbackYear = generateYearPeriod(currentUtcYear, apiVersion, resourceIdentity);
+      const fallbackYear = generateYearPeriod(currentUtcYear, apiVersion, resourceIdentity, null, dateDomain);
       return [fallbackYear];
     }
     return partitionCustomDateRange(
@@ -458,7 +500,8 @@ export function initializeStrategyPeriods(
       customConfig.granularity || "month",
       direction,
       apiVersion,
-      resourceIdentity
+      resourceIdentity,
+      dateDomain
     );
   }
 
@@ -483,10 +526,17 @@ export function initializeStrategyPeriods(
   // rather than inventing 20+ years of empty periods. Real years are added progressively
   // as actual records arrive.
   if (!earliestDateIso && (strategy === "automatic_maximum_coverage" || strategy === "year_by_year")) {
+    const primaryPeriodId = catalogTarget === "playlists"
+      ? `period:primary_playlists:${resourceIdentity || "target"}:${apiVersion}`
+      : `period:primary:${resourceIdentity || "target"}:${apiVersion}`;
+    const primaryLabel = catalogTarget === "playlists"
+      ? "Primary Playlist Discovery Window"
+      : "Primary Discovery Window";
+
     const primaryDiscoveryPeriod: RetrievalPeriod = {
-      periodId: `period:primary:${resourceIdentity || "target"}:${apiVersion}`,
+      periodId: primaryPeriodId,
       granularity: "entire_range",
-      label: "Primary Discovery Window",
+      label: primaryLabel,
       isUnbounded: true,
       startIso: null,
       endIso: null,
@@ -494,6 +544,7 @@ export function initializeStrategyPeriods(
       endUnix: null,
       apiVersion,
       resourceIdentity,
+      dateDomain,
       status: "pending",
       pagesFetched: 0,
       rawItemsReceived: 0,
@@ -525,7 +576,7 @@ export function initializeStrategyPeriods(
           : 12;
 
       for (let m = minMonth; m <= maxMonth; m++) {
-        periods.push(generateMonthPeriod(yr, m, apiVersion, resourceIdentity));
+        periods.push(generateMonthPeriod(yr, m, apiVersion, resourceIdentity, null, dateDomain));
       }
     }
 
@@ -544,7 +595,7 @@ export function initializeStrategyPeriods(
   if (strategy === "year_by_year") {
     const periods: RetrievalPeriod[] = [];
     for (let yr = earliestYear; yr <= latestYear; yr++) {
-      periods.push(generateYearPeriod(yr, apiVersion, resourceIdentity));
+      periods.push(generateYearPeriod(yr, apiVersion, resourceIdentity, null, dateDomain));
     }
 
     const sortPeriods = (a: RetrievalPeriod, b: RetrievalPeriod) => {
@@ -561,7 +612,7 @@ export function initializeStrategyPeriods(
   // Strategy A: Automatic Maximum Coverage
   const periods: RetrievalPeriod[] = [];
   for (let yr = earliestYear; yr <= latestYear; yr++) {
-    periods.push(generateYearPeriod(yr, apiVersion, resourceIdentity));
+    periods.push(generateYearPeriod(yr, apiVersion, resourceIdentity, null, dateDomain));
   }
 
   const sortPeriods = (a: RetrievalPeriod, b: RetrievalPeriod) => {
@@ -595,13 +646,14 @@ export function subdivideSaturatedPeriod(
   const yr = startDate.getUTCFullYear();
   const apiVersion = period.apiVersion;
   const resId = period.resourceIdentity;
+  const dateDomain = period.dateDomain || "video-created-at";
 
   const childPeriods: RetrievalPeriod[] = [];
 
   if (period.granularity === "year") {
     // Subdivide Year into 12 calendar Months
     for (let m = 1; m <= 12; m++) {
-      const monthPeriod = generateMonthPeriod(yr, m, apiVersion, resId, period.periodId);
+      const monthPeriod = generateMonthPeriod(yr, m, apiVersion, resId, period.periodId, dateDomain);
       childPeriods.push(monthPeriod);
     }
   } else if (period.granularity === "month") {
@@ -618,7 +670,8 @@ export function subdivideSaturatedPeriod(
       `${period.label} (Days 1–10)`,
       apiVersion,
       resId,
-      period.periodId
+      period.periodId,
+      dateDomain
     );
     // Interval 2: 11 to 20
     const int2 = generateCustomPeriod(
@@ -628,7 +681,8 @@ export function subdivideSaturatedPeriod(
       `${period.label} (Days 11–20)`,
       apiVersion,
       resId,
-      period.periodId
+      period.periodId,
+      dateDomain
     );
     // Interval 3: 21 to lastDay
     const int3 = generateCustomPeriod(
@@ -638,7 +692,8 @@ export function subdivideSaturatedPeriod(
       `${period.label} (Days 21–${lastDay})`,
       apiVersion,
       resId,
-      period.periodId
+      period.periodId,
+      dateDomain
     );
 
     childPeriods.push(int1, int2, int3);
@@ -658,7 +713,8 @@ export function subdivideSaturatedPeriod(
         `${period.label} (Day ${d})`,
         apiVersion,
         resId,
-        period.periodId
+        period.periodId,
+        dateDomain
       );
       childPeriods.push(dayPeriod);
     }
@@ -696,9 +752,18 @@ export function createPartitionLedger(params: {
   earliestContentDate?: string | null;
   latestContentDate?: string | null;
   customConfig?: CustomDateRangeConfig;
+  catalogTarget?: "videos" | "playlists";
 }): CatalogPartitionLedger {
   const strategy = params.strategy || "automatic_maximum_coverage";
   const direction = params.direction || "newest_to_oldest";
+  const catalogTarget = params.catalogTarget || (params.resourceType === "playlist" ? "videos" : "videos");
+  const dateDomain: DateDomain =
+    params.resourceType === "playlist"
+      ? "playlist-membership-added-at"
+      : catalogTarget === "playlists"
+      ? "playlist-created-at"
+      : "video-created-at";
+
   const initialPeriods = initializeStrategyPeriods(
     strategy,
     direction,
@@ -707,7 +772,8 @@ export function createPartitionLedger(params: {
     params.apiVersion,
     params.resourceId,
     params.customConfig,
-    params.resourceType
+    params.resourceType,
+    catalogTarget
   );
 
   const activePeriodId = initialPeriods[0]?.periodId || null;
@@ -725,6 +791,8 @@ export function createPartitionLedger(params: {
     periods: initialPeriods,
     earliestContentDate: params.earliestContentDate || null,
     latestContentDate: params.latestContentDate || null,
+    catalogTarget,
+    dateDomain,
     totalRawObserved: 0,
     totalUniqueRetained: 0,
     totalDuplicatesDetected: 0,

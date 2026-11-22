@@ -70,7 +70,51 @@ export const DEFAULT_SCAN_CONFIG: ScanBudgetConfig = {
   fieldsProfile: "standard",
   retrievalStrategy: "automatic_maximum_coverage",
   retrievalDirection: "newest_to_oldest",
+  catalogTarget: "videos",
 };
+
+/**
+ * Validates whether a playlist creation date falls within the requested date bounds.
+ * Used for explicit, safe client-side filtering on Dailymotion API v1 endpoints
+ * where server-side date parameters are unsupported for playlist catalogs.
+ */
+export function isPlaylistWithinCreationBounds(
+  playlistDateStr: string | null | undefined,
+  dateAfter: string | null | undefined,
+  dateBefore: string | null | undefined
+): boolean {
+  if (!playlistDateStr) return true;
+  const plTime = new Date(playlistDateStr).getTime();
+  if (Number.isNaN(plTime)) return true;
+
+  if (dateAfter) {
+    let afterTime: number;
+    if (/^\d+$/.test(dateAfter)) {
+      const numVal = Number(dateAfter);
+      afterTime = numVal < 2e10 ? numVal * 1000 : numVal;
+    } else {
+      afterTime = new Date(dateAfter).getTime();
+    }
+    if (!Number.isNaN(afterTime) && plTime < afterTime) {
+      return false;
+    }
+  }
+
+  if (dateBefore) {
+    let beforeTime: number;
+    if (/^\d+$/.test(dateBefore)) {
+      const numVal = Number(dateBefore);
+      beforeTime = numVal < 2e10 ? numVal * 1000 : numVal;
+    } else {
+      beforeTime = new Date(dateBefore).getTime();
+    }
+    if (!Number.isNaN(beforeTime) && plTime > beforeTime) {
+      return false;
+    }
+  }
+
+  return true;
+}
 
 /**
  * Maps the user's selected retrieval direction ("newest_to_oldest" vs "oldest_to_newest")
@@ -283,6 +327,7 @@ export async function resolveLinkExplorerInput(
       strategy: config.retrievalStrategy || "automatic_maximum_coverage",
       direction: config.retrievalDirection || "newest_to_oldest",
       customConfig: config.customRangeConfig,
+      catalogTarget: config.catalogTarget || "videos",
     });
 
   // 2. Identify target active period
@@ -600,13 +645,19 @@ export async function resolveLinkExplorerInput(
         }
       }
 
-      // Check lifetime reported total (handling both videosTotal and videos_total)
-      const reportedLifetime =
-        mainItem?.extra?.videosTotal !== undefined && mainItem.extra.videosTotal !== null
-          ? Number(mainItem.extra.videosTotal)
-          : mainItem?.extra?.videos_total !== undefined && mainItem.extra.videos_total !== null
-          ? Number(mainItem.extra.videos_total)
-          : null;
+      // Check lifetime reported total (handling both videosTotal / playlistsTotal depending on catalogTarget)
+      const isPlaylistsCatalog = config.catalogTarget === "playlists";
+      const reportedLifetime = isPlaylistsCatalog
+        ? (mainItem?.extra?.playlistsTotal !== undefined && mainItem.extra.playlistsTotal !== null
+            ? Number(mainItem.extra.playlistsTotal)
+            : mainItem?.extra?.playlists_total !== undefined && mainItem.extra.playlists_total !== null
+            ? Number(mainItem.extra.playlists_total)
+            : null)
+        : (mainItem?.extra?.videosTotal !== undefined && mainItem.extra.videosTotal !== null
+            ? Number(mainItem.extra.videosTotal)
+            : mainItem?.extra?.videos_total !== undefined && mainItem.extra.videos_total !== null
+            ? Number(mainItem.extra.videos_total)
+            : null);
 
       if (reportedLifetime && !Number.isNaN(reportedLifetime)) {
         providerReportedLifetimeTotal = reportedLifetime;
@@ -658,18 +709,22 @@ export async function resolveLinkExplorerInput(
           visitedCursors.add(currentNextCursor);
         }
 
+        const windowTypeLabel = isPlaylistsCatalog ? "Channel Playlists" : "Channel Videos";
         updateProgress({
           pagesFetched: page,
-          activeWindowLabel: `Fetching Channel Page ${page} (size: ${config.pageSize})`,
+          activeWindowLabel: `Fetching ${windowTypeLabel} Page ${page} (size: ${config.pageSize})`,
         });
 
         // Build request parameters respecting V1 vs V2 capability
         const queryParams = new URLSearchParams();
-        queryParams.set("mode", "videos");
         const effectiveOwnerOrProfile =
           version === "v2" && (targetIdentity.v2ProfileId || mainItem?.id)
             ? targetIdentity.v2ProfileId || mainItem?.id || analyzed.identifier
             : (mainItem?.id || analyzed.identifier);
+
+        if (!isPlaylistsCatalog) {
+          queryParams.set("mode", "videos");
+        }
         queryParams.set(version === "v2" ? "profileId" : "owner", effectiveOwnerOrProfile);
         queryParams.set("page", String(page));
         queryParams.set("pageSize", String(config.pageSize));
@@ -693,11 +748,20 @@ export async function resolveLinkExplorerInput(
           continuationState?.dateBefore ||
           (activePeriod ? (version === "v1" ? String(activePeriod.endUnix) : activePeriod.endIso) : null);
 
-        if (effectiveDateAfter) queryParams.set("createdAfter", effectiveDateAfter);
-        if (effectiveDateBefore) queryParams.set("createdBefore", effectiveDateBefore);
+        // For channel videos: date filters are sent upstream for both V1 and V2.
+        // For channel playlists: V2 REST supports createdAfter & createdBefore on /v2/profiles/{id}/playlists.
+        // V1 does not support date params on /user/{id}/playlists, so we omit date params in V1 upstream request
+        // and enforce client-side date filtering strictly against playlist.created_at below.
+        if (effectiveDateAfter && (!isPlaylistsCatalog || version === "v2")) {
+          queryParams.set("createdAfter", effectiveDateAfter);
+        }
+        if (effectiveDateBefore && (!isPlaylistsCatalog || version === "v2")) {
+          queryParams.set("createdBefore", effectiveDateBefore);
+        }
 
+        const endpointResource = isPlaylistsCatalog ? "playlists" : "channels";
         const videosRes = await fetch(
-          `/api/discovery/${version}/channels?${queryParams.toString()}`,
+          `/api/discovery/${version}/${endpointResource}?${queryParams.toString()}`,
           { signal: abortSignal }
         );
         const videosData = (await videosRes.json()) as DiscoveryApiResponse;
@@ -712,7 +776,17 @@ export async function resolveLinkExplorerInput(
         }
 
         pagesFetchedThisRun += 1;
-        const pageItems = videosData.items ?? videosData.result?.items ?? [];
+        let pageItems = videosData.items ?? videosData.result?.items ?? [];
+        if (isPlaylistsCatalog && version === "v1" && (effectiveDateAfter || effectiveDateBefore)) {
+          // Explicit local date filtering on playlist creation date for V1
+          pageItems = pageItems.filter((item) =>
+            isPlaylistWithinCreationBounds(
+              item.playlistCreatedAt || item.createdAt,
+              effectiveDateAfter,
+              effectiveDateBefore
+            )
+          );
+        }
         lastPageItems = pageItems;
         hasMore = Boolean(videosData.hasMore ?? videosData.result?.hasMore);
         currentNextCursor = videosData.result?.nextCursor ?? (videosData as any).nextCursor ?? null;
@@ -848,12 +922,15 @@ export async function resolveLinkExplorerInput(
           }
 
           // Automatic backward date-slicing window generation:
-          // Extract oldest video creation timestamp to bypass 1,000-item / single-window ceiling
+          // Extract oldest creation timestamp (playlistCreatedAt vs videoCreatedAt) to bypass 1,000-item / single-window ceiling
           let oldestItemForBackward: DiscoveryItem | null = null;
           let oldestTimeMsForBackward = Infinity;
           for (const it of canonicalItemsAfterLoop) {
-            if (it.createdAt) {
-              const t = new Date(it.createdAt).getTime();
+            const itemDate = isPlaylistsCatalog
+              ? (it.playlistCreatedAt || it.createdAt)
+              : (it.videoCreatedAt || it.createdAt);
+            if (itemDate) {
+              const t = new Date(itemDate).getTime();
               if (!Number.isNaN(t) && t < oldestTimeMsForBackward) {
                 oldestTimeMsForBackward = t;
                 oldestItemForBackward = it;
@@ -866,8 +943,12 @@ export async function resolveLinkExplorerInput(
             const backwardEndUnix = Math.floor(oldestTimeMsForBackward / 1000) - 1;
             const inceptionIso = "2005-01-01T00:00:00.000Z";
             const inceptionUnix = Math.floor(new Date(inceptionIso).getTime() / 1000);
+            const oldestDateStr = isPlaylistsCatalog
+              ? (oldestItemForBackward.playlistCreatedAt || oldestItemForBackward.createdAt)
+              : (oldestItemForBackward.videoCreatedAt || oldestItemForBackward.createdAt);
 
-            const backwardId = `period:backward:${oldestItemForBackward.createdAt?.substring(0, 10)}_${Date.now()}:${version}:${analyzed.identifier}`;
+            const backwardPrefix = isPlaylistsCatalog ? "period:backward_playlists" : "period:backward";
+            const backwardId = `${backwardPrefix}:${oldestDateStr?.substring(0, 10)}_${Date.now()}:${version}:${analyzed.identifier}`;
             const existingBackward = ledger.periods.find((p) => p.endUnix === backwardEndUnix || p.endIso === backwardEndIso);
 
             if (!existingBackward) {
@@ -875,13 +956,14 @@ export async function resolveLinkExplorerInput(
                 periodId: backwardId,
                 parentPeriodId: activePeriod.periodId,
                 granularity: "entire_range",
-                label: `Prior to ${oldestItemForBackward.createdAt?.substring(0, 10)} (${version === "v1" ? `Unix ${backwardEndUnix}` : backwardEndIso.substring(0, 10)})`,
+                label: `Prior to ${oldestDateStr?.substring(0, 10)} (${version === "v1" ? `Unix ${backwardEndUnix}` : backwardEndIso.substring(0, 10)})`,
                 startIso: inceptionIso,
                 endIso: backwardEndIso,
                 startUnix: inceptionUnix,
                 endUnix: backwardEndUnix,
                 apiVersion: version,
                 resourceIdentity: analyzed.identifier,
+                dateDomain: isPlaylistsCatalog ? "playlist-created-at" : "video-created-at",
                 status: "pending",
                 pagesFetched: 0,
                 rawItemsReceived: 0,

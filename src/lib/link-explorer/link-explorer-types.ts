@@ -88,6 +88,7 @@ export interface ScanBudgetConfig {
   retrievalStrategy?: RetrievalStrategy;
   retrievalDirection?: RetrievalDirection;
   customRangeConfig?: CustomDateRangeConfig;
+  catalogTarget?: "videos" | "playlists";
 }
 
 export interface VideoChronologyRef {
@@ -410,8 +411,10 @@ export function computeResourceIntelligence(
     else if (k === "playlist") locallyRetrievedPlaylists += 1;
     else if (k === "live") locallyRetrievedLivestreams += 1;
 
-    if (it.createdAt) {
-      const parsed = new Date(it.createdAt).getTime();
+    // Use explicit semantic date fields: playlistCreatedAt for playlists, videoCreatedAt for videos
+    const itemDate = k === "playlist" ? (it.playlistCreatedAt || it.createdAt) : (it.videoCreatedAt || it.createdAt);
+    if (itemDate) {
+      const parsed = new Date(itemDate).getTime();
       if (!Number.isNaN(parsed)) {
         validDatedVideos.push({ item: it, timestamp: parsed });
       }
@@ -429,9 +432,9 @@ export function computeResourceIntelligence(
         id: oldest.id,
         title: oldest.title,
         thumbnail: oldest.thumbnail,
-        date: oldest.createdAt,
+        date: (oldest.kind === "playlist" ? oldest.playlistCreatedAt : oldest.videoCreatedAt) || oldest.createdAt,
         duration: oldest.duration,
-        url: oldest.url || `https://www.dailymotion.com/video/${oldest.id}`,
+        url: oldest.url || (oldest.kind === "playlist" ? `https://www.dailymotion.com/playlist/${oldest.id}` : `https://www.dailymotion.com/video/${oldest.id}`),
       }
     : null;
 
@@ -440,9 +443,9 @@ export function computeResourceIntelligence(
         id: newest.id,
         title: newest.title,
         thumbnail: newest.thumbnail,
-        date: newest.createdAt,
+        date: (newest.kind === "playlist" ? newest.playlistCreatedAt : newest.videoCreatedAt) || newest.createdAt,
         duration: newest.duration,
-        url: newest.url || `https://www.dailymotion.com/video/${newest.id}`,
+        url: newest.url || (newest.kind === "playlist" ? `https://www.dailymotion.com/playlist/${newest.id}` : `https://www.dailymotion.com/video/${newest.id}`),
       }
     : null;
 
@@ -532,8 +535,15 @@ export function computeResourceIntelligence(
 
   // Separate date domains for playlists vs profiles (Section 4)
   const isPlaylistResource = analyzed.kind === "playlist";
-  const effectiveDateDomain: DateDomain = isPlaylistResource ? "video-created-at" : "video-created-at";
-  const playlistCreatedDate = isPlaylistResource ? (mainItem?.createdAt || createdDate || null) : null;
+  const areItemsPlaylists = items.length > 0 && items.every((it) => it.kind === "playlist");
+  const effectiveDateDomain: DateDomain = isPlaylistResource
+    ? "video-created-at"
+    : areItemsPlaylists
+    ? "playlist-created-at"
+    : "video-created-at";
+  const playlistCreatedDate = isPlaylistResource
+    ? (mainItem?.playlistCreatedAt || mainItem?.createdAt || createdDate || null)
+    : null;
   const membershipDateAvailable = false;
   const membershipDateNotice = isPlaylistResource
     ? "Dailymotion API does not expose membership-added timestamps for playlist entries. Individual video upload dates are displayed."

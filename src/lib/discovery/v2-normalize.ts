@@ -119,6 +119,9 @@ export function normalizeV2Video(raw: V2RawVideo): DiscoveryItem | null {
     category: raw.category ?? null,
     createdAt,
     year: yearOf(createdAt),
+    videoCreatedAt: createdAt,
+    playlistCreatedAt: null,
+    membershipAddedAt: null,
     tags: Array.isArray(raw.tags) ? raw.tags.filter((t): t is string => typeof t === "string" && t.length > 0) : [],
     ownerId: raw.profile?.profile_id ?? null,
     ownerName: raw.profile?.display_name ?? raw.profile?.name ?? null,
@@ -155,16 +158,20 @@ export function normalizeV2Profile(raw: V2RawProfile, kind: DiscoveryItemKind = 
 }
 
 export function normalizeV2Playlist(raw: V2RawPlaylist): DiscoveryItem | null {
-  if (!raw.playlist_id) return null;
+  const playlistId = raw.playlist_id ?? (raw as any).id;
+  if (!playlistId) return null;
   const createdAt = validIso(raw.created_at);
   const total = typeof raw.videos_total === "number" ? raw.videos_total : null;
   return {
-    ...base("playlist", raw.playlist_id, raw),
-    title: raw.title ?? raw.name ?? raw.playlist_id,
+    ...base("playlist", playlistId, raw),
+    title: raw.title ?? raw.name ?? playlistId,
     description: raw.description ?? null,
-    url: `https://www.dailymotion.com/playlist/${raw.playlist_id}`,
+    url: `https://www.dailymotion.com/playlist/${playlistId}`,
     createdAt,
     year: yearOf(createdAt),
+    playlistCreatedAt: createdAt,
+    videoCreatedAt: null,
+    membershipAddedAt: null,
     extra: { videosTotal: total, videos_total: total },
   };
 }

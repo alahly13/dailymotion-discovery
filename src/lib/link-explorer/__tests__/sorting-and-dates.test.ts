@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import {
+  isPlaylistWithinCreationBounds,
   resolveApiSortParameter,
   resolveFieldSelection,
   resolveLinkExplorerInput,
@@ -12,6 +13,8 @@ import {
   initializeStrategyPeriods,
   partitionCustomDateRange,
 } from "../catalog-partition-engine";
+import { normalizeV1Playlist, normalizeV1Video } from "@/lib/discovery/v1-normalize";
+import { normalizeV2Playlist, normalizeV2Video } from "@/lib/discovery/v2-normalize";
 import type { DiscoveryItem } from "@/lib/discovery/types";
 
 describe("Sorting Parameter Resolution (Section 2)", () => {
@@ -262,6 +265,167 @@ describe("Pause, Resume, and Cancel Lifecycle (Section 6)", () => {
       );
 
       expect(progressReported?.status).toBe("cancelled");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+});
+
+describe("Strict Separation of Playlist Creation Date vs Video Upload Date (Critical Requirement)", () => {
+  it("normalizes V1 and V2 models into distinct semantic date fields", () => {
+    // V1 Video
+    const v1Video = normalizeV1Video({
+      id: "x123",
+      title: "V1 Video",
+      created_time: 1600000000,
+    });
+    expect(v1Video).not.toBeNull();
+    expect(v1Video?.videoCreatedAt).toBe(new Date(1600000000 * 1000).toISOString());
+    expect(v1Video?.playlistCreatedAt).toBeNull();
+    expect(v1Video?.membershipAddedAt).toBeNull();
+
+    // V1 Playlist
+    const v1Playlist = normalizeV1Playlist({
+      id: "p123",
+      name: "V1 Playlist",
+      created_time: 1650000000,
+    });
+    expect(v1Playlist).not.toBeNull();
+    expect(v1Playlist?.playlistCreatedAt).toBe(new Date(1650000000 * 1000).toISOString());
+    expect(v1Playlist?.videoCreatedAt).toBeNull();
+    expect(v1Playlist?.membershipAddedAt).toBeNull();
+
+    // V2 Video
+    const v2Video = normalizeV2Video({
+      video_id: "x456",
+      title: "V2 Video",
+      created_at: "2024-03-01T10:00:00.000Z",
+    });
+    expect(v2Video).not.toBeNull();
+    expect(v2Video?.videoCreatedAt).toBe("2024-03-01T10:00:00.000Z");
+    expect(v2Video?.playlistCreatedAt).toBeNull();
+    expect(v2Video?.membershipAddedAt).toBeNull();
+
+    // V2 Playlist
+    const v2Playlist = normalizeV2Playlist({
+      playlist_id: "p456",
+      title: "V2 Playlist",
+      created_at: "2023-11-15T08:30:00.000Z",
+    });
+    expect(v2Playlist).not.toBeNull();
+    expect(v2Playlist?.playlistCreatedAt).toBe("2023-11-15T08:30:00.000Z");
+    expect(v2Playlist?.videoCreatedAt).toBeNull();
+    expect(v2Playlist?.membershipAddedAt).toBeNull();
+  });
+
+  it("filters playlist catalog strictly by playlist creation date (e.g. 2020 & 2023 included, 2018 & 2025 excluded)", () => {
+    const playlists = [
+      { id: "pl2018", playlistCreatedAt: "2018-05-10T00:00:00.000Z", createdAt: "2018-05-10T00:00:00.000Z" },
+      { id: "pl2020", playlistCreatedAt: "2020-07-15T00:00:00.000Z", createdAt: "2020-07-15T00:00:00.000Z" },
+      { id: "pl2023", playlistCreatedAt: "2023-11-20T00:00:00.000Z", createdAt: "2023-11-20T00:00:00.000Z" },
+      { id: "pl2025", playlistCreatedAt: "2025-02-01T00:00:00.000Z", createdAt: "2025-02-01T00:00:00.000Z" },
+    ];
+
+    const dateAfter = "2020-01-01T00:00:00.000Z";
+    const dateBefore = "2024-12-31T23:59:59.999Z";
+
+    const filtered = playlists.filter((p) =>
+      isPlaylistWithinCreationBounds(p.playlistCreatedAt || p.createdAt, dateAfter, dateBefore)
+    );
+
+    const retainedIds = filtered.map((p) => p.id);
+    expect(retainedIds).toEqual(["pl2020", "pl2023"]);
+    expect(retainedIds).not.toContain("pl2018");
+    expect(retainedIds).not.toContain("pl2025");
+  });
+
+  it("stamps dateDomain as playlist-created-at when partitioning playlist catalogs", () => {
+    const periods = initializeStrategyPeriods(
+      "year_by_year",
+      "newest_to_oldest",
+      "2020-01-01T00:00:00.000Z",
+      "2023-12-31T23:59:59.999Z",
+      "v2",
+      "lemonde",
+      undefined,
+      "channel",
+      "playlists" // catalogTarget = playlists
+    );
+
+    expect(periods.length).toBe(4);
+    for (const p of periods) {
+      expect(p.dateDomain).toBe("playlist-created-at");
+      expect(p.label).toContain("Playlist Creation: Year");
+    }
+  });
+
+  it("preserves constituent videos in playlist membership ingestion across disparate years (e.g. 2010 and 2026)", async () => {
+    const originalFetch = globalThis.fetch;
+    const mockVideos = [
+      {
+        id: "v2010",
+        title: "Classic Video 2010",
+        kind: "video",
+        createdAt: "2010-06-15T12:00:00.000Z",
+        videoCreatedAt: "2010-06-15T12:00:00.000Z",
+        playlistCreatedAt: null,
+      },
+      {
+        id: "v2026",
+        title: "Modern Video 2026",
+        kind: "video",
+        createdAt: "2026-02-10T15:30:00.000Z",
+        videoCreatedAt: "2026-02-10T15:30:00.000Z",
+        playlistCreatedAt: null,
+      },
+    ];
+
+    globalThis.fetch = vi.fn().mockImplementation(async (url: string) => {
+      if (url.includes("mode=lookup")) {
+        return {
+          ok: true,
+          json: async () => ({
+            ok: true,
+            item: {
+              id: "x88apm",
+              title: "Mixed Era Playlist",
+              kind: "playlist",
+              createdAt: "2020-01-01T00:00:00.000Z",
+              playlistCreatedAt: "2020-01-01T00:00:00.000Z",
+              extra: { videosTotal: 2 },
+            },
+          }),
+        } as any;
+      }
+      return {
+        ok: true,
+        json: async () => ({
+          ok: true,
+          items: mockVideos,
+          hasMore: false,
+          total: 2,
+        }),
+      } as any;
+    });
+
+    try {
+      const result = await resolveLinkExplorerInput(
+        "https://www.dailymotion.com/playlist/x88apm",
+        "v2",
+        "playlist",
+        { pageSize: 10, maxPages: 1 }
+      );
+
+      expect(result.ok).toBe(true);
+      expect(result.items.length).toBe(2);
+      const ids = result.items.map((i) => i.id);
+      expect(ids).toContain("v2010");
+      expect(ids).toContain("v2026");
+
+      // Verify the parent playlist creation date did NOT exclude the 2010 video or 2026 video
+      expect(result.item?.playlistCreatedAt).toBe("2020-01-01T00:00:00.000Z");
+      expect(result.items[0].videoCreatedAt).toBe("2010-06-15T12:00:00.000Z");
+      expect(result.items[1].videoCreatedAt).toBe("2026-02-10T15:30:00.000Z");
     } finally {
       globalThis.fetch = originalFetch;
     }
