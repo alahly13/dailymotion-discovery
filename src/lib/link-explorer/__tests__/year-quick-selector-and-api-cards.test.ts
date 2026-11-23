@@ -20,7 +20,7 @@ import {
 } from "../link-explorer-service";
 import { normalizeV1Video, normalizeV1Playlist } from "@/lib/discovery/v1-normalize";
 import { normalizeV2Video, normalizeV2Playlist } from "@/lib/discovery/v2-normalize";
-import type { RawDailymotionV1Item } from "@/lib/discovery/v1-normalize";
+import type { V1RawVideo, V1RawPlaylist } from "@/lib/discovery/v1-normalize";
 import type { V2RawVideo, V2RawPlaylist } from "@/lib/discovery/v2-normalize";
 
 describe("1. Year Quick Selector: 2010-2026 Definition & Boundaries", () => {
@@ -204,7 +204,7 @@ describe("4. Selected Year Strategy Initialization & Partition Ledger", () => {
 
 describe("5. Normalization & Canonical Metadata Fields", () => {
   it("V1 normalization populates canonical date fields and source endpoint", () => {
-    const rawV1: RawDailymotionV1Item = {
+    const rawV1: V1RawVideo = {
       id: "x8abc12",
       title: "V1 Video Test",
       description: "Test description",
@@ -217,7 +217,7 @@ describe("5. Normalization & Canonical Metadata Fields", () => {
       tags: ["tag1", "tag2"],
     };
 
-    const normalized = normalizeV1Video(rawV1, 0);
+    const normalized = normalizeV1Video(rawV1);
     expect(normalized).not.toBeNull();
     expect(normalized?.id).toBe("x8abc12");
     expect(normalized?.videoCreatedAt).toBe("2023-01-01T00:00:00.000Z");
@@ -242,7 +242,7 @@ describe("5. Normalization & Canonical Metadata Fields", () => {
       tags: ["news", "v2"],
     };
 
-    const normalized = normalizeV2Video(rawV2, 0);
+    const normalized = normalizeV2Video(rawV2);
     expect(normalized).not.toBeNull();
     expect(normalized?.id).toBe("x9xyz99");
     expect(normalized?.videoCreatedAt).toBe("2024-03-15T08:30:00.000Z");
@@ -253,7 +253,7 @@ describe("5. Normalization & Canonical Metadata Fields", () => {
   });
 
   it("Playlist normalization preserves playlistCreatedAt and sourceEndpoint", () => {
-    const rawV1Playlist: RawDailymotionV1Item = {
+    const rawV1Playlist: V1RawPlaylist = {
       id: "p12345",
       name: "V1 Playlist",
       created_time: 1577836800, // 2020-01-01 UTC
@@ -261,7 +261,7 @@ describe("5. Normalization & Canonical Metadata Fields", () => {
       owner: "curator1",
     };
 
-    const normV1Pl = normalizeV1Playlist(rawV1Playlist, 0);
+    const normV1Pl = normalizeV1Playlist(rawV1Playlist);
     expect(normV1Pl).not.toBeNull();
     expect(normV1Pl?.kind).toBe("playlist");
     expect(normV1Pl?.playlistCreatedAt).toBe("2020-01-01T00:00:00.000Z");
@@ -275,7 +275,7 @@ describe("5. Normalization & Canonical Metadata Fields", () => {
       videos_total: 18,
     };
 
-    const normV2Pl = normalizeV2Playlist(rawV2Playlist, 0);
+    const normV2Pl = normalizeV2Playlist(rawV2Playlist);
     expect(normV2Pl).not.toBeNull();
     expect(normV2Pl?.kind).toBe("playlist");
     expect(normV2Pl?.playlistCreatedAt).toBe("2021-06-01T00:00:00.000Z");

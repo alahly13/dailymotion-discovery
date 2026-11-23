@@ -42,6 +42,8 @@ export async function POST(request: Request) {
   let authenticated = false;
   let authenticatedUsername = CANONICAL_ADMIN_USERNAME;
 
+  const capturedCookies: { name: string; value: string; options?: Record<string, unknown> }[] = [];
+
   // 1. Authenticate against Supabase Auth if credentials map to canonical admin and Supabase is configured
   if (targetEmail && publicEnv.NEXT_PUBLIC_SUPABASE_URL && publicEnv.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY) {
     try {
@@ -58,6 +60,7 @@ export async function POST(request: Request) {
               try {
                 cookiesToSet.forEach(({ name, value, options }) => {
                   cookieStore.set(name, value, options);
+                  capturedCookies.push({ name, value, options });
                 });
               } catch {
                 // Ignore if environment does not allow setting on cookieStore synchronously
@@ -101,6 +104,12 @@ export async function POST(request: Request) {
 
   const maxAge = adminSessionMaxAge();
   const response = NextResponse.json({ ok: true, username: authenticatedUsername, maxAge });
+
+  // Forward captured Supabase SSR cookies onto HTTP response headers
+  for (const c of capturedCookies) {
+    response.cookies.set(c.name, c.value, c.options as any);
+  }
+
   response.cookies.set(ADMIN_COOKIE_NAME, token, {
     httpOnly: true,
     sameSite: "lax",

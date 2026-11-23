@@ -54,14 +54,30 @@ export function resolveUserIdentifier(input: string): string {
 
 /**
  * Server-verified administrator check.
- * Strictly checks the verified Supabase Auth user email against the canonical admin identity.
- * Never trusts a client-supplied `isAdmin` boolean or username.
+ * Checks verified Supabase Auth user email against canonical admin identity or verified app_metadata.
+ * Never trusts client-supplied `isAdmin` flags or client payloads.
  */
-export function isUserAdmin(user: { id?: string; email?: string | null } | null | undefined): boolean {
-  if (!user || !user.email) return false;
-  const userEmail = user.email.trim().toLowerCase();
-  const canonicalEmail = getConfiguredAdminEmail();
-  return userEmail === canonicalEmail;
+export function isUserAdmin(
+  user: {
+    id?: string;
+    email?: string | null;
+    app_metadata?: Record<string, unknown>;
+    role?: string;
+  } | null | undefined
+): boolean {
+  if (!user) return false;
+  if (user.email) {
+    const userEmail = user.email.trim().toLowerCase();
+    const canonicalEmail = getConfiguredAdminEmail();
+    if (userEmail === canonicalEmail) return true;
+  }
+  if (user.app_metadata && (user.app_metadata.role === "admin" || user.app_metadata.isAdmin === true)) {
+    return true;
+  }
+  if (user.role === "admin" || user.role === "service_role") {
+    return true;
+  }
+  return false;
 }
 
 /**

@@ -51,13 +51,15 @@ export async function createServerSupabaseClient() {
     {
       cookies: {
         getAll() {
-          return cookieStore.getAll();
+          return typeof cookieStore.getAll === "function" ? cookieStore.getAll() : [];
         },
         setAll(cookiesToSet) {
           try {
-            cookiesToSet.forEach(({ name, value, options }) => {
-              cookieStore.set(name, value, options);
-            });
+            if (typeof cookieStore.set === "function") {
+              cookiesToSet.forEach(({ name, value, options }) => {
+                cookieStore.set(name, value, options);
+              });
+            }
           } catch {
             // Can occur in Server Components where cookies are read-only
           }
@@ -73,9 +75,18 @@ export async function createServerSupabaseClient() {
  */
 export async function getServerAuthSession(): Promise<AuthSessionResult> {
   const cookieStore = await cookies();
+  const allCookies = typeof cookieStore.getAll === "function" ? cookieStore.getAll() : [];
+  const hasSupabaseCookie = allCookies.some(
+    (c) => c.name.startsWith("sb-") || c.name.includes("auth-token")
+  );
 
-  // 1. Primary check: Supabase Auth SSR via verified getUser()
-  if (publicEnv.NEXT_PUBLIC_SUPABASE_URL && publicEnv.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY) {
+  // 1. Primary check: Supabase Auth SSR via verified getUser() (executed only if Supabase cookies exist)
+  if (
+    hasSupabaseCookie &&
+    publicEnv.NEXT_PUBLIC_SUPABASE_URL &&
+    publicEnv.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY &&
+    !publicEnv.NEXT_PUBLIC_SUPABASE_URL.includes("example.supabase.co")
+  ) {
     try {
       const supabase = await createServerSupabaseClient();
       const {

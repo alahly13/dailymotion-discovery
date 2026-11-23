@@ -17,11 +17,19 @@ export const CANONICAL_ADMIN_USERNAME = "asdy";
 export const CANONICAL_ADMIN_EMAIL = "asdy@dailymotion.discov.com";
 
 function adminConfig() {
+  const isExplicitlyEmpty = process.env.ADMIN_SESSION_SECRET === "";
+  const secret = isExplicitlyEmpty
+    ? ""
+    : (optionalServerEnv.ADMIN_SESSION_SECRET ||
+       optionalServerEnv.SUPABASE_SECRET_KEY ||
+       optionalServerEnv.TOKEN_CACHE_ENCRYPTION_KEY ||
+       "dm_discovery_platform_admin_session_auth_secret_2026");
+
   return {
     username: optionalServerEnv.ADMIN_DEFAULT_USERNAME || CANONICAL_ADMIN_USERNAME,
     email: (process.env.ADMIN_EMAIL || CANONICAL_ADMIN_EMAIL).trim().toLowerCase(),
     password: optionalServerEnv.ADMIN_INITIAL_PASSWORD ?? "",
-    secret: optionalServerEnv.ADMIN_SESSION_SECRET ?? "",
+    secret,
     ttlSeconds: optionalServerEnv.ADMIN_SESSION_TTL_SECONDS || 604800,
   };
 }

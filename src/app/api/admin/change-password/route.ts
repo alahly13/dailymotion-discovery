@@ -66,7 +66,10 @@ export async function POST(request: Request) {
     }
   );
 
-  const targetEmail = resolveAdminEmail(gate.admin.username) || resolveAdminEmail(CANONICAL_ADMIN_USERNAME);
+  const targetEmail =
+    gate.admin.email ||
+    resolveAdminEmail(gate.admin.username) ||
+    resolveAdminEmail(CANONICAL_ADMIN_USERNAME);
   if (!targetEmail) {
     return NextResponse.json({ ok: false, error: "Could not resolve administrator identity." }, { status: 400 });
   }

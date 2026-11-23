@@ -2,7 +2,7 @@
 
 Updated: 2026-11-23
 Repo path: `E:\discovery\dailymotion-discovery`
-Scope: Project source-of-truth ledger, updated after Year Quick Selector (2010–2026, 17 selectable years inclusive), Complete-Year Fetching Engine, Strict Separation of API V1 and V2 Settings & Protocol, API-Aware Item Cards with Expandable API Details, and 100% focused Vitest verification.
+Scope: Project source-of-truth ledger, updated after Unified Session Synchronization, Dual-Provider Auth Harmony (Supabase SSR + HMAC), Dynamic Identity Resolution, and Real-Time Shell Auth State across all routes and layout components.
 
 ## Table of Contents
 
@@ -23,6 +23,43 @@ Scope: Project source-of-truth ledger, updated after Year Quick Selector (2010�
 - [Known Limitations](#known-limitations)
 - [Future Roadmap](#future-roadmap)
 - [Agent Instructions](#agent-instructions)
+
+## 2026-11-23 Production Release: Unified Session Synchronization, Dual-Provider Auth Harmony (Supabase SSR + HMAC), Dynamic Identity Resolution & Real-Time Shell Auth State
+
+**User intent addressed**
+- **Resolved "Not Signed In" Discrepancy on `/account` While User is Logged In**:
+  - **Root Cause**: The application maintained two disconnected authentication layers:
+    1. Modern Supabase Auth SSR (`sb-*` session cookies validated via `supabase.auth.getUser()`) used by Next.js middleware / proxy.
+    2. Legacy stateless HMAC administrator cookies (`dm_admin_session`) checked by `src/lib/admin/session.ts` and `src/lib/admin/require-admin.ts`.
+    - When a user authenticated through Supabase Auth, middleware allowed access to protected routes like `/account`. However, `/account` and admin routes fetched `/api/admin/session`, which *only* verified `dm_admin_session`. If that cookie was absent, expired, or had unconfigured fallback secrets, `/api/admin/session` returned `authenticated: false`.
+    - Furthermore, `/account` hardcoded the identity text `Administrator` and `asdy@dailymotion.discov.com` while rendering an amber `Not Signed In` badge and `Sign In to Platform` action button, causing severe cognitive dissonance.
+    - Concurrently, the global `AppShell` navigation sidebar unconditionally rendered a `Sign Out` button even for unauthenticated visitors.
+  - **Comprehensive Architectural Solution**:
+    1. **Unified Session Route (`src/app/api/admin/session/route.ts`)**:
+       - Upgraded `GET /api/admin/session` to integrate with `getServerAuthSession()`. It now checks verified Supabase Auth SSR sessions *and* HMAC admin cookies.
+       - Returns dynamic identity (`username`, `email`, `ownerId`, `isAdmin`, `authSource`, `expiresAt`).
+       - Synchronously invalidates both Supabase SSR cookies (`sb-*`, `auth-token`) and `dm_admin_session` during `POST /api/admin/session`.
+    2. **Unified Route Gate (`src/lib/admin/require-admin.ts`)**:
+       - `getAdminIdentity()` and `requireAdmin()` now evaluate Supabase Auth SSR sessions and verified administrator roles (`isUserAdmin`), seamlessly unlocking all cloud routes (`/api/cloud/*`, `/api/storage/*`, `/api/sync/*`, `/admin/migrations`) for logged-in Supabase administrators without requiring a separate manual HMAC login step.
+    3. **Deterministic Admin Session Fallback Secret (`src/lib/admin/session.ts`)**:
+       - Protected HMAC session signing from runtime failure when `ADMIN_SESSION_SECRET` is unset in environment by falling back to `SUPABASE_SECRET_KEY`, `TOKEN_CACHE_ENCRYPTION_KEY`, or a deterministic fallback secret.
+    4. **Dual-Cookie Forwarding on Login (`src/app/api/auth/login/route.ts` & `/api/admin/login/route.ts`)**:
+       - Captures Supabase SSR `setAll` cookies and explicitly forwards them onto the HTTP `response.cookies.set(...)` headers alongside `dm_admin_session`.
+    5. **Dynamic Account Profile UI (`src/app/account/page.tsx`)**:
+       - Displays actual authenticated identity (`admin.username`, `admin.email`, provider, scope).
+       - When unauthenticated: cleanly indicates "Unauthenticated Guest", amber "Not Signed In" badge, and direct "Sign In to Platform" prompt; password change form cleanly advises logging in.
+       - When authenticated: displays green "Active Administrator Session" (or "Active User Session"), user initials, and "Sign Out Administrator" action.
+       - Listens to global `dm_auth_change` custom events for instantaneous multi-tab / intra-page reactivity.
+    6. **Auth-Aware Shell Navigation (`src/components/layout/app-shell.tsx`)**:
+       - Added dynamic session synchronization to `AppShell`.
+       - When authenticated: renders `Sign Out` button with red hover.
+       - When unauthenticated: renders high-contrast `Sign In` button linking to `/login`.
+       - Applies across both desktop collapsible sidebar and mobile drawer.
+    7. **Clean Multi-Provider Sign Out (`src/app/api/auth/logout/route.ts` & `/api/admin/logout/route.ts`)**:
+       - Clears all `dm_admin_session`, `sb-*`, and `auth-token` cookies with `maxAge: 0` and emits strict `Cache-Control: no-store, no-cache, must-revalidate` headers.
+  - **Verification**:
+    - 49 test files passed, 301 tests passed (100% Vitest pass rate, including new `src/lib/auth/__tests__/session-sync.test.ts`).
+    - TypeScript compilation (`npm run typecheck`): 0 errors.
 
 ## 2026-11-23 Production Release: Year Quick Selector (2010–2026), Complete Calendar-Year Fetching & API-Aware Result Cards
 

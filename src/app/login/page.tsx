@@ -95,6 +95,10 @@ function LoginForm() {
 
         setSuccessMessage("Authentication verified. Opening your research workspace...");
 
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(new CustomEvent("dm_auth_change"));
+        }
+
         // Ensure safe return destination
         const safeDestination =
           returnUrl.startsWith("/") && !returnUrl.startsWith("//") ? returnUrl : "/";

@@ -16,6 +16,7 @@ import {
   Library,
   Link as LinkIcon,
   ListMusic,
+  LogIn,
   LogOut,
   Menu,
   PanelLeftClose,
@@ -130,6 +131,8 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [mounted, setMounted] = useState(false);
   // Active API version state ("v1" | "v2") derived safely on the client without Next.js CSR bailout
   const [activeVersion, setActiveVersion] = useState<"v1" | "v2">("v1");
+  // Authenticated state to toggle between Sign In and Sign Out in the shell navigation
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
 
   // Restore sidebar preference from localStorage
   useEffect(() => {
@@ -144,12 +147,45 @@ export function AppShell({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  // Sync session authentication status with /api/admin/session and custom events
+  useEffect(() => {
+    let active = true;
+    const checkSession = async () => {
+      try {
+        const res = await fetch("/api/admin/session", { cache: "no-store" });
+        if (!active) return;
+        if (res.ok) {
+          const data = (await res.json()) as { authenticated?: boolean };
+          setIsAuthenticated(Boolean(data.authenticated));
+        } else {
+          setIsAuthenticated(false);
+        }
+      } catch {
+        if (active) setIsAuthenticated(false);
+      }
+    };
+
+    void checkSession();
+    window.addEventListener("dm_auth_change", checkSession);
+    return () => {
+      active = false;
+      window.removeEventListener("dm_auth_change", checkSession);
+    };
+  }, [pathname]);
+
   async function handleSignOut() {
     try {
       await fetch("/api/auth/logout", { method: "POST" });
     } catch {
       // Best-effort
     }
+    try {
+      await fetch("/api/admin/logout", { method: "POST" });
+    } catch {
+      // Best-effort
+    }
+    setIsAuthenticated(false);
+    window.dispatchEvent(new CustomEvent("dm_auth_change"));
     window.location.href = "/login";
   }
 
@@ -396,17 +432,27 @@ export function AppShell({ children }: { children: ReactNode }) {
           )}
         </nav>
 
-        {/* Footer info & Sign Out */}
+        {/* Footer info & Sign In / Sign Out */}
         {isOpen ? (
           <div className="mt-auto border-t border-[var(--border)] pt-3 text-[11px] text-[var(--muted-foreground)] w-full space-y-2">
-            <button
-              type="button"
-              onClick={handleSignOut}
-              className="w-full inline-flex items-center justify-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface-container-low)] px-3 py-1.5 text-xs font-bold text-[var(--foreground)] hover:bg-[var(--surface-container-high)] hover:text-red-500 transition cursor-pointer"
-            >
-              <LogOut className="h-3.5 w-3.5" />
-              <span>Sign Out</span>
-            </button>
+            {isAuthenticated === true ? (
+              <button
+                type="button"
+                onClick={() => void handleSignOut()}
+                className="w-full inline-flex items-center justify-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface-container-low)] px-3 py-1.5 text-xs font-bold text-[var(--foreground)] hover:bg-[var(--surface-container-high)] hover:text-red-500 transition cursor-pointer"
+              >
+                <LogOut className="h-3.5 w-3.5" />
+                <span>Sign Out</span>
+              </button>
+            ) : isAuthenticated === false ? (
+              <Link
+                href="/login"
+                className="w-full inline-flex items-center justify-center gap-2 rounded-lg bg-[var(--primary)] px-3 py-1.5 text-xs font-bold text-[var(--primary-foreground)] hover:opacity-95 transition cursor-pointer"
+              >
+                <LogIn className="h-3.5 w-3.5" />
+                <span>Sign In</span>
+              </Link>
+            ) : null}
             <div>
               <p className="font-semibold text-[var(--foreground)]">Metadata Research Only</p>
               <p className="text-[10px] leading-4 text-[var(--muted-foreground)]">
@@ -416,14 +462,24 @@ export function AppShell({ children }: { children: ReactNode }) {
           </div>
         ) : (
           <div className="mt-auto border-t border-[var(--border)] pt-2 w-full flex justify-center">
-            <button
-              type="button"
-              onClick={handleSignOut}
-              title="Sign Out"
-              className="h-8 w-8 inline-flex items-center justify-center rounded-lg border border-[var(--border)] bg-[var(--surface-container-low)] text-[var(--muted-foreground)] hover:text-red-500 hover:bg-[var(--surface-container-high)] transition cursor-pointer"
-            >
-              <LogOut className="h-4 w-4" />
-            </button>
+            {isAuthenticated === true ? (
+              <button
+                type="button"
+                onClick={() => void handleSignOut()}
+                title="Sign Out"
+                className="h-8 w-8 inline-flex items-center justify-center rounded-lg border border-[var(--border)] bg-[var(--surface-container-low)] text-[var(--muted-foreground)] hover:text-red-500 hover:bg-[var(--surface-container-high)] transition cursor-pointer"
+              >
+                <LogOut className="h-4 w-4" />
+              </button>
+            ) : isAuthenticated === false ? (
+              <Link
+                href="/login"
+                title="Sign In"
+                className="h-8 w-8 inline-flex items-center justify-center rounded-lg bg-[var(--primary)] text-[var(--primary-foreground)] hover:opacity-95 transition cursor-pointer"
+              >
+                <LogIn className="h-4 w-4" />
+              </Link>
+            ) : null}
           </div>
         )}
       </aside>
@@ -522,16 +578,30 @@ export function AppShell({ children }: { children: ReactNode }) {
               ))}
             </div>
 
-            {/* Mobile Drawer Sign Out */}
+            {/* Mobile Drawer Sign In / Sign Out */}
             <div className="mt-auto border-t border-[var(--border)] pt-3">
-              <button
-                type="button"
-                onClick={handleSignOut}
-                className="w-full inline-flex items-center justify-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface-container-low)] px-3 py-2 text-xs font-bold text-[var(--foreground)] hover:bg-[var(--surface-container-high)] hover:text-red-500 transition cursor-pointer"
-              >
-                <LogOut className="h-4 w-4" />
-                <span>Sign Out</span>
-              </button>
+              {isAuthenticated === true ? (
+                <button
+                  type="button"
+                  onClick={async () => {
+                    setMobileMenuOpen(false);
+                    await handleSignOut();
+                  }}
+                  className="w-full inline-flex items-center justify-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface-container-low)] px-3 py-2 text-xs font-bold text-[var(--foreground)] hover:bg-[var(--surface-container-high)] hover:text-red-500 transition cursor-pointer"
+                >
+                  <LogOut className="h-4 w-4" />
+                  <span>Sign Out</span>
+                </button>
+              ) : isAuthenticated === false ? (
+                <Link
+                  href="/login"
+                  onClick={() => setMobileMenuOpen(false)}
+                  className="w-full inline-flex items-center justify-center gap-2 rounded-lg bg-[var(--primary)] px-3 py-2 text-xs font-bold text-[var(--primary-foreground)] hover:opacity-95 transition cursor-pointer"
+                >
+                  <LogIn className="h-4 w-4" />
+                  <span>Sign In</span>
+                </Link>
+              ) : null}
             </div>
           </div>
         </div>

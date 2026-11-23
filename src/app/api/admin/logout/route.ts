@@ -56,6 +56,17 @@ export async function POST() {
     maxAge: 0,
   });
 
+  // Explicitly clear all Supabase and auth-token cookies on response
+  const allCookies = cookieStore.getAll();
+  for (const c of allCookies) {
+    if (c.name.startsWith("sb-") || c.name.includes("auth-token") || c.name.includes("session")) {
+      response.cookies.set(c.name, "", {
+        path: "/",
+        maxAge: 0,
+      });
+    }
+  }
+
   // 3. Prevent browser back-forward caching of protected content
   response.headers.set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
   response.headers.set("Pragma", "no-cache");

@@ -50,6 +50,7 @@ export async function POST(request: Request) {
   let isAdmin = false;
 
   const cookieStore = await cookies();
+  const capturedCookies: { name: string; value: string; options?: Record<string, unknown> }[] = [];
 
   // 1. Supabase Auth SSR authentication
   if (publicEnv.NEXT_PUBLIC_SUPABASE_URL && publicEnv.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY) {
@@ -66,6 +67,7 @@ export async function POST(request: Request) {
               try {
                 cookiesToSet.forEach(({ name, value, options }) => {
                   cookieStore.set(name, value, options);
+                  capturedCookies.push({ name, value, options });
                 });
               } catch {
                 // Ignore in contexts with immutable headers
@@ -115,7 +117,7 @@ export async function POST(request: Request) {
     );
   }
 
-  // 4. Create response and attach admin session cookie if administrator
+  // 4. Create response and attach both Supabase cookies and admin session cookie
   const response = NextResponse.json({
     ok: true,
     user: authenticatedUser,
@@ -123,8 +125,13 @@ export async function POST(request: Request) {
     ownerId: authenticatedUser.id,
   });
 
+  // Explicitly forward captured Supabase SSR cookies onto HTTP response headers
+  for (const c of capturedCookies) {
+    response.cookies.set(c.name, c.value, c.options as any);
+  }
+
   if (isAdmin) {
-    const adminToken = createAdminSession(CANONICAL_ADMIN_USERNAME);
+    const adminToken = createAdminSession(authenticatedUser.email?.split("@")[0] || CANONICAL_ADMIN_USERNAME);
     if (adminToken) {
       const maxAge = adminSessionMaxAge();
       response.cookies.set(ADMIN_COOKIE_NAME, adminToken, {
