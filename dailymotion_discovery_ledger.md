@@ -27,6 +27,11 @@ Scope: Project source-of-truth ledger, updated after Year Quick Selector (2010�
 ## 2026-11-23 Production Release: Year Quick Selector (2010–2026), Complete Calendar-Year Fetching & API-Aware Result Cards
 
 **User intent addressed**
+- **Cloudflare Worker Deployment Account ID Alignment (`cloudflare/workers/dailymotion-discovery-api/wrangler.jsonc`)**:
+  - Resolved Cloudflare API Authentication Error `[code: 10000]` during `wrangler deploy`:
+    - **Root Cause**: Wrangler lacked an explicit `account_id` in `wrangler.jsonc` and fell back to stale cached account ID `2e916f8558cf884eb308706e5c467813` (`Elmahdyabdulla209@gmail.com`) in `node_modules/.cache/wrangler/wrangler-account.json`. The user had authenticated under `alahlyeagle13@gmail.com` (`1ed4278f71b95d7ff3c61a3cff2940f7`), causing a cross-account authorization failure.
+    - **Fix**: Pinned `"account_id": "1ed4278f71b95d7ff3c61a3cff2940f7"` explicitly into `wrangler.jsonc` and synchronized `node_modules/.cache/wrangler/wrangler-account.json` to the authenticated account.
+
 - **Year Quick Selector (2010–2026, Exactly 17 Selectable Years)**:
   - Added an interactive **Year Selector** section directly to `CatalogRetrievalStrategyPanel` (`src/components/link-explorer/catalog-retrieval-strategy-panel.tsx`).
   - Contains exactly 17 selectable years inclusive: `2010`, `2011`, `2012`, `2013`, `2014`, `2015`, `2016`, `2017`, `2018`, `2019`, `2020`, `2021`, `2022`, `2023`, `2024`, `2025`, `2026`.

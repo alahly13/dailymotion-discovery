@@ -1,6 +1,7 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "dailymotion-discovery-api",
+  "account_id": "1ed4278f71b95d7ff3c61a3cff2940f7",
   "main": "src/index.ts",
   "compatibility_date": "2026-11-12",
   "workers_dev": true,
