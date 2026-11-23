@@ -11,11 +11,16 @@
 
 import { useState } from "react";
 import {
+  AlertCircle,
+  ArrowDownUp,
   Calendar,
+  Check,
   ChevronDown,
   ChevronUp,
   Cpu,
+  Database,
   Gauge,
+  Info,
   Layers,
   ListFilter,
   RefreshCw,
@@ -127,7 +132,15 @@ export function AdvancedFetchSettingsPanel({
         <div className="flex items-center gap-2.5">
           <Sliders className="h-4 w-4 text-primary" />
           <span className="text-xs font-black uppercase tracking-wider text-foreground">
-            Advanced Discovery & API Fetch Settings
+            {version === "v1" ? "Dailymotion API V1 Settings" : "Dailymotion API V2 Settings"}
+          </span>
+          <span className={cn(
+            "rounded-md px-2 py-0.5 text-[10px] font-black uppercase tracking-wider",
+            version === "v1"
+              ? "bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/20"
+              : "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20"
+          )}>
+            {version.toUpperCase()} {version === "v1" ? "Legacy Protocol" : "REST Protocol"}
           </span>
           <span className="hidden sm:inline-flex rounded-md bg-primary/10 px-2 py-0.5 text-[11px] font-bold text-primary capitalize">
             Strategy: {config.strategy}
@@ -139,7 +152,7 @@ export function AdvancedFetchSettingsPanel({
 
         <div className="flex items-center gap-2">
           <span className="text-xs text-muted-foreground font-semibold">
-            {isOpen ? "Hide Controls" : "Configure Knobs"}
+            {isOpen ? "Hide Settings" : "Configure Settings"}
           </span>
           {isOpen ? (
             <ChevronUp className="h-4 w-4 text-muted-foreground" />
@@ -152,6 +165,105 @@ export function AdvancedFetchSettingsPanel({
       {/* Expanded Knobs and Settings */}
       {isOpen && (
         <div className="p-5 border-t border-border space-y-6">
+          {/* Version-Specific Protocol & Capability Details */}
+          <div className="rounded-xl border border-border/80 bg-surface/50 p-4 space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-border/60 pb-2.5">
+              <div className="flex items-center gap-2">
+                <Database className="h-4 w-4 text-primary" />
+                <h4 className="text-xs font-black uppercase tracking-wider text-foreground">
+                  {version === "v1" ? "Dailymotion API V1 Settings & Protocol" : "Dailymotion API V2 Settings & Protocol"}
+                </h4>
+                <span className={cn(
+                  "px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wider",
+                  version === "v1"
+                    ? "bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/20"
+                    : "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20"
+                )}>
+                  {version === "v1" ? "Legacy REST Protocol" : "Modern REST Protocol"}
+                </span>
+              </div>
+              <span className="text-[11px] text-muted-foreground font-mono">
+                API Version Isolation: STRICT
+              </span>
+            </div>
+
+            {/* Version Specific Capabilities Table & Explanation */}
+            {version === "v1" ? (
+              <div className="space-y-2.5 text-xs">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-[11px]">
+                  <div className="rounded-lg border border-border bg-card p-3 space-y-1.5">
+                    <span className="font-bold text-foreground flex items-center gap-1.5">
+                      <Check className="h-3.5 w-3.5 text-emerald-500" />
+                      Supported V1 Endpoints & Date Domains:
+                    </span>
+                    <ul className="space-y-1 text-muted-foreground list-disc list-inside">
+                      <li><strong className="text-foreground">Channel Videos:</strong> <code className="font-mono">GET /user/{'{id}'}/videos</code> with Unix timestamps (<code className="font-mono">created_after</code>, <code className="font-mono">created_before</code> in seconds).</li>
+                      <li><strong className="text-foreground">Channel Playlists:</strong> <code className="font-mono">GET /user/{'{id}'}/playlists</code> (Server-side date params unsupported; filtered client-side via <code className="font-mono">playlist.created_at</code>).</li>
+                      <li><strong className="text-foreground">Playlist Membership:</strong> <code className="font-mono">GET /playlist/{'{id}'}/videos</code> (Complete ingestion; retains all videos across years).</li>
+                      <li><strong className="text-foreground">Global Video Search:</strong> <code className="font-mono">GET /videos</code> with search query and filters.</li>
+                    </ul>
+                  </div>
+
+                  <div className="rounded-lg border border-border bg-card p-3 space-y-1.5">
+                    <span className="font-bold text-foreground flex items-center gap-1.5">
+                      <Info className="h-3.5 w-3.5 text-amber-500" />
+                      V1 Response Dates & Limitations:
+                    </span>
+                    <ul className="space-y-1 text-muted-foreground list-disc list-inside">
+                      <li><strong className="text-foreground">Timestamp Format:</strong> Unix seconds (<code className="font-mono">created_time</code>, <code className="font-mono">modified_time</code>).</li>
+                      <li><strong className="text-foreground">Pagination Ceiling:</strong> 1,000 items maximum per query window (<code className="font-mono">limit=100</code>, <code className="font-mono">page=10</code> max).</li>
+                      <li><strong className="text-foreground">Continuation Signal:</strong> <code className="font-mono">has_more: true/false</code>.</li>
+                      <li><strong className="text-foreground">Absent in V1:</strong> Cursor tokens (<code className="font-mono">next</code>), <code className="font-mono">published_at</code>, nested profile objects.</li>
+                    </ul>
+                  </div>
+                </div>
+
+                <div className="rounded-lg bg-amber-500/10 border border-amber-500/20 p-2.5 flex items-start gap-2 text-[11px] text-amber-700 dark:text-amber-300">
+                  <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+                  <p>
+                    <strong>API V1 Protocol Notice:</strong> Query windows saturate at 1,000 records. For complete yearly or multi-year retrieval, Link Explorer automatically activates adaptive date subdivision to exhaust lifetime channel archives safely.
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-2.5 text-xs">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-[11px]">
+                  <div className="rounded-lg border border-border bg-card p-3 space-y-1.5">
+                    <span className="font-bold text-foreground flex items-center gap-1.5">
+                      <Check className="h-3.5 w-3.5 text-emerald-500" />
+                      Supported V2 Endpoints & Date Domains:
+                    </span>
+                    <ul className="space-y-1 text-muted-foreground list-disc list-inside">
+                      <li><strong className="text-foreground">Profile Videos:</strong> <code className="font-mono">GET /v2/profiles/{'{id}'}/videos</code> with ISO 8601 strings (<code className="font-mono">created_after</code>, <code className="font-mono">created_before</code>).</li>
+                      <li><strong className="text-foreground">Profile Playlists:</strong> <code className="font-mono">GET /v2/profiles/{'{id}'}/playlists</code> (Native server-side ISO date filters supported).</li>
+                      <li><strong className="text-foreground">Playlist Membership:</strong> <code className="font-mono">GET /v2/playlists/{'{id}'}/videos</code> (Complete ingestion with cursor pagination).</li>
+                      <li><strong className="text-foreground">Sorting:</strong> <code className="font-mono">sort=-created_at</code> (Newest) or <code className="font-mono">sort=created_at</code> (Oldest).</li>
+                    </ul>
+                  </div>
+
+                  <div className="rounded-lg border border-border bg-card p-3 space-y-1.5">
+                    <span className="font-bold text-foreground flex items-center gap-1.5">
+                      <Info className="h-3.5 w-3.5 text-emerald-500" />
+                      V2 Response Dates & Continuation:
+                    </span>
+                    <ul className="space-y-1 text-muted-foreground list-disc list-inside">
+                      <li><strong className="text-foreground">Timestamp Format:</strong> ISO 8601 strings (<code className="font-mono">created_at</code>, <code className="font-mono">published_at</code>, <code className="font-mono">updated_at</code>).</li>
+                      <li><strong className="text-foreground">Pagination Model:</strong> Authoritative cursor URL in <code className="font-mono">pagination.next</code>.</li>
+                      <li><strong className="text-foreground">Exhaustion Signal:</strong> <code className="font-mono">pagination.next = null</code> strictly confirms completion.</li>
+                      <li><strong className="text-foreground">Absent in V2:</strong> Global unauthenticated video search without profile ID; legacy username routes.</li>
+                    </ul>
+                  </div>
+                </div>
+
+                <div className="rounded-lg bg-emerald-500/10 border border-emerald-500/20 p-2.5 flex items-start gap-2 text-[11px] text-emerald-700 dark:text-emerald-300">
+                  <Check className="h-4 w-4 shrink-0 mt-0.5" />
+                  <p>
+                    <strong>API V2 Protocol Notice:</strong> Cursor pagination eliminates 1,000-item query window caps where profile access is granted. Continuation follows authoritative <code className="font-mono">next</code> URLs until <code className="font-mono">next = null</code>.
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
           {/* 1. Strategy Selector Cards */}
           <div className="space-y-2">
             <label className="text-xs font-black uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
@@ -293,6 +405,43 @@ export function AdvancedFetchSettingsPanel({
               </select>
               <p className="text-[10px] text-muted-foreground">
                 Optimizes payload size and parsing speed.
+              </p>
+            </div>
+
+            {/* Knob 5: Upstream Server Sort Parameter */}
+            <div className="space-y-1.5 sm:col-span-2 lg:col-span-4 pt-2 border-t border-border/50">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+                <label className="text-xs font-bold text-foreground flex items-center gap-1.5">
+                  <ArrowDownUp className="h-3.5 w-3.5 text-primary" />
+                  <span>Upstream Server Sort Parameter ({version.toUpperCase()})</span>
+                </label>
+                <span className="text-[10px] text-muted-foreground font-mono">
+                  {version === "v1" ? "v1: recent, old, visited, trending" : "v2: -created_at, created_at"}
+                </span>
+              </div>
+              <select
+                value={config.serverSort || (version === "v1" ? "recent" : "-created_at")}
+                onChange={(e) => onChangeConfig({ ...config, serverSort: e.target.value })}
+                className="w-full h-10 rounded-lg border border-border bg-surface px-3 text-xs text-foreground outline-none focus:ring-2 focus:ring-primary cursor-pointer font-medium"
+              >
+                {version === "v1" ? (
+                  <>
+                    <option value="recent">recent — Newest Videos First (Default)</option>
+                    <option value="old">old — Oldest Videos First</option>
+                    <option value="visited">visited — Most Visited Lifetime</option>
+                    <option value="trending">trending — Trending Popularity</option>
+                  </>
+                ) : (
+                  <>
+                    <option value="-created_at">-created_at — Newest First (Official REST Default)</option>
+                    <option value="created_at">created_at — Oldest First (Inception Traversal)</option>
+                  </>
+                )}
+              </select>
+              <p className="text-[10px] text-muted-foreground">
+                {version === "v1"
+                  ? "Controls the sort query parameter sent directly to Dailymotion API v1 endpoints."
+                  : "Controls the sort query parameter sent directly to Dailymotion API v2 profile and playlist endpoints."}
               </p>
             </div>
           </div>

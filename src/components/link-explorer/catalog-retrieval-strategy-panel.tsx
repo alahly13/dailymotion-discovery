@@ -19,7 +19,10 @@ import {
   ChevronDown,
   Clock,
   Compass,
+  History,
+  Info,
   Layers,
+  Play,
   Sparkles,
   Zap,
 } from "lucide-react";
@@ -29,17 +32,24 @@ import type {
   RetrievalDirection,
   RetrievalStrategy,
 } from "@/lib/link-explorer/link-explorer-types";
+import {
+  SELECTABLE_YEARS,
+  getCalendarYearBoundaries,
+} from "@/lib/link-explorer/catalog-partition-engine";
 import type { DailymotionResourceKind } from "@/lib/platforms/dailymotion/dailymotion-url-analyzer";
 import { cn } from "@/lib/utils/cn";
 
 export interface CatalogRetrievalStrategyPanelProps {
   strategy: RetrievalStrategy;
   direction: RetrievalDirection;
+  selectedYear?: number | null;
   customRangeConfig?: CustomDateRangeConfig;
   catalogTarget?: "videos" | "playlists";
   targetKind?: DailymotionResourceKind;
   onChangeStrategy: (strategy: RetrievalStrategy) => void;
   onChangeDirection: (direction: RetrievalDirection) => void;
+  onSelectYear?: (year: number) => void;
+  onFetchSelectedYear?: (year: number) => void;
   onChangeCustomRange: (config: CustomDateRangeConfig) => void;
   onChangeCatalogTarget?: (target: "videos" | "playlists") => void;
   disabled?: boolean;
@@ -91,11 +101,14 @@ const STRATEGY_OPTIONS: Array<{
 export function CatalogRetrievalStrategyPanel({
   strategy,
   direction,
+  selectedYear,
   customRangeConfig,
   catalogTarget = "videos",
   targetKind,
   onChangeStrategy,
   onChangeDirection,
+  onSelectYear,
+  onFetchSelectedYear,
   onChangeCustomRange,
   onChangeCatalogTarget,
   disabled = false,
@@ -116,6 +129,26 @@ export function CatalogRetrievalStrategyPanel({
     : isPlaylistsCatalog
     ? "Choose how the channel playlist catalog is divided into time periods based on playlist creation date (playlist.created_at)."
     : "Choose how the channel video catalog is divided into time periods based on video upload date (video.created_at).";
+
+  const yearSelectorTitle = isPlaylistMembership
+    ? "Playlist Membership — Complete Ingestion"
+    : isPlaylistsCatalog
+    ? "Playlist Creation Year Quick Selector (2010–2026)"
+    : "Video Upload Year Quick Selector (2010–2026)";
+
+  const yearSelectorSubtitle = isPlaylistMembership
+    ? "Constituent videos retain their original upload dates. Membership ingestion retrieves all entries across all years without date truncation."
+    : isPlaylistsCatalog
+    ? "Select any calendar year to retrieve playlists created in that year based strictly on playlist.created_at."
+    : "Select any calendar year to retrieve videos uploaded to Dailymotion in that year based strictly on video.created_at.";
+
+  const domainBadge = isPlaylistMembership
+    ? "Membership Domain (All Years)"
+    : isPlaylistsCatalog
+    ? "Playlist Creation Domain (playlist.created_at)"
+    : "Video Upload Domain (video.created_at)";
+
+  const activeYearBounds = selectedYear ? getCalendarYearBoundaries(selectedYear) : null;
 
   const startDateLabel = isPlaylistsCatalog
     ? "Playlist Creation Date — Fetch From (YYYY-MM-DD):"
@@ -245,6 +278,114 @@ export function CatalogRetrievalStrategyPanel({
             </button>
           </div>
         </div>
+      </div>
+
+      {/* 1. Year Quick Selector (2010–2026) */}
+      <div className="rounded-xl border border-border/80 bg-surface/40 p-4 space-y-3.5">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-border/50 pb-2.5">
+          <div className="space-y-0.5">
+            <div className="flex items-center gap-2">
+              <Calendar className="h-4 w-4 text-primary" />
+              <h4 className="text-xs font-black uppercase tracking-wider text-foreground">
+                {yearSelectorTitle}
+              </h4>
+              <span className="rounded-md bg-primary/10 border border-primary/20 px-2 py-0.5 text-[10px] font-bold text-primary">
+                17 Years Inclusive (2010–2026)
+              </span>
+            </div>
+            <p className="text-[11px] text-muted-foreground">
+              {yearSelectorSubtitle}
+            </p>
+          </div>
+
+          <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-surface-muted border border-border/60 text-muted-foreground self-start sm:self-auto">
+            {domainBadge}
+          </span>
+        </div>
+
+        {/* 17 Selectable Year Buttons (2010 to 2026 inclusive) */}
+        <div className="flex flex-wrap items-center gap-1.5">
+          {SELECTABLE_YEARS.map((yr) => {
+            const isYearActive = strategy === "selected_year" && selectedYear === yr;
+            const is2026 = yr === 2026;
+
+            return (
+              <button
+                key={yr}
+                type="button"
+                disabled={disabled}
+                onClick={() => {
+                  onSelectYear?.(yr);
+                  onChangeStrategy("selected_year");
+                }}
+                className={cn(
+                  "relative px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer font-mono border",
+                  isYearActive
+                    ? "bg-primary text-primary-foreground border-primary shadow-xs ring-2 ring-primary/30"
+                    : "bg-surface hover:bg-surface-muted text-muted-foreground hover:text-foreground border-border/70 hover:border-border"
+                )}
+                title={`Select calendar year ${yr} to retrieve all records`}
+              >
+                <span>{yr}</span>
+                {is2026 && (
+                  <span
+                    className={cn(
+                      "ml-1 text-[9px] px-1 py-0.2 rounded font-sans uppercase font-black",
+                      isYearActive ? "bg-black/30 text-white" : "bg-primary/15 text-primary"
+                    )}
+                  >
+                    Now
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Active Year Boundaries & Retrieval Trigger Card */}
+        {strategy === "selected_year" && selectedYear && activeYearBounds && (
+          <div className="rounded-xl border border-primary/40 bg-primary/5 p-3.5 space-y-2.5 animate-in fade-in duration-200">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="space-y-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="rounded-md bg-primary text-primary-foreground font-black text-xs px-2.5 py-0.5">
+                    Year {selectedYear}
+                  </span>
+                  <span className="text-xs font-bold text-foreground">
+                    Strict Half-Open Boundary:
+                  </span>
+                  <code className="text-[11px] font-mono bg-surface-muted/90 px-2 py-0.5 rounded border border-border text-foreground">
+                    {activeYearBounds.boundaryLabel}
+                  </code>
+                </div>
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground font-mono">
+                  <span>Start (UTC): {activeYearBounds.startIso}</span>
+                  <span>•</span>
+                  <span>End Limit: {activeYearBounds.nextYearStartIso}</span>
+                  <span>•</span>
+                  <span>Unix: {activeYearBounds.startUnix} &lt;= t &lt; {activeYearBounds.nextYearStartUnix}</span>
+                </div>
+                {selectedYear === 2026 && (
+                  <p className="text-[11px] text-amber-500 font-medium">
+                    Note: 2026 retrieval discovers all published items up to the current moment without fabricating unreleased records.
+                  </p>
+                )}
+              </div>
+
+              {onFetchSelectedYear && (
+                <button
+                  type="button"
+                  disabled={disabled}
+                  onClick={() => onFetchSelectedYear(selectedYear)}
+                  className="inline-flex items-center gap-2 rounded-xl bg-primary px-3.5 py-2 text-xs font-black text-primary-foreground shadow-sm hover:bg-primary/90 transition-all cursor-pointer whitespace-nowrap self-start sm:self-auto"
+                >
+                  <Play className="h-3.5 w-3.5 fill-current" />
+                  <span>Fetch Entire Year {selectedYear}</span>
+                </button>
+              )}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Strategy Card Selection Grid */}

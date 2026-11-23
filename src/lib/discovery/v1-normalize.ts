@@ -24,6 +24,7 @@ export interface V1RawVideo {
   language?: string | null;
   country?: string | null;
   created_time?: number | string | null;
+  modified_time?: number | string | null;
   channel?: string | null;
   "channel.name"?: string | null;
   owner?: string | null;
@@ -46,6 +47,7 @@ export interface V1RawUser {
   videos_total?: number | string | null;
   avatar_360_url?: string | null;
   created_time?: number | string | null;
+  modified_time?: number | string | null;
 }
 
 export interface V1RawPlaylist {
@@ -56,6 +58,7 @@ export interface V1RawPlaylist {
   owner?: string | null;
   "owner.screenname"?: string | null;
   created_time?: number | string | null;
+  modified_time?: number | string | null;
   url?: string | null;
 }
 
@@ -90,6 +93,10 @@ function base(kind: DiscoveryItemKind, id: string, raw: unknown): Omit<Discovery
     category: null,
     createdAt: null,
     year: null,
+    publishedAt: null,
+    updatedAt: null,
+    availableAt: null,
+    sourceEndpoint: null,
     tags: [],
     ownerId: null,
     ownerName: null,
@@ -124,6 +131,10 @@ export function normalizeV1Video(raw: V1RawVideo): DiscoveryItem | null {
     videoCreatedAt: createdAt,
     playlistCreatedAt: null,
     membershipAddedAt: null,
+    publishedAt: null,
+    updatedAt: unixToIso(raw.modified_time),
+    availableAt: null,
+    sourceEndpoint: "GET /videos",
     tags: parseTags(raw.tags),
     ownerId: raw.owner ?? null,
     ownerName: raw["owner.screenname"] ?? raw.owner ?? null,
@@ -184,6 +195,10 @@ export function normalizeV1Playlist(raw: V1RawPlaylist): DiscoveryItem | null {
     playlistCreatedAt: createdAt,
     videoCreatedAt: null,
     membershipAddedAt: null,
+    publishedAt: null,
+    updatedAt: unixToIso(raw.modified_time),
+    availableAt: null,
+    sourceEndpoint: "GET /user/{id}/playlists",
     ownerId: raw.owner ?? null,
     ownerName: raw["owner.screenname"] ?? raw.owner ?? null,
     extra: { videosTotal: total, videos_total: total },

@@ -46,7 +46,12 @@ import {
   getNextPendingPeriod,
   subdivideSaturatedPeriod,
   isLedgerFullyCompleted,
+  SELECTABLE_YEARS,
+  getCalendarYearBoundaries,
+  isItemWithinYearBoundaries,
 } from "./catalog-partition-engine";
+
+export { SELECTABLE_YEARS, getCalendarYearBoundaries, isItemWithinYearBoundaries };
 import { CatalogDeduplicator } from "./deduplication-service";
 
 export interface DiscoveryApiResponse {
@@ -93,7 +98,8 @@ export function isPlaylistWithinCreationBounds(
       const numVal = Number(dateAfter);
       afterTime = numVal < 2e10 ? numVal * 1000 : numVal;
     } else {
-      afterTime = new Date(dateAfter).getTime();
+      const norm = dateAfter.length <= 10 ? `${dateAfter}T00:00:00.000Z` : dateAfter;
+      afterTime = new Date(norm).getTime();
     }
     if (!Number.isNaN(afterTime) && plTime < afterTime) {
       return false;
@@ -106,7 +112,8 @@ export function isPlaylistWithinCreationBounds(
       const numVal = Number(dateBefore);
       beforeTime = numVal < 2e10 ? numVal * 1000 : numVal;
     } else {
-      beforeTime = new Date(dateBefore).getTime();
+      const norm = dateBefore.length <= 10 ? `${dateBefore}T23:59:59.999Z` : dateBefore;
+      beforeTime = new Date(norm).getTime();
     }
     if (!Number.isNaN(beforeTime) && plTime > beforeTime) {
       return false;
@@ -297,7 +304,10 @@ export async function resolveLinkExplorerInput(
 
   // Adjust maxPages based on chosen strategy
   let targetMaxPages = config.maxPages;
-  if (config.strategy === "quick") {
+  if (config.retrievalStrategy === "selected_year") {
+    // When fetching an entire calendar year, retrieve all pages until confirmed exhaustion
+    targetMaxPages = config.maxPages && config.maxPages > 0 ? config.maxPages : 0;
+  } else if (config.strategy === "quick") {
     targetMaxPages = 1;
   } else if (config.strategy === "standard") {
     targetMaxPages = Math.min(config.maxPages || 5, 10);
@@ -326,6 +336,7 @@ export async function resolveLinkExplorerInput(
       canonicalUrl: analyzed.canonicalUrl || "",
       strategy: config.retrievalStrategy || "automatic_maximum_coverage",
       direction: config.retrievalDirection || "newest_to_oldest",
+      selectedYear: config.selectedYear || null,
       customConfig: config.customRangeConfig,
       catalogTarget: config.catalogTarget || "videos",
     });
@@ -906,7 +917,8 @@ export async function resolveLinkExplorerInput(
           // Adaptive Subdivision: split saturated Year -> Months or Month -> 10-day intervals
           if (
             ledger.strategy === "automatic_maximum_coverage" ||
-            ledger.strategy === "year_by_year"
+            ledger.strategy === "year_by_year" ||
+            ledger.strategy === "selected_year"
           ) {
             const childPeriods = subdivideSaturatedPeriod(activePeriod, ledger.direction);
             if (childPeriods.length > 0) {

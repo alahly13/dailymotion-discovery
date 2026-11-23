@@ -42,6 +42,10 @@ export interface DiscoveryItem {
   playlistCreatedAt?: string | null;
   videoCreatedAt?: string | null;
   membershipAddedAt?: string | null;
+  publishedAt?: string | null;
+  updatedAt?: string | null;
+  availableAt?: string | null;
+  sourceEndpoint?: string | null;
   tags: string[];
   ownerId: string | null;
   ownerName: string | null;

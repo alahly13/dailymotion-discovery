@@ -16,7 +16,8 @@ export type RetrievalStrategy =
   | "automatic_maximum_coverage" // DEFAULT
   | "month_by_month"
   | "year_by_year"
-  | "custom_range";
+  | "custom_range"
+  | "selected_year";
 
 export type RetrievalDirection =
   | "newest_to_oldest" // DEFAULT
@@ -84,6 +85,7 @@ export interface CatalogPartitionLedger {
   canonicalUrl: string;
   strategy: RetrievalStrategy;
   direction: RetrievalDirection;
+  selectedYear?: number | null;
   customRangeConfig?: CustomDateRangeConfig;
   activePeriodId: string | null;
   periods: RetrievalPeriod[];
@@ -96,6 +98,90 @@ export interface CatalogPartitionLedger {
   totalDuplicatesDetected: number;
   createdAt: string;
   updatedAt: string;
+}
+
+/**
+ * Exactly 17 selectable calendar years, inclusive (2010 through 2026).
+ */
+export const SELECTABLE_YEARS = [
+  2010, 2011, 2012, 2013, 2014, 2015, 2016, 2017,
+  2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025, 2026
+] as const;
+
+export type SelectableYear = (typeof SELECTABLE_YEARS)[number];
+
+export interface CalendarYearBoundaries {
+  year: number;
+  startIso: string;          // e.g. "2020-01-01T00:00:00.000Z"
+  endIso: string;            // e.g. "2020-12-31T23:59:59.999Z"
+  nextYearStartIso: string;  // e.g. "2021-01-01T00:00:00.000Z" (half-open upper bound)
+  startUnix: number;         // e.g. 1577836800 (Jan 1 00:00:00 UTC)
+  endUnix: number;           // e.g. 1609459199 (Dec 31 23:59:59 UTC)
+  nextYearStartUnix: number; // e.g. 1609459200 (Jan 1 00:00:00 UTC of next year)
+  boundaryLabel: string;     // e.g. "2020-01-01T00:00:00.000Z <= timestamp < 2021-01-01T00:00:00.000Z"
+}
+
+/**
+ * Calculates complete calendar-year boundaries using the strict half-open interval convention:
+ * [January 1 of selected year, January 1 of the following year)
+ * i.e. startIso <= timestamp < nextYearStartIso
+ */
+export function getCalendarYearBoundaries(year: number): CalendarYearBoundaries {
+  const startIso = `${year}-01-01T00:00:00.000Z`;
+  const nextYearStartIso = `${year + 1}-01-01T00:00:00.000Z`;
+  const endIso = `${year}-12-31T23:59:59.999Z`;
+  const startUnix = Math.floor(new Date(startIso).getTime() / 1000);
+  const nextYearStartUnix = Math.floor(new Date(nextYearStartIso).getTime() / 1000);
+  const endUnix = Math.floor(new Date(`${year}-12-31T23:59:59.000Z`).getTime() / 1000);
+  const boundaryLabel = `${startIso} <= timestamp < ${nextYearStartIso}`;
+
+  return {
+    year,
+    startIso,
+    endIso,
+    nextYearStartIso,
+    startUnix,
+    endUnix,
+    nextYearStartUnix,
+    boundaryLabel,
+  };
+}
+
+/**
+ * Validates whether an item's timestamp falls within the selected calendar year
+ * according to the strict half-open interval [startIso, nextYearStartIso).
+ * Accurately parses Unix timestamp seconds, milliseconds, or ISO-8601 strings.
+ */
+export function isItemWithinYearBoundaries(
+  timestamp: string | number | null | undefined,
+  year: number
+): boolean {
+  if (timestamp === null || timestamp === undefined || timestamp === "") {
+    return false;
+  }
+  let ms: number;
+  if (typeof timestamp === "number") {
+    // Unix seconds vs milliseconds: 2e10 threshold (year 2603 in seconds)
+    ms = timestamp < 2e10 ? Math.floor(timestamp * 1000) : timestamp;
+  } else {
+    const trimmed = String(timestamp).trim();
+    if (/^\d+$/.test(trimmed)) {
+      const numVal = Number(trimmed);
+      ms = numVal < 2e10 ? Math.floor(numVal * 1000) : numVal;
+    } else {
+      ms = new Date(trimmed).getTime();
+    }
+  }
+
+  if (Number.isNaN(ms)) {
+    return false;
+  }
+
+  const bounds = getCalendarYearBoundaries(year);
+  const startMs = bounds.startUnix * 1000;
+  const nextYearStartMs = bounds.nextYearStartUnix * 1000;
+
+  return ms >= startMs && ms < nextYearStartMs;
 }
 
 /**
@@ -182,10 +268,7 @@ export function generateYearPeriod(
   parentPeriodId: string | null = null,
   dateDomain: DateDomain = "video-created-at"
 ): RetrievalPeriod {
-  const startIso = `${year}-01-01T00:00:00.000Z`;
-  const endIso = `${year}-12-31T23:59:59.999Z`;
-  const startUnix = Math.floor(new Date(startIso).getTime() / 1000);
-  const endUnix = Math.floor(new Date(`${year}-12-31T23:59:59.000Z`).getTime() / 1000);
+  const bounds = getCalendarYearBoundaries(year);
   const labelPrefix = dateDomain === "playlist-created-at" ? "Playlist Creation: " : "";
   const periodPrefix = dateDomain === "playlist-created-at" ? "period:playlist_catalog:year" : "period:year";
   const periodId = `${periodPrefix}:${year}:${apiVersion}:${resourceIdentity || "target"}`;
@@ -195,10 +278,10 @@ export function generateYearPeriod(
     parentPeriodId,
     granularity: "year",
     label: `${labelPrefix}Year ${year}`,
-    startIso,
-    endIso,
-    startUnix,
-    endUnix,
+    startIso: bounds.startIso,
+    endIso: bounds.endIso,
+    startUnix: bounds.startUnix,
+    endUnix: bounds.endUnix,
     apiVersion,
     resourceIdentity,
     dateDomain,
@@ -449,7 +532,8 @@ export function initializeStrategyPeriods(
   resourceIdentity: string = "",
   customConfig?: CustomDateRangeConfig,
   resourceType?: DailymotionResourceKind,
-  catalogTarget: "videos" | "playlists" = "videos"
+  catalogTarget: "videos" | "playlists" = "videos",
+  selectedYear?: number | null
 ): RetrievalPeriod[] {
   const currentUtcYear = new Date().getUTCFullYear();
   const currentUtcMonth = new Date().getUTCMonth() + 1;
@@ -486,6 +570,15 @@ export function initializeStrategyPeriods(
       hasMore: true,
     };
     return [playlistPeriod];
+  }
+
+  // Selected single calendar year mode (e.g. Year Quick Selector 2010–2026)
+  if (strategy === "selected_year") {
+    const yr =
+      selectedYear && selectedYear >= 2005 && selectedYear <= 2030
+        ? selectedYear
+        : currentUtcYear;
+    return [generateYearPeriod(yr, apiVersion, resourceIdentity, null, dateDomain)];
   }
 
   // Custom date range explicitly specified by user
@@ -749,6 +842,7 @@ export function createPartitionLedger(params: {
   canonicalUrl: string;
   strategy?: RetrievalStrategy;
   direction?: RetrievalDirection;
+  selectedYear?: number | null;
   earliestContentDate?: string | null;
   latestContentDate?: string | null;
   customConfig?: CustomDateRangeConfig;
@@ -773,7 +867,8 @@ export function createPartitionLedger(params: {
     params.resourceId,
     params.customConfig,
     params.resourceType,
-    catalogTarget
+    catalogTarget,
+    params.selectedYear
   );
 
   const activePeriodId = initialPeriods[0]?.periodId || null;
@@ -786,6 +881,7 @@ export function createPartitionLedger(params: {
     canonicalUrl: params.canonicalUrl,
     strategy,
     direction,
+    selectedYear: params.selectedYear || null,
     customRangeConfig: params.customConfig,
     activePeriodId,
     periods: initialPeriods,

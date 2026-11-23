@@ -20,6 +20,8 @@ export interface V2RawVideo {
   country?: string | null;
   created_at?: string | null;
   published_at?: string | null;
+  updated_at?: string | null;
+  available_at?: string | null;
   tags?: string[] | null;
   video_url?: string | null;
   is_explicit?: boolean | null;
@@ -51,6 +53,7 @@ export interface V2RawPlaylist {
   description?: string | null;
   videos_total?: number | null;
   created_at?: string | null;
+  updated_at?: string | null;
 }
 
 export interface V2RawLivestream {
@@ -89,6 +92,10 @@ function base(kind: DiscoveryItemKind, id: string, raw: unknown): Omit<Discovery
     category: null,
     createdAt: null,
     year: null,
+    publishedAt: null,
+    updatedAt: null,
+    availableAt: null,
+    sourceEndpoint: null,
     tags: [],
     ownerId: null,
     ownerName: null,
@@ -122,6 +129,10 @@ export function normalizeV2Video(raw: V2RawVideo): DiscoveryItem | null {
     videoCreatedAt: createdAt,
     playlistCreatedAt: null,
     membershipAddedAt: null,
+    publishedAt: validIso(raw.published_at),
+    updatedAt: validIso(raw.updated_at),
+    availableAt: validIso(raw.available_at),
+    sourceEndpoint: "GET /v2/profiles/{id}/videos",
     tags: Array.isArray(raw.tags) ? raw.tags.filter((t): t is string => typeof t === "string" && t.length > 0) : [],
     ownerId: raw.profile?.profile_id ?? null,
     ownerName: raw.profile?.display_name ?? raw.profile?.name ?? null,
@@ -172,6 +183,10 @@ export function normalizeV2Playlist(raw: V2RawPlaylist): DiscoveryItem | null {
     playlistCreatedAt: createdAt,
     videoCreatedAt: null,
     membershipAddedAt: null,
+    publishedAt: null,
+    updatedAt: validIso(raw.updated_at),
+    availableAt: null,
+    sourceEndpoint: "GET /v2/profiles/{id}/playlists",
     extra: { videosTotal: total, videos_total: total },
   };
 }

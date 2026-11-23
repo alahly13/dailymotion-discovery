@@ -8,13 +8,18 @@
 import type { ApiVersion, DiscoveryItem } from "@/lib/discovery/types";
 import type { DailymotionAnalyzedLink, DailymotionResourceKind } from "@/lib/platforms/dailymotion/dailymotion-url-analyzer";
 import type { DailymotionNormalizedError } from "@/lib/dailymotion/errors";
-import type {
-  CatalogPartitionLedger,
-  CustomDateRangeConfig,
-  PeriodGranularity,
-  RetrievalDirection,
-  RetrievalPeriod,
-  RetrievalStrategy,
+import {
+  type CatalogPartitionLedger,
+  type CustomDateRangeConfig,
+  type PeriodGranularity,
+  type RetrievalDirection,
+  type RetrievalPeriod,
+  type RetrievalStrategy,
+  type CalendarYearBoundaries,
+  type SelectableYear,
+  SELECTABLE_YEARS,
+  getCalendarYearBoundaries,
+  isItemWithinYearBoundaries,
 } from "./catalog-partition-engine";
 import type { CatalogItemRecord } from "./catalog-persistence-service";
 import type { LocalCatalogSearchCriteria, LocalCatalogSearchResult } from "./local-catalog-search-service";
@@ -27,11 +32,14 @@ export type {
   RetrievalDirection,
   RetrievalPeriod,
   RetrievalStrategy,
+  CalendarYearBoundaries,
+  SelectableYear,
   CatalogItemRecord,
   LocalCatalogSearchCriteria,
   LocalCatalogSearchResult,
   ScanCheckpointRecord,
 };
+export { SELECTABLE_YEARS, getCalendarYearBoundaries, isItemWithinYearBoundaries };
 
 export type DateDomain =
   | "video-created-at"
@@ -87,6 +95,7 @@ export interface ScanBudgetConfig {
   serverSort?: string; // v1: recent, old, visited, trending | v2: created_at, -created_at
   retrievalStrategy?: RetrievalStrategy;
   retrievalDirection?: RetrievalDirection;
+  selectedYear?: number | null;
   customRangeConfig?: CustomDateRangeConfig;
   catalogTarget?: "videos" | "playlists";
 }

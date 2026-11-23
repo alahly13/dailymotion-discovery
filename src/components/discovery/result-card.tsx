@@ -16,6 +16,7 @@ import { useState } from "react";
 import {
   Bookmark,
   BookmarkCheck,
+  Calendar,
   Check,
   ChevronDown,
   ChevronUp,
@@ -25,6 +26,7 @@ import {
   ExternalLink,
   Eye,
   FolderPlus,
+  Info,
   Library,
   Radio,
   Star,
@@ -56,6 +58,30 @@ export function formatDuration(seconds: number | null): string | null {
 export function formatViews(views: number | null | undefined): string {
   if (views === null || views === undefined) return "0 views";
   return `${compactNumber.format(views)} views`;
+}
+
+/**
+ * Formats API Unix timestamp (seconds or ms) or ISO-8601 string into a human-readable UTC timestamp.
+ * Strictly adheres to UTC representation and never converts Unix seconds into invalid milliseconds.
+ */
+export function formatApiDate(dateStrOrNum: string | number | null | undefined): string | null {
+  if (dateStrOrNum === null || dateStrOrNum === undefined || dateStrOrNum === "") return null;
+  let d: Date;
+  if (typeof dateStrOrNum === "number") {
+    const ms = dateStrOrNum < 2e10 ? dateStrOrNum * 1000 : dateStrOrNum;
+    d = new Date(ms);
+  } else {
+    const trimmed = String(dateStrOrNum).trim();
+    if (/^\d+$/.test(trimmed)) {
+      const numVal = Number(trimmed);
+      const ms = numVal < 2e10 ? numVal * 1000 : numVal;
+      d = new Date(ms);
+    } else {
+      d = new Date(trimmed);
+    }
+  }
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toISOString().replace("T", " ").replace(/\.\d{3}Z$/, " UTC");
 }
 
 export interface CollectionTargetOption {
@@ -94,6 +120,7 @@ export function ResultCard({
   const [descExpanded, setDescExpanded] = useState(false);
   const [pickedCollection, setPickedCollection] = useState("");
   const [addedNotice, setAddedNotice] = useState<string | null>(null);
+  const [apiDetailsOpen, setApiDetailsOpen] = useState(false);
 
   const taxonomy = classifyDiscoveryItem(item);
   const meta = RESOURCE_TYPE_META[taxonomy];
@@ -107,6 +134,12 @@ export function ResultCard({
   const isExplicit = extra.explicit === true || extra.is_explicit === true;
   const isKids = extra.is_for_kids === true || extra.is_created_for_kids === true;
   const safeDesc = formatSafeDescription(item.description);
+
+  // Formatted semantic date strings
+  const formattedUploadDate = formatApiDate(item.videoCreatedAt || item.createdAt);
+  const formattedPlaylistDate = formatApiDate(item.playlistCreatedAt || item.createdAt);
+  const formattedModifiedDate = formatApiDate(item.updatedAt || (extra.modified_time as any));
+  const formattedPublishedDate = formatApiDate(item.publishedAt || (extra.publishedAt as any));
 
   async function copyText(text: string, which: "id" | "url") {
     try {
@@ -386,13 +419,74 @@ export function ResultCard({
               {item.title}
             </h3>
 
-            <p className="text-xs text-[var(--muted-foreground)]">
-              {item.ownerName ? `Created by ${item.ownerName}` : `ID: ${item.id}`}
-            </p>
+            <div className="flex items-center gap-1.5 text-xs text-[var(--muted-foreground)]">
+              {item.ownerName && (
+                <span className="font-semibold text-[var(--foreground)]">
+                  Created by {item.ownerName}
+                </span>
+              )}
+              {item.ownerName && <span>•</span>}
+              <span className="font-mono text-[11px]">ID: {item.id}</span>
+            </div>
+
+            {/* Prominent Playlist Creation Date (Strictly distinguishes from video upload dates) */}
+            <div className="rounded-lg bg-[var(--surface-container-high)]/70 border border-border/60 px-2.5 py-1.5 flex items-center gap-2 text-xs">
+              <Calendar className="h-3.5 w-3.5 text-amber-500 shrink-0" />
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="font-bold text-foreground">Playlist Creation Date:</span>
+                <span className="font-mono text-muted-foreground">
+                  {formattedPlaylistDate || "Not provided by API"}
+                </span>
+              </div>
+            </div>
 
             {safeDesc && (
               <p className="line-clamp-2 text-xs leading-5 text-[var(--muted-foreground)]">{safeDesc}</p>
             )}
+
+            {/* Expandable More API Details Section */}
+            <div className="border-t border-border/50 pt-2 mt-1">
+              <button
+                type="button"
+                onClick={() => setApiDetailsOpen((prev) => !prev)}
+                className="flex items-center justify-between w-full text-[11px] font-bold text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+              >
+                <span className="flex items-center gap-1.5">
+                  <Info className="h-3 w-3 text-primary" />
+                  More API Details
+                </span>
+                {apiDetailsOpen ? (
+                  <ChevronUp className="h-3.5 w-3.5" />
+                ) : (
+                  <ChevronDown className="h-3.5 w-3.5" />
+                )}
+              </button>
+
+              {apiDetailsOpen && (
+                <div className="mt-2 rounded-lg border border-border/60 bg-surface/80 p-2.5 space-y-1.5 text-[11px] font-mono animate-in fade-in duration-150">
+                  <div className="flex items-center justify-between border-b border-border/40 pb-1">
+                    <span className="text-muted-foreground">API Version / Source:</span>
+                    <span className="font-bold text-foreground">{item.apiVersion.toUpperCase()}</span>
+                  </div>
+                  <div className="flex items-center justify-between border-b border-border/40 pb-1">
+                    <span className="text-muted-foreground">Original ID Field ({item.apiVersion === "v1" ? "id" : "playlist_id"}):</span>
+                    <span className="text-foreground">{item.id}</span>
+                  </div>
+                  <div className="flex items-center justify-between border-b border-border/40 pb-1">
+                    <span className="text-muted-foreground">Creation Date ({item.apiVersion === "v1" ? "created_time" : "created_at"}):</span>
+                    <span className="text-foreground">{formattedPlaylistDate || "Not returned"}</span>
+                  </div>
+                  <div className="flex items-center justify-between border-b border-border/40 pb-1">
+                    <span className="text-muted-foreground">Total Videos ({item.apiVersion === "v1" ? "videos_total" : "videos_total"}):</span>
+                    <span className="text-foreground">{videosTotal !== null ? String(videosTotal) : "Not returned"}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground">Endpoint:</span>
+                    <span className="text-muted-foreground text-[10px]">{item.sourceEndpoint || (item.apiVersion === "v1" ? "GET /user/{id}/playlists" : "GET /v2/profiles/{id}/playlists")}</span>
+                  </div>
+                </div>
+              )}
+            </div>
 
             {addedNotice && (
               <p className="text-[11px] font-bold text-emerald-500" role="status">
@@ -551,7 +645,20 @@ export function ResultCard({
             </h3>
           )}
 
-          {/* Metadata Row: Owner + Views + Date */}
+          {/* Prominent Video Upload Date Box (Never mixed with playlist creation dates) */}
+          <div className="flex items-center gap-2 rounded-lg border border-blue-500/20 bg-blue-500/5 px-2.5 py-1.5 text-xs">
+            <Calendar className="h-4 w-4 text-blue-500 shrink-0" />
+            <div className="flex flex-col min-w-0">
+              <span className="text-[10px] uppercase font-bold tracking-wider text-blue-600 dark:text-blue-400">
+                Uploaded to Dailymotion
+              </span>
+              <span className="font-mono font-medium text-foreground truncate">
+                {formattedUploadDate || "Not provided by API"}
+              </span>
+            </div>
+          </div>
+
+          {/* Metadata Row: Owner + Views + Date + ID */}
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-[var(--muted-foreground)]">
             {item.ownerName && (
               <span className="truncate font-semibold text-[var(--foreground)] max-w-[150px]">
@@ -571,6 +678,8 @@ export function ResultCard({
                 {item.category}
               </span>
             )}
+            <span>•</span>
+            <span className="font-mono text-[10px] text-[var(--muted-foreground)]">ID: {item.id}</span>
           </div>
 
           {/* Expandable Description */}
@@ -602,6 +711,78 @@ export function ResultCard({
               ))}
             </div>
           )}
+
+          {/* Expandable Scientific / API Details */}
+          <div className="border-t border-border/50 pt-2">
+            <button
+              type="button"
+              onClick={() => setApiDetailsOpen((prev) => !prev)}
+              className="flex w-full items-center justify-between text-[11px] font-semibold text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+            >
+              <span className="flex items-center gap-1.5">
+                <Info className="h-3.5 w-3.5" />
+                More API Details
+              </span>
+              {apiDetailsOpen ? (
+                <ChevronUp className="h-3.5 w-3.5" />
+              ) : (
+                <ChevronDown className="h-3.5 w-3.5" />
+              )}
+            </button>
+
+            {apiDetailsOpen && (
+              <div className="mt-2 rounded-lg border border-border/60 bg-surface/80 p-2.5 space-y-1.5 text-[11px] font-mono animate-in fade-in duration-150">
+                <div className="flex items-center justify-between border-b border-border/40 pb-1">
+                  <span className="text-muted-foreground">API Version / Source:</span>
+                  <span className="font-bold text-foreground">{item.apiVersion.toUpperCase()} (Native)</span>
+                </div>
+                <div className="flex items-center justify-between border-b border-border/40 pb-1">
+                  <span className="text-muted-foreground">Original ID Field ({item.apiVersion === "v1" ? "id" : "video_id"}):</span>
+                  <span className="text-foreground">{item.id}</span>
+                </div>
+                <div className="flex items-center justify-between border-b border-border/40 pb-1">
+                  <span className="text-muted-foreground">Upload Timestamp ({item.apiVersion === "v1" ? "created_time" : "created_at"}):</span>
+                  <span className="text-foreground">{formattedUploadDate || "Not returned"}</span>
+                </div>
+                {formattedModifiedDate && (
+                  <div className="flex items-center justify-between border-b border-border/40 pb-1">
+                    <span className="text-muted-foreground">Last Modified ({item.apiVersion === "v1" ? "modified_time" : "updated_at"}):</span>
+                    <span className="text-foreground">{formattedModifiedDate}</span>
+                  </div>
+                )}
+                {formattedPublishedDate && formattedPublishedDate !== formattedUploadDate && (
+                  <div className="flex items-center justify-between border-b border-border/40 pb-1">
+                    <span className="text-muted-foreground">Published Date (published_at):</span>
+                    <span className="text-foreground">{formattedPublishedDate}</span>
+                  </div>
+                )}
+                {item.availableAt && (
+                  <div className="flex items-center justify-between border-b border-border/40 pb-1">
+                    <span className="text-muted-foreground">Availability (available_at):</span>
+                    <span className="text-foreground">{formatApiDate(item.availableAt)}</span>
+                  </div>
+                )}
+                <div className="flex items-center justify-between border-b border-border/40 pb-1">
+                  <span className="text-muted-foreground">Views ({item.apiVersion === "v1" ? "views_total" : "views"}):</span>
+                  <span className="text-foreground">{item.views !== null ? item.views.toLocaleString() : "Not returned"}</span>
+                </div>
+                <div className="flex items-center justify-between border-b border-border/40 pb-1">
+                  <span className="text-muted-foreground">Duration ({item.apiVersion === "v1" ? "duration [s]" : "duration [s]"}):</span>
+                  <span className="text-foreground">{durationLabel || "Not returned"}</span>
+                </div>
+                <div className="flex items-center justify-between border-b border-border/40 pb-1">
+                  <span className="text-muted-foreground">Content Flags:</span>
+                  <span className="text-foreground">
+                    {[isExplicit ? "Explicit" : null, isKids ? "Made for Kids" : null].filter(Boolean).join(", ") || "Standard"}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground">Endpoint:</span>
+                  <span className="text-muted-foreground text-[10px]">{item.sourceEndpoint || (item.apiVersion === "v1" ? "GET /videos" : "GET /v2/profiles/{id}/videos")}</span>
+                </div>
+              </div>
+            )}
+          </div>
 
           {addedNotice && (
             <p className="text-[11px] font-bold text-emerald-500" role="status">

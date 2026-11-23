@@ -146,6 +146,7 @@ export function LinkExplorerWorkspace() {
   // Time-Partitioned Catalog Retrieval Strategy State (2026)
   const [retrievalStrategy, setRetrievalStrategy] = useState<RetrievalStrategy>("automatic_maximum_coverage");
   const [retrievalDirection, setRetrievalDirection] = useState<RetrievalDirection>("newest_to_oldest");
+  const [selectedYear, setSelectedYear] = useState<number | null>(null);
   const [customRangeConfig, setCustomRangeConfig] = useState<CustomDateRangeConfig>({
     startDate: "2005-01-01",
     endDate: new Date().toISOString().substring(0, 10),
@@ -348,8 +349,13 @@ export function LinkExplorerWorkspace() {
       ...scanConfig,
       retrievalStrategy,
       retrievalDirection,
+      selectedYear: (overrideConfig?.retrievalStrategy || retrievalStrategy) === "selected_year"
+        ? (overrideConfig?.selectedYear ?? selectedYear)
+        : undefined,
       serverSort: computedSort,
-      customRangeConfig: retrievalStrategy === "custom_range" ? customRangeConfig : undefined,
+      customRangeConfig: (overrideConfig?.retrievalStrategy || retrievalStrategy) === "custom_range"
+        ? customRangeConfig
+        : undefined,
       ...overrideConfig,
     };
 
@@ -1231,6 +1237,7 @@ export function LinkExplorerWorkspace() {
       <CatalogRetrievalStrategyPanel
         strategy={retrievalStrategy}
         direction={retrievalDirection}
+        selectedYear={selectedYear}
         customRangeConfig={customRangeConfig}
         catalogTarget={scanConfig.catalogTarget || "videos"}
         targetKind={resolution?.effectiveKind || (overrideKind !== "auto" ? overrideKind : analyzedPreview?.kind)}
@@ -1247,6 +1254,33 @@ export function LinkExplorerWorkspace() {
             retrievalDirection: nextDir,
             serverSort: computedSort,
           }));
+        }}
+        onSelectYear={(yr) => {
+          setSelectedYear(yr);
+          setRetrievalStrategy("selected_year");
+          setScanConfig((prev) => ({
+            ...prev,
+            retrievalStrategy: "selected_year",
+            selectedYear: yr,
+          }));
+        }}
+        onFetchSelectedYear={(yr) => {
+          setSelectedYear(yr);
+          setRetrievalStrategy("selected_year");
+          setScanConfig((prev) => ({
+            ...prev,
+            retrievalStrategy: "selected_year",
+            selectedYear: yr,
+          }));
+          const targetInput = input.trim();
+          if (targetInput) {
+            void executeResolution(targetInput, version, {
+              retrievalStrategy: "selected_year",
+              selectedYear: yr,
+              maxPages: 0, // complete year retrieval until exhaustion
+              strategy: "deep",
+            });
+          }
         }}
         onChangeCustomRange={(nextRange) => {
           setCustomRangeConfig(nextRange);

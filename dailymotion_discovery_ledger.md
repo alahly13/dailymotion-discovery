@@ -2,7 +2,7 @@
 
 Updated: 2026-11-23
 Repo path: `E:\discovery\dailymotion-discovery`
-Scope: Project source-of-truth ledger, updated after Strict Separation of Playlist Creation Date from Video Upload Date, Dual-Domain Catalog Partitioning, Complete Playlist Membership Ingestion, 100% Vitest (283/283 tests) and TypeScript verification.
+Scope: Project source-of-truth ledger, updated after Year Quick Selector (2010–2026, 17 selectable years inclusive), Complete-Year Fetching Engine, Strict Separation of API V1 and V2 Settings & Protocol, API-Aware Item Cards with Expandable API Details, and 100% focused Vitest verification.
 
 ## Table of Contents
 
@@ -23,6 +23,57 @@ Scope: Project source-of-truth ledger, updated after Strict Separation of Playli
 - [Known Limitations](#known-limitations)
 - [Future Roadmap](#future-roadmap)
 - [Agent Instructions](#agent-instructions)
+
+## 2026-11-23 Production Release: Year Quick Selector (2010–2026), Complete Calendar-Year Fetching & API-Aware Result Cards
+
+**User intent addressed**
+- **Year Quick Selector (2010–2026, Exactly 17 Selectable Years)**:
+  - Added an interactive **Year Selector** section directly to `CatalogRetrievalStrategyPanel` (`src/components/link-explorer/catalog-retrieval-strategy-panel.tsx`).
+  - Contains exactly 17 selectable years inclusive: `2010`, `2011`, `2012`, `2013`, `2014`, `2015`, `2016`, `2017`, `2018`, `2019`, `2020`, `2021`, `2022`, `2023`, `2024`, `2025`, `2026`.
+  - Selecting any year immediately displays an Active Year Preview Banner with exact half-open UTC interval `[January 1 selected year, January 1 following year)` and a prominent `Fetch Entire Year YYYY` action button.
+  - Selecting a year does NOT overwrite or destroy custom date ranges or other retrieval strategies; clearly separates `selected_year` mode from `custom_range` mode.
+  - Enforced constant `SELECTABLE_YEARS = [2010, 2011, ..., 2026]` and helper `getCalendarYearBoundaries(year)` producing `startIso`, `endIso`, `nextYearStartIso`, `startUnix`, `endUnix`, and `nextYearStartUnix`.
+  - Boundary inclusion helper `isItemWithinYearBoundaries(timestamp, year)` guarantees zero gaps and zero overlaps between adjacent years using `[startMs, nextYearStartMs)`.
+
+- **Strict Resource-Specific Date Domains**:
+  - **Channel Videos**: Evaluated strictly against Video Upload Year (`videoCreatedAt` / `created_time` in V1 [Unix seconds] or `created_at` in V2 [ISO-8601]).
+  - **Channel Playlists**: Evaluated strictly against Playlist Creation Year (`playlistCreatedAt` / `created_time` in V1 or `created_at` in V2).
+  - **Playlist Membership Complete Ingestion**: When retrieving videos inside a selected playlist, all constituent videos are ingested in full without applying parent creation date filters. Original video upload timestamps are preserved.
+
+- **Dailymotion API V1 vs API V2 Settings & Protocol Separation**:
+  - `AdvancedFetchSettingsPanel` (`src/components/link-explorer/advanced-fetch-settings-panel.tsx`):
+    - Added dedicated `Dailymotion API V1 Settings & Protocol` and `Dailymotion API V2 Settings & Protocol` sections with version badges.
+    - Explicitly documented supported endpoints, parameter names, pagination mechanisms (V1 page numbers + `has_more` vs V2 cursor `nextUrl`), date formats (V1 Unix seconds vs V2 ISO-8601 strings), and unavailable features (V1 lacks `published_at`, `available_at`, nested profile objects; V2 separates Users from Profiles).
+    - Upstream Server Sort Parameter knob:
+      - API V1: `recent` (default), `old`, `visited`, `trending`.
+      - API V2: `-created_at` (default), `created_at`.
+
+- **Automatic Complete-Year Fetching & Checkpointing**:
+  - When `retrievalStrategy === "selected_year"` is triggered, the engine automatically configures `targetMaxPages = 0` (unlimited pages until API exhaustion).
+  - Paginates continuously through all available pages without requiring manual "Load More" clicks.
+  - Checks durable IndexedDB checkpoints on every page commit, preventing duplicate ingestion.
+  - Safe pause, resume, and cancellation lifecycle maintained.
+  - Stalled pagination detected if repeated cursors or visited page numbers occur.
+
+- **Scientific API-Aware Result Cards (`src/components/discovery/result-card.tsx`)**:
+  - **Video Cards**:
+    - Prominent `Uploaded to Dailymotion` timestamp box with `Calendar` icon and formatted UTC date.
+    - Video ID (`item.id`), Owner / Channel, Views (`formatViews`), Duration badge (`durationLabel`), Category badge, Content flags (`EXPLICIT`, `KIDS`).
+    - Expandable `More API Details` accordion exposing original API field names (`created_time`/`created_at`, `modified_time`/`updated_at`, `published_at`, `available_at`, `views_total`/`views`, `source.duration`, `visibility`, `endpoint`).
+  - **Playlist Cards**:
+    - Prominent `Playlist Creation Date` box (never labeled as video upload date!).
+    - Playlist ID, Owner / Curator, Total videos count (`videosTotal`).
+    - Expandable `More API Details` accordion exposing original field names and endpoint details.
+
+- **Normalization Updates (`src/lib/discovery/`)**:
+  - `types.ts`: Added `publishedAt`, `updatedAt`, `availableAt`, `sourceEndpoint` to canonical `DiscoveryItem`.
+  - `v1-normalize.ts`: Maps `modified_time` to `updatedAt`, sets `publishedAt: null`, `availableAt: null`, `sourceEndpoint: "GET /videos"` (or `"GET /user/{id}/playlists"`).
+  - `v2-normalize.ts`: Maps `created_at` to `publishedAt` / `createdAt`, `updated_at` to `updatedAt`, `available_at` to `availableAt`, `sourceEndpoint: "GET /v2/profiles/{id}/videos"` (or `"GET /v2/profiles/{id}/playlists"`).
+
+- **Verification Results**:
+  - Added `src/lib/link-explorer/__tests__/year-quick-selector-and-api-cards.test.ts` (16 tests, 100% pass).
+  - Existing `src/lib/link-explorer/__tests__/sorting-and-dates.test.ts` (15 tests, 100% pass).
+  - Total verified test suite: 31 focused tests passed.
 
 ## 2026-11-23 Production Release: Strict Separation of Playlist Creation Date vs Video Upload Date, Dual-Domain Catalog Partitioning & Membership Ingestion
 
