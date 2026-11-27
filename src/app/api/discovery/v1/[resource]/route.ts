@@ -71,7 +71,12 @@ function baseVideoFilters(url: URL): V1VideoQuery {
     limit: num(url.searchParams.get("pageSize")) ?? 100,
     page: num(url.searchParams.get("page")),
     fields: str(url.searchParams.get("fields")),
-    familyFilter: url.searchParams.get("familyFilter") === "false" ? false : null,
+    familyFilter: (() => {
+      const raw = url.searchParams.get("familyFilter");
+      if (raw === "false") return false;
+      if (raw === "true") return true;
+      return null;
+    })(),
     localization: str(url.searchParams.get("localization")),
   };
 }

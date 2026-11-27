@@ -39,3 +39,21 @@ function parsePublicEnv() {
 }
 
 export const publicEnv = parsePublicEnv();
+
+/**
+ * Determines whether real (non-placeholder) Supabase URL and publishable key are active.
+ *
+ * What this controls: Prevents proxy middleware, auth routes, and SSR helpers from probing
+ * the build/test fallback `https://example.supabase.co` over the network when env is unset.
+ * Scope: Shared Supabase configuration guard (client and server safe).
+ */
+export function isSupabaseConfigured(): boolean {
+  const url = (process.env.NEXT_PUBLIC_SUPABASE_URL ?? publicEnv.NEXT_PUBLIC_SUPABASE_URL ?? "").trim();
+  const key = (process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ?? publicEnv.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ?? "").trim();
+  return Boolean(
+    url &&
+      key &&
+      !url.includes("example.supabase.co") &&
+      key !== "build-placeholder"
+  );
+}

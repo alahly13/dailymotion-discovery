@@ -67,7 +67,35 @@ export function SavedTitlesWorkspace() {
   const [addModalOpen, setAddModalOpen] = useState(false);
   const [editingEntry, setEditingEntry] = useState<SavedTitleEntry | null>(null);
 
-  // 1. Resolve authenticated user identity
+  // 1. Refresh local records from IndexedDB and cloud records from R2
+  const refreshAllData = useCallback(async (targetOwner: string) => {
+    setRefreshing(true);
+    try {
+      // A. Load local pending records from owner's IndexedDB
+      const pending = await getPendingOwnerSavedTitles(targetOwner);
+      setLocalPendingEntries(pending);
+
+      // B. Fetch committed cloud manifest from R2
+      const res = await fetch("/api/saved-titles/cloud-manifest", { cache: "no-store" });
+      if (res.ok) {
+        const data = (await res.json()) as {
+          ok: boolean;
+          configured?: boolean;
+          manifest?: SavedTitlesManifest;
+        };
+        if (data.ok && data.manifest) {
+          setCloudManifest(data.manifest);
+          setCloudEntries(data.manifest.entries || []);
+        }
+      }
+    } catch (err) {
+      console.warn("[saved-titles] Refresh notice:", err);
+    } finally {
+      setRefreshing(false);
+    }
+  }, []);
+
+  // 2. Resolve authenticated user identity
   const loadUserAndData = useCallback(async () => {
     // Safety timer to prevent indefinite loading in low-connectivity or high-latency environments
     const safetyTimer = setTimeout(() => {
@@ -94,38 +122,11 @@ export function SavedTitlesWorkspace() {
       clearTimeout(safetyTimer);
       setLoading(false);
     }
-  }, []);
-
-  // 2. Refresh local records from IndexedDB and cloud records from R2
-  const refreshAllData = async (targetOwner: string) => {
-    setRefreshing(true);
-    try {
-      // A. Load local pending records from owner's IndexedDB
-      const pending = await getPendingOwnerSavedTitles(targetOwner);
-      setLocalPendingEntries(pending);
-
-      // B. Fetch committed cloud manifest from R2
-      const res = await fetch("/api/saved-titles/cloud-manifest", { cache: "no-store" });
-      if (res.ok) {
-        const data = (await res.json()) as {
-          ok: boolean;
-          configured?: boolean;
-          manifest?: SavedTitlesManifest;
-        };
-        if (data.ok && data.manifest) {
-          setCloudManifest(data.manifest);
-          setCloudEntries(data.manifest.entries || []);
-        }
-      }
-    } catch (err) {
-      console.warn("[saved-titles] Refresh notice:", err);
-    } finally {
-      setRefreshing(false);
-    }
-  };
+  }, [refreshAllData]);
 
   useEffect(() => {
-    void loadUserAndData();
+    // Schedule mount fetch asynchronously to satisfy React Compiler effect purity rules
+    void Promise.resolve().then(() => loadUserAndData());
   }, [loadUserAndData]);
 
   // 3. Listen to cross-component or cross-tab capture events
@@ -226,7 +227,13 @@ export function SavedTitlesWorkspace() {
     // Combine with cloud entries
     const combinedEntriesMap = new Map<string, SavedTitleEntry>();
     for (const c of cloudEntries) combinedEntriesMap.set(c.id, c);
-    for (const p of localPendingEntries) combinedEntriesMap.set(p.id, p);
+    for (const p of localPendingEntries) {
+      if (p.isDeleted) {
+        combinedEntriesMap.delete(p.id);
+      } else {
+        combinedEntriesMap.set(p.id, p);
+      }
+    }
 
     const exportDoc: SavedTitlesManifest = {
       ...manifest,
@@ -292,7 +299,10 @@ export function SavedTitlesWorkspace() {
   };
 
   const filteredCloud = useMemo(() => filterAndSort(cloudEntries), [cloudEntries, searchQuery, sourceFilter, kindFilter, apiVersionFilter, sortOrder]);
-  const filteredPending = useMemo(() => filterAndSort(localPendingEntries), [localPendingEntries, searchQuery, sourceFilter, kindFilter, apiVersionFilter, sortOrder]);
+  const filteredPending = useMemo(
+    () => filterAndSort(localPendingEntries.filter((entry) => !entry.isDeleted)),
+    [localPendingEntries, searchQuery, sourceFilter, kindFilter, apiVersionFilter, sortOrder]
+  );
 
   return (
     <div className="space-y-6">

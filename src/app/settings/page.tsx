@@ -17,24 +17,18 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import {
   AlertTriangle,
-  Check,
-  CheckCircle2,
   Database,
-  ExternalLink,
-  Eye,
   Globe,
   HardDrive,
   KeyRound,
   Layers,
   Lock,
   LogOut,
-  Mail,
   Moon,
   Palette,
   RefreshCw,
   Search,
   Server,
-  Settings as SettingsIcon,
   Shield,
   ShieldCheck,
   SlidersHorizontal,
@@ -388,17 +382,19 @@ export default function SettingsPage() {
       void navigator.storage.persisted().then(setPersistedStorage).catch(() => {});
     }
 
-    // Detect theme mode
-    try {
-      const stored = localStorage.getItem("theme");
-      if (stored === "light" || stored === "dark") {
-        setThemeMode(stored);
-      } else {
-        setThemeMode("system");
+    // Defer external localStorage read to microtask to avoid synchronous setState inside effect
+    queueMicrotask(() => {
+      try {
+        const stored = localStorage.getItem("theme");
+        if (stored === "light" || stored === "dark") {
+          setThemeMode(stored);
+        } else {
+          setThemeMode("system");
+        }
+      } catch {
+        // Non-fatal
       }
-    } catch {
-      // Non-fatal
-    }
+    });
   }, []);
 
   // Theme changer helper
@@ -421,11 +417,14 @@ export default function SettingsPage() {
     }
   }
 
-  // Real Sign Out handler
+  // Real Sign Out handler (clears both Supabase SSR session and HMAC admin cookie)
   async function handleSignOut() {
     setSigningOut(true);
     try {
-      await fetch("/api/auth/logout", { method: "POST" });
+      await Promise.all([
+        fetch("/api/auth/logout", { method: "POST" }),
+        fetch("/api/admin/logout", { method: "POST" }),
+      ]);
     } catch {
       // Non-fatal
     }

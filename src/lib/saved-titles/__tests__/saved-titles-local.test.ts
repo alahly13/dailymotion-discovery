@@ -180,4 +180,58 @@ describe("Saved Titles — Owner-Scoped Local Browser Persistence", () => {
     expect(manifest.entries.length).toBe(1);
     expect(manifest.entries[0].addedBy.type).toBe("administrator");
   });
+
+  it("allows UUID owner to edit, commit, and delete pre-login local-owner drafts without leaking cross-UUID", async () => {
+    const memoryDb = createMemoryLocalDatabase();
+    const uuidOwner = "11111111-1111-1111-1111-111111111111";
+    const otherUuid = "22222222-2222-2222-2222-222222222222";
+
+    await saveLocalSavedTitle(
+      {
+        id: "st_prelogin_1",
+        ownerId: "local-owner",
+        kind: "url",
+        value: "https://www.dailymotion.com/video/x8abcde",
+        displayTitle: "Draft Before Login",
+        source: { workspace: "link-explorer", label: "Link Explorer", apiVersion: "v2", resourceType: "video" },
+        addedBy: { type: "link-action" },
+        createdAt: "2026-11-14T10:00:00.000Z",
+        updatedAt: "2026-11-14T10:00:00.000Z",
+        resourceType: "video",
+        canonicalUrl: "https://www.dailymotion.com/video/x8abcde",
+        status: "pending_sync",
+      },
+      memoryDb
+    );
+
+    // Separate edit, markCommitted, and delete must agree with getAllOwnerSavedTitles alias rules
+    const edited = await updateLocalSavedTitle(
+      uuidOwner,
+      "st_prelogin_1",
+      { displayTitle: "Edited After Login" },
+      memoryDb
+    );
+    expect(edited?.displayTitle).toBe("Edited After Login");
+    expect(edited?.ownerId).toBe(uuidOwner);
+
+    await markCommittedSavedTitles(
+      uuidOwner,
+      ["st_prelogin_1"],
+      { revision: 1, generationId: "gen-alias", sha256: "sha-alias", uploadedAt: "2026-11-14T10:05:00.000Z" },
+      memoryDb
+    );
+    const cloud = await getCloudSyncedOwnerSavedTitles(uuidOwner, memoryDb);
+    expect(cloud).toHaveLength(1);
+    expect(cloud[0].status).toBe("cloud_synced");
+
+    // Once adopted by uuidOwner, a distinct UUID user cannot read or delete it
+    expect(await getAllOwnerSavedTitles(otherUuid, memoryDb)).toHaveLength(0);
+    expect(await deleteLocalSavedTitle(otherUuid, "st_prelogin_1", memoryDb)).toBe(false);
+
+    // Owner soft-deletes committed record into pending_sync tombstone for R2 deletion propagation
+    expect(await deleteLocalSavedTitle(uuidOwner, "st_prelogin_1", memoryDb)).toBe(true);
+    const pendingDelete = await getPendingOwnerSavedTitles(uuidOwner, memoryDb);
+    expect(pendingDelete).toHaveLength(1);
+    expect(pendingDelete[0].isDeleted).toBe(true);
+  });
 });

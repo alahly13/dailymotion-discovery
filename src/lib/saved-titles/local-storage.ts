@@ -37,45 +37,56 @@ function dispatchChangedEvent() {
 /**
  * Returns all local saved title records strictly scoped to the verified owner.
  */
+/**
+ * Evaluates whether a stored SavedTitleEntry belongs to `callerOwnerId`, allowing authenticated
+ * owners and admin accounts to seamlessly adopt pre-login `"local-owner"`, `"asdy"`, or `"admin"`
+ * drafts without leaking distinct UUID users' data to each other.
+ */
+function matchesSavedTitleOwner(entryOwnerId: string | undefined | null, callerOwnerId: string): boolean {
+  const cleanCaller = (callerOwnerId || "").trim().toLowerCase();
+  const cleanEntry = (entryOwnerId || "").trim().toLowerCase();
+  if (!cleanCaller) return false;
+  if (cleanEntry === cleanCaller) return true;
+
+  const isOwnerOrAdmin =
+    cleanCaller === "asdy" ||
+    cleanCaller === "admin" ||
+    cleanCaller === "local-owner" ||
+    cleanCaller.length >= 20;
+  return (
+    isOwnerOrAdmin &&
+    (cleanEntry === "local-owner" || cleanEntry === "asdy" || cleanEntry === "admin")
+  );
+}
+
+/**
+ * Returns all Saved Titles belonging to the authenticated owner (newest first).
+ */
 export async function getAllOwnerSavedTitles(
   ownerId: string,
   adapter: LocalStoreAdapter = getLocalDatabase()
 ): Promise<SavedTitleEntry[]> {
-  const cleanOwner = (ownerId || "").trim().toLowerCase();
-  if (!cleanOwner) return [];
+  if (!(ownerId || "").trim()) return [];
 
   const all = await adapter.getAll<SavedTitleEntry>(LOCAL_STORES.SAVED_TITLES);
   return all
-    .filter((entry) => {
-      if (entry.isDeleted) return false;
-      const entryOwner = (entry.ownerId || "").trim().toLowerCase();
-      if (entryOwner === cleanOwner) return true;
-      // Allow seamless display of titles captured prior to session hydration or under admin/local-owner aliases
-      const isOwnerOrAdmin =
-        cleanOwner === "asdy" ||
-        cleanOwner === "admin" ||
-        cleanOwner === "local-owner" ||
-        cleanOwner.length >= 20;
-      if (
-        isOwnerOrAdmin &&
-        (entryOwner === "local-owner" || entryOwner === "asdy" || entryOwner === "admin")
-      ) {
-        return true;
-      }
-      return false;
-    })
+    .filter((entry) => !entry.isDeleted && matchesSavedTitleOwner(entry.ownerId, ownerId))
     .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 }
 
 /**
- * Returns only records waiting to be uploaded to Cloudflare R2.
+ * Returns records waiting to be synchronized to Cloudflare R2 (including `isDeleted` tombstones
+ * so deleted cloud-synced items propagate cleanly instead of silently reviving on hydrate).
  */
 export async function getPendingOwnerSavedTitles(
   ownerId: string,
   adapter: LocalStoreAdapter = getLocalDatabase()
 ): Promise<SavedTitleEntry[]> {
-  const all = await getAllOwnerSavedTitles(ownerId, adapter);
-  return all.filter((entry) => entry.status !== "cloud_synced");
+  if (!(ownerId || "").trim()) return [];
+  const all = await adapter.getAll<SavedTitleEntry>(LOCAL_STORES.SAVED_TITLES);
+  return all
+    .filter((entry) => entry.status !== "cloud_synced" && matchesSavedTitleOwner(entry.ownerId, ownerId))
+    .sort((a, b) => new Date(b.updatedAt || b.createdAt).getTime() - new Date(a.updatedAt || a.createdAt).getTime());
 }
 
 /**
@@ -121,14 +132,14 @@ export async function updateLocalSavedTitle(
   patch: Partial<Pick<SavedTitleEntry, "displayTitle" | "notes">>,
   adapter: LocalStoreAdapter = getLocalDatabase()
 ): Promise<SavedTitleEntry | null> {
-  const cleanOwner = (ownerId || "").trim().toLowerCase();
   const existing = await adapter.get<SavedTitleEntry>(LOCAL_STORES.SAVED_TITLES, id);
-  if (!existing || (existing.ownerId || "").trim().toLowerCase() !== cleanOwner) {
+  if (!existing || !matchesSavedTitleOwner(existing.ownerId, ownerId)) {
     return null;
   }
 
   const updated: SavedTitleEntry = {
     ...existing,
+    ownerId: (ownerId || "").trim() || existing.ownerId,
     displayTitle: patch.displayTitle !== undefined ? patch.displayTitle.trim() : existing.displayTitle,
     notes: patch.notes !== undefined ? patch.notes : existing.notes,
     status: "pending_sync",
@@ -150,9 +161,8 @@ export async function deleteLocalSavedTitle(
   id: string,
   adapter: LocalStoreAdapter = getLocalDatabase()
 ): Promise<boolean> {
-  const cleanOwner = (ownerId || "").trim().toLowerCase();
   const existing = await adapter.get<SavedTitleEntry>(LOCAL_STORES.SAVED_TITLES, id);
-  if (!existing || (existing.ownerId || "").trim().toLowerCase() !== cleanOwner) {
+  if (!existing || !matchesSavedTitleOwner(existing.ownerId, ownerId)) {
     return false;
   }
 
@@ -184,17 +194,17 @@ export async function markCommittedSavedTitles(
   receipt: SavedTitleSyncReceipt,
   adapter: LocalStoreAdapter = getLocalDatabase()
 ): Promise<void> {
-  const cleanOwner = (ownerId || "").trim().toLowerCase();
   const committedSet = new Set(committedIds);
 
   const all = await adapter.getAll<SavedTitleEntry>(LOCAL_STORES.SAVED_TITLES);
   for (const entry of all) {
-    if ((entry.ownerId || "").trim().toLowerCase() === cleanOwner && committedSet.has(entry.id)) {
+    if (matchesSavedTitleOwner(entry.ownerId, ownerId) && committedSet.has(entry.id)) {
       if (entry.isDeleted) {
         await adapter.delete(LOCAL_STORES.SAVED_TITLES, entry.id);
       } else {
         const synced: SavedTitleEntry = {
           ...entry,
+          ownerId: (ownerId || "").trim() || entry.ownerId,
           status: "cloud_synced",
           syncedAt: receipt.uploadedAt || new Date().toISOString(),
           syncReceipt: receipt,

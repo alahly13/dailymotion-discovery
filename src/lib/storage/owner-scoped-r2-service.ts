@@ -124,8 +124,8 @@ export async function uploadOwnerScopedItemsAndTitles(
         title: titleRecord.title,
         updatedAt: titleRecord.updatedAt,
       };
-    } catch (err: any) {
-      errors.push(`Failed to upload ${item.id}: ${err.message || String(err)}`);
+    } catch (err: unknown) {
+      errors.push(`Failed to upload ${item.id}: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
@@ -160,8 +160,8 @@ export async function uploadOwnerScopedItemsAndTitles(
     );
     manifestSha = computeSha256(manifestJson);
     await client.putObject(cleanOwner, manifestKey, manifestJson, { sha256: manifestSha });
-  } catch (indexErr: any) {
-    errors.push(`Failed to update index/manifest: ${indexErr.message || String(indexErr)}`);
+  } catch (indexErr: unknown) {
+    errors.push(`Failed to update index/manifest: ${indexErr instanceof Error ? indexErr.message : String(indexErr)}`);
   }
 
   return {
@@ -208,13 +208,12 @@ export async function verifyLocalItemForSafeDeletion(
   }
   steps.step1_localItemValid = true;
 
-  // Step 2: Check cloud sync state on local record
-  if (item.syncStatus !== "cloud_verified" && item.syncStatus !== "local_only") {
-    // If upload is actively in progress or failed, deletion must be blocked
+  // Step 2: Require explicit cloud-verified status before clearing local data
+  if (item.syncStatus !== "cloud_verified") {
     return {
       canDeleteLocally: false,
       stepResults: steps,
-      reason: `Step 2 failed: Local record syncStatus is '${item.syncStatus}', cannot safely delete during active sync.`,
+      reason: `Step 2 failed: Local record syncStatus is '${item.syncStatus}'; only 'cloud_verified' items can be cleared safely.`,
     };
   }
   steps.step2_cloudSyncStatusConfirmed = true;
@@ -278,10 +277,15 @@ export async function verifyLocalItemForSafeDeletion(
     }
     steps.step5_r2ItemShaMatches = true;
 
-    // Step 6: Verify R2 Title SHA-256 match / semantic equality
+    // Step 6: Verify R2 Title SHA-256 / semantic equality against local record
     const cloudTitleObj = JSON.parse(cloudTitleRaw.text) as StoredTitleRecord;
     const localTitleRecord = buildStoredTitleRecord(item);
-    if (cloudTitleObj.id !== item.id || cloudTitleObj.provider !== "dailymotion") {
+    if (
+      cloudTitleObj.id !== item.id ||
+      cloudTitleObj.provider !== "dailymotion" ||
+      cloudTitleObj.title !== localTitleRecord.title ||
+      cloudTitleObj.sourceApiVersion !== localTitleRecord.sourceApiVersion
+    ) {
       return {
         canDeleteLocally: false,
         stepResults: steps,
@@ -301,18 +305,30 @@ export async function verifyLocalItemForSafeDeletion(
       };
     }
 
-    // Step 8: Verify Manifest / Index reference
+    // Step 8: Verify Manifest / Index reference (titles-index writes `entries` keyed by item.id)
     const indexKey = adminIndexKey(cleanOwner, "titles-index");
     try {
       const cloudIndexRaw = await client.getObjectText(cleanOwner, indexKey);
       if (cloudIndexRaw && cloudIndexRaw.text) {
-        const indexObj = JSON.parse(cloudIndexRaw.text);
-        if (indexObj.titles && !indexObj.titles[item.id]) {
-          // If index contains titles map, verify item is indexed
+        const indexObj = JSON.parse(cloudIndexRaw.text) as {
+          entries?: Record<string, unknown>;
+          titles?: Record<string, unknown>;
+        };
+        const entriesMap = indexObj.entries ?? indexObj.titles;
+        if (entriesMap && !entriesMap[item.id]) {
+          return {
+            canDeleteLocally: false,
+            stepResults: steps,
+            reason: `Step 8 failed: Item '${item.id}' is not registered in cloud titles-index.`,
+          };
         }
       }
     } catch {
-      // Non-blocking fallback if index is in transit
+      return {
+        canDeleteLocally: false,
+        stepResults: steps,
+        reason: "Step 8 failed: Unable to parse cloud titles-index.",
+      };
     }
     steps.step8_manifestOrIndexLinked = true;
 
@@ -324,11 +340,11 @@ export async function verifyLocalItemForSafeDeletion(
       stepResults: steps,
       verifiedAt: new Date().toISOString(),
     };
-  } catch (verifyErr: any) {
+  } catch (verifyErr: unknown) {
     return {
       canDeleteLocally: false,
       stepResults: steps,
-      reason: `Verification error: ${verifyErr.message || String(verifyErr)}`,
+      reason: `Verification error: ${verifyErr instanceof Error ? verifyErr.message : String(verifyErr)}`,
     };
   }
 }

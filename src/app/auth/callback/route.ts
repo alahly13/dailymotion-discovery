@@ -6,7 +6,7 @@
 
 import { type NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@supabase/ssr";
-import { publicEnv } from "@/lib/config/public-env";
+import { isSupabaseConfigured, publicEnv } from "@/lib/config/public-env";
 
 export async function GET(request: NextRequest) {
   const requestUrl = new URL(request.url);
@@ -16,10 +16,14 @@ export async function GET(request: NextRequest) {
 
   // Prevent open redirect
   const safeNext = next.startsWith("/") && !next.startsWith("//") ? next : "/";
+  const destinationUrl =
+    type === "recovery"
+      ? new URL("/account?view=change-password&status=recovery", requestUrl.origin)
+      : new URL(safeNext, requestUrl.origin);
 
-  let response = NextResponse.redirect(new URL(safeNext, requestUrl.origin));
+  let response = NextResponse.redirect(destinationUrl);
 
-  if (code && publicEnv.NEXT_PUBLIC_SUPABASE_URL && publicEnv.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY) {
+  if (code && isSupabaseConfigured()) {
     try {
       const supabase = createServerClient(
         publicEnv.NEXT_PUBLIC_SUPABASE_URL,
@@ -31,22 +35,24 @@ export async function GET(request: NextRequest) {
             },
             setAll(cookiesToSet) {
               cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value));
-              response = NextResponse.redirect(
-                type === "recovery"
-                  ? new URL("/account?view=change-password&status=recovery", requestUrl.origin)
-                  : new URL(safeNext, requestUrl.origin)
-              );
+              response = NextResponse.redirect(destinationUrl);
               cookiesToSet.forEach(({ name, value, options }) => response.cookies.set(name, value, options));
             },
           },
         }
       );
 
-      await supabase.auth.exchangeCodeForSession(code);
+      const { error } = await supabase.auth.exchangeCodeForSession(code);
+      if (error) {
+        console.warn("[auth/callback] Code exchange failed:", error.message);
+        return NextResponse.redirect(new URL("/login?error=auth_callback_failed", requestUrl.origin));
+      }
     } catch (err) {
       console.warn("[auth/callback] Code exchange notice:", err instanceof Error ? err.message : String(err));
       return NextResponse.redirect(new URL("/login?error=auth_callback_failed", requestUrl.origin));
     }
+  } else if (!code) {
+    return NextResponse.redirect(new URL("/login?error=auth_callback_missing_code", requestUrl.origin));
   }
 
   return response;

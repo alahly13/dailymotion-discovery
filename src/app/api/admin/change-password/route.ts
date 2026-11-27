@@ -5,7 +5,7 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { createServerClient } from "@supabase/ssr";
-import { publicEnv } from "@/lib/config/public-env";
+import { isSupabaseConfigured, publicEnv } from "@/lib/config/public-env";
 import { requireAdmin } from "@/lib/admin/require-admin";
 import { resolveAdminEmail, CANONICAL_ADMIN_USERNAME } from "@/lib/admin/session";
 
@@ -40,11 +40,12 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: false, error: "New password must be different from current password." }, { status: 400 });
   }
 
-  if (!publicEnv.NEXT_PUBLIC_SUPABASE_URL || !publicEnv.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY) {
+  if (!isSupabaseConfigured()) {
     return NextResponse.json({ ok: false, error: "Supabase service is not configured." }, { status: 503 });
   }
 
   const cookieStore = await cookies();
+  const capturedCookies: { name: string; value: string; options?: Record<string, unknown> }[] = [];
   const supabase = createServerClient(
     publicEnv.NEXT_PUBLIC_SUPABASE_URL,
     publicEnv.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY,
@@ -57,6 +58,7 @@ export async function POST(request: Request) {
           try {
             cookiesToSet.forEach(({ name, value, options }) => {
               cookieStore.set(name, value, options);
+              capturedCookies.push({ name, value, options });
             });
           } catch {
             // Ignore if setting cookies synchronously is restricted
@@ -96,8 +98,12 @@ export async function POST(request: Request) {
     );
   }
 
-  return NextResponse.json({
+  const response = NextResponse.json({
     ok: true,
     message: "Administrator password updated successfully in Supabase Auth.",
   });
+  for (const c of capturedCookies) {
+    response.cookies.set(c.name, c.value, c.options as Parameters<typeof response.cookies.set>[2]);
+  }
+  return response;
 }

@@ -23,7 +23,7 @@ export interface SaveReceipt {
   batchId: string;
   idempotencyKey: string;
   stage: SaveReceiptStage;
-  targetBackend: "r2-worker+postgres" | "postgres-fallback" | "local-only";
+  targetBackend: "r2-worker" | "r2-worker+postgres" | "postgres-fallback" | "local-only";
   startedAt: string;
   completedAt?: string;
   generationIds: Record<string, string>;

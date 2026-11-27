@@ -38,6 +38,8 @@ export async function executeUnifiedR2CloudSync(): Promise<UnifiedSyncResult> {
   let savedTitlesReceipt: SavedTitleSyncReceipt | undefined;
   let workspaceReceipt: SaveReceipt | undefined;
   let workspaceSynced = false;
+  let savedTitlesError: string | undefined;
+  let workspaceError: string | undefined;
 
   // 1. Resolve authoritative owner UUID
   const ownerId = await getClientOwnerId();
@@ -66,13 +68,15 @@ export async function executeUnifiedR2CloudSync(): Promise<UnifiedSyncResult> {
         if (typeof window !== "undefined") {
           window.dispatchEvent(new CustomEvent(SAVED_TITLES_CHANGED_EVENT));
         }
-      } else if (!res.ok) {
+      } else {
         throw new Error(body.error || `Saved Titles sync failed (${res.status})`);
       }
     }
   } catch (err) {
+    savedTitlesError = err instanceof Error ? err.message : "Saved Titles cloud sync failed.";
     console.warn("[unified-cloud-sync] Saved Titles sync error:", err);
-    // Continue to workspace sync so independent datasets are not blocked
+    // Continue to workspace sync so independent datasets can flush queued changes,
+    // while keeping `ok: false` overall because Saved Titles failed.
   }
 
   // 3. Synchronize Workspace Datasets (Saved Items, History, Collections)
@@ -80,21 +84,21 @@ export async function executeUnifiedR2CloudSync(): Promise<UnifiedSyncResult> {
     const coordinator = new SyncCoordinator();
     workspaceReceipt = await coordinator.syncNow();
     workspaceSynced = workspaceReceipt.stage === "CLOUD_COMMITTED";
+    if (!workspaceSynced) {
+      workspaceError = workspaceReceipt.errorMessage || "Workspace cloud synchronization failed.";
+    }
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : String(err);
+    workspaceError = errMsg;
     console.warn("[unified-cloud-sync] Workspace sync error:", err);
-    return {
-      ok: savedTitlesCount > 0, // Partial success if saved titles landed
-      error: errMsg,
-      savedTitlesCount,
-      workspaceSynced: false,
-      savedTitlesReceipt,
-      syncedAt,
-    };
   }
 
+  const combinedErrors = [savedTitlesError, workspaceError].filter((msg): msg is string => Boolean(msg));
+  const ok = combinedErrors.length === 0 && workspaceSynced;
+
   return {
-    ok: true,
+    ok,
+    ...(combinedErrors.length > 0 ? { error: combinedErrors.join(" | ") } : {}),
     savedTitlesCount,
     workspaceSynced,
     workspaceReceipt,

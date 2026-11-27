@@ -106,4 +106,64 @@ describe("Admin Session & Logout Security", () => {
     expect(cookieHeader).toContain("dm_admin_session=");
     expect(cookieHeader).toContain("Max-Age=0");
   });
+
+  it("blocks ADMIN_INITIAL_PASSWORD fallback when Supabase Auth explicitly rejects credentials", async () => {
+    vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://example.com");
+    vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "https://proj123.supabase.co");
+    vi.stubEnv("NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY", "sb_publishable_real_key_for_test");
+    vi.stubEnv("ADMIN_DEFAULT_USERNAME", "asdy");
+    vi.stubEnv("ADMIN_INITIAL_PASSWORD", "old-bootstrap-password");
+    vi.stubEnv("ADMIN_SESSION_SECRET", "super-secret-key-at-least-32-chars-long!!");
+
+    vi.resetModules();
+    vi.doMock("@supabase/ssr", () => ({
+      createServerClient: () => ({
+        auth: {
+          signInWithPassword: vi.fn().mockResolvedValue({
+            data: { user: null, session: null },
+            error: { status: 400, message: "Invalid login credentials" },
+          }),
+        },
+      }),
+    }));
+
+    const { POST } = await import("@/app/api/auth/login/route");
+    const req = new Request("https://example.com/api/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ identifier: "asdy", password: "old-bootstrap-password" }),
+    });
+    const res = await POST(req);
+    expect(res.status).toBe(401);
+    const body = (await res.json()) as { ok: boolean };
+    expect(body.ok).toBe(false);
+    vi.doUnmock("@supabase/ssr");
+  });
+
+  it("checks exchangeCodeForSession error in /auth/callback and redirects to error page", async () => {
+    vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://example.com");
+    vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "https://proj123.supabase.co");
+    vi.stubEnv("NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY", "sb_publishable_real_key_for_test");
+
+    vi.resetModules();
+    vi.doMock("@supabase/ssr", () => ({
+      createServerClient: () => ({
+        auth: {
+          exchangeCodeForSession: vi.fn().mockResolvedValue({
+            data: { session: null, user: null },
+            error: { message: "PKCE code verifier mismatch" },
+          }),
+        },
+      }),
+    }));
+
+    const { GET } = await import("@/app/auth/callback/route");
+    const { NextRequest } = await import("next/server");
+    const req = new NextRequest("https://example.com/auth/callback?code=bad-code");
+    const res = await GET(req);
+    expect(res.status).toBeGreaterThanOrEqual(300);
+    expect(res.status).toBeLessThan(400);
+    expect(res.headers.get("location")).toContain("/login?error=auth_callback_failed");
+    vi.doUnmock("@supabase/ssr");
+  });
 });

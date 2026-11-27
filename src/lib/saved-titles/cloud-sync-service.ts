@@ -152,13 +152,20 @@ export async function executeSavedTitlesCloudSync(
 
   const serializedManifest = JSON.stringify(manifestPayload, null, 2);
   const manifestSha256 = computeSha256(serializedManifest);
+  const manifestByteCount = Buffer.byteLength(serializedManifest, "utf8");
 
+  // Populate both legacy Saved Titles keys and canonical DatasetVersionPointer keys so
+  // Storage Explorer overview & integrity verification inspect Saved Titles uniformly.
   const versionPayload = {
     datasetSlug: "saved-titles",
     ownerId,
     activeGenerationId: generationId,
+    manifestKey,
     activeManifestKey: manifestKey,
+    aggregateSha256: manifestSha256,
     activeSha256: manifestSha256,
+    totalBytes: manifestByteCount,
+    committedAt: now,
     revision: newRevision,
     recordCount: mergedEntries.length,
     updatedAt: now,

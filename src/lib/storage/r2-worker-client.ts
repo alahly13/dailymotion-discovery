@@ -59,7 +59,7 @@ export interface WorkerBatchVerifyResult {
   batchId: string;
   verifiedCount: number;
   failedCount: number;
-  verified: string[];
+  verified: Array<string | { key: string; size: number; sha256: string }>;
   failures: Array<{ key: string; reason: string; expectedSha256?: string; actualSha256?: string }>;
 }
 

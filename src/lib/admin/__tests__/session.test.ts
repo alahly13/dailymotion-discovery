@@ -53,4 +53,18 @@ describe("admin session", () => {
     expect(mod.verifyAdminCredentials("admin", "x")).toBe(false);
     expect(mod.createAdminSession("admin")).toBeNull();
   });
+
+  it("never falls back to any hardcoded signing key when all secret env vars are unset", async () => {
+    vi.stubEnv("ADMIN_SESSION_SECRET", "");
+    vi.stubEnv("SUPABASE_SECRET_KEY", "");
+    vi.stubEnv("TOKEN_CACHE_ENCRYPTION_KEY", "");
+    delete process.env.ADMIN_SESSION_SECRET;
+    delete process.env.SUPABASE_SECRET_KEY;
+    delete process.env.TOKEN_CACHE_ENCRYPTION_KEY;
+
+    const mod = await import("../../admin/session");
+    expect(mod.hasAdminSigningSecret()).toBe(false);
+    expect(mod.createAdminSession("asdy")).toBeNull();
+    expect(mod.verifyAdminSession("any.token")).toBeNull();
+  });
 });

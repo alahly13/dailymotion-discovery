@@ -170,4 +170,53 @@ describe("Local-first SyncCoordinator & Cloud Hydration", () => {
     expect(ids).not.toContain("xdel2");
     expect(merged.interruptedJournals).toHaveLength(1);
   });
+
+  it("deduplicates concurrent syncNow calls via single-flight lock and records failed catch metadata", async () => {
+    const db = createMemoryLocalDatabase();
+    let fetchCalls = 0;
+
+    const throwingCoord = new SyncCoordinator(db, async () => {
+      fetchCalls += 1;
+      await new Promise((r) => setTimeout(r, 15));
+      throw new Error("Offline socket reset");
+    });
+
+    await throwingCoord.toggleSaveItem(makeSampleItem("xnet1", "Network Drop Clip"));
+
+    const [r1, r2] = await Promise.all([throwingCoord.syncNow(), throwingCoord.syncNow()]);
+    expect(fetchCalls).toBe(1);
+    expect(r1.batchId).toBe(r2.batchId);
+    expect(r1.stage).toBe("FAILED");
+    expect(r1.errorMessage).toContain("Offline socket reset");
+
+    const afterCatch = await readLocalWorkspaceSnapshot(db);
+    expect(afterCatch.lastReceipt?.stage).toBe("FAILED");
+    expect(afterCatch.pendingOperations[0].status).toBe("failed");
+    expect(afterCatch.pendingOperations[0].attempts).toBe(1);
+    expect(afterCatch.pendingOperations[0].lastError).toContain("Offline socket reset");
+  });
+
+  it("executeUnifiedR2CloudSync returns ok: false when cloud sync fails (never reports false success)", async () => {
+    const { executeUnifiedR2CloudSync } = await import("../unified-cloud-sync");
+    const origFetch = globalThis.fetch;
+    globalThis.fetch = (async (input: string | URL | Request) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      if (url.includes("/api/auth/session")) {
+        return new Response(JSON.stringify({ authenticated: true, ownerId: "uuid-sync-fail" }), { status: 200 });
+      }
+      if (url.includes("/api/sync/save-all")) {
+        return new Response(JSON.stringify({ ok: false, error: "R2 Worker 503 outage" }), { status: 503 });
+      }
+      return new Response(JSON.stringify({ ok: false }), { status: 500 });
+    }) as typeof fetch;
+
+    try {
+      const result = await executeUnifiedR2CloudSync();
+      expect(result.ok).toBe(false);
+      expect(result.workspaceSynced).toBe(false);
+      expect(result.error).toContain("R2 Worker 503 outage");
+    } finally {
+      globalThis.fetch = origFetch;
+    }
+  });
 });

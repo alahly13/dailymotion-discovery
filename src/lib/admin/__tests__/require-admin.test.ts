@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const cookieGet = vi.fn();
 
@@ -29,9 +29,20 @@ async function loadGate() {
   return { ...session, ...gate };
 }
 
+// Pre-warm module transforms once before per-test `vi.resetModules()` so cold SSR/Supabase
+// bundling overhead never consumes Test 1's 20s execution budget on slow disks.
+beforeAll(async () => {
+  await import("../require-admin");
+}, 60000);
+
 beforeEach(() => {
   vi.resetModules();
   cookieGet.mockReset();
+});
+
+afterEach(() => {
+  vi.doUnmock("@/lib/auth/auth-service");
+  vi.unstubAllEnvs();
 });
 
 describe("admin route gating", () => {
@@ -57,5 +68,32 @@ describe("admin route gating", () => {
     cookieGet.mockReturnValue({ value: "forged.payload" });
     expect((await requireAdmin()).ok).toBe(false);
     expect(await getAdminIdentity()).toBeNull();
+  });
+
+  it("prefers Supabase SSR ownerId and email when dm_admin_session cookie coexists", async () => {
+    stubAdminEnv();
+    vi.resetModules();
+    vi.doMock("@/lib/auth/auth-service", () => ({
+      getServerAuthSession: async () => ({
+        authenticated: true,
+        isAdmin: true,
+        ownerId: "11111111-2222-3333-4444-555555555555",
+        authSource: "supabase",
+        user: {
+          id: "11111111-2222-3333-4444-555555555555",
+          email: "asdy@dailymotion.discov.com",
+          username: "asdy",
+        },
+      }),
+    }));
+    const { createAdminSession, getAdminIdentity } = await loadGate();
+    const token = createAdminSession("asdy");
+    cookieGet.mockReturnValue({ value: token });
+
+    const identity = await getAdminIdentity();
+    expect(identity?.ownerId).toBe("11111111-2222-3333-4444-555555555555");
+    expect(identity?.email).toBe("asdy@dailymotion.discov.com");
+    expect(identity?.authSource).toBe("supabase");
+    vi.doUnmock("@/lib/auth/auth-service");
   });
 });

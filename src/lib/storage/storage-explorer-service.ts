@@ -115,17 +115,27 @@ export async function getStorageExplorerOverview(deps?: {
 
     if (r2Client.configured && workerHealth?.ok) {
       try {
-        const ptr = await r2Client.getObjectJson<DatasetVersionPointer>(ownerId, pointerKey);
+        const ptr = await r2Client.getObjectJson<
+          Partial<DatasetVersionPointer> & {
+            activeGenerationId?: string;
+            activeManifestKey?: string;
+            activeSha256?: string;
+            updatedAt?: string;
+          }
+        >(ownerId, pointerKey);
         if (ptr?.data) {
+          const resolvedManifestKey = ptr.data.manifestKey ?? ptr.data.activeManifestKey ?? null;
+          const resolvedSha = ptr.data.aggregateSha256 ?? ptr.data.activeSha256 ?? null;
+          const resolvedTime = ptr.data.committedAt ?? ptr.data.updatedAt ?? null;
           item = {
             datasetSlug: slug,
             versionPointerKey: pointerKey,
-            activeGenerationId: ptr.data.activeGenerationId,
-            activeManifestKey: ptr.data.manifestKey,
-            activeAggregateSha: ptr.data.aggregateSha256,
-            recordCount: ptr.data.recordCount,
-            totalBytes: ptr.data.totalBytes,
-            lastSyncedAt: ptr.data.committedAt,
+            activeGenerationId: ptr.data.activeGenerationId ?? null,
+            activeManifestKey: resolvedManifestKey,
+            activeAggregateSha: resolvedSha,
+            recordCount: Number(ptr.data.recordCount ?? 0),
+            totalBytes: Number(ptr.data.totalBytes ?? 0),
+            lastSyncedAt: resolvedTime,
             source: "r2-worker",
           };
         }
@@ -205,17 +215,42 @@ export async function verifyR2DatasetsIntegrity(deps?: {
 
   for (const slug of CANONICAL_DATASET_SLUGS) {
     if (slug === "legacy-supabase-archive") continue;
-    const pointer = await r2Client.getObjectJson<DatasetVersionPointer>(
-      ownerId,
-      datasetVersionPointerKey(ownerId, slug)
-    );
-    if (!pointer?.data?.manifestKey) continue;
+    const pointer = await r2Client.getObjectJson<
+      Partial<DatasetVersionPointer> & {
+        activeGenerationId?: string;
+        activeManifestKey?: string;
+        activeSha256?: string;
+      }
+    >(ownerId, datasetVersionPointerKey(ownerId, slug));
 
-    const manifest = await r2Client.getObjectJson<GenerationManifestDocument>(ownerId, pointer.data.manifestKey);
+    const resolvedManifestKey = pointer?.data?.manifestKey ?? pointer?.data?.activeManifestKey;
+    if (!resolvedManifestKey) continue;
+
+    // Saved Titles stores a consolidated manifest object rather than chunked `parts[]`; verify
+    // its raw JSON SHA-256 directly against the pointer checksum so integrity checks include it.
+    if (slug === "saved-titles") {
+      const rawManifest = await r2Client.getObjectText(ownerId, resolvedManifestKey);
+      const expectedSha = pointer?.data?.aggregateSha256 ?? pointer?.data?.activeSha256;
+      const computedSha = rawManifest?.text
+        ? crypto.createHash("sha256").update(rawManifest.text, "utf8").digest("hex")
+        : null;
+      const shaOk = Boolean(rawManifest?.text && (!expectedSha || computedSha === expectedSha));
+      results.push({
+        datasetSlug: slug,
+        generationId: pointer?.data?.activeGenerationId ?? null,
+        ok: shaOk,
+        verifiedParts: shaOk ? 1 : 0,
+        failedParts: shaOk ? 0 : 1,
+        reason: shaOk ? undefined : "Saved Titles manifest missing or SHA-256 mismatch",
+      });
+      continue;
+    }
+
+    const manifest = await r2Client.getObjectJson<GenerationManifestDocument>(ownerId, resolvedManifestKey);
     if (!manifest?.data?.parts?.length) {
       results.push({
         datasetSlug: slug,
-        generationId: pointer.data.activeGenerationId,
+        generationId: pointer?.data?.activeGenerationId ?? null,
         ok: false,
         verifiedParts: 0,
         failedParts: 0,

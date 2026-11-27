@@ -1,6 +1,6 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
-import { publicEnv } from "@/lib/config/public-env";
+import { isSupabaseConfigured, publicEnv } from "@/lib/config/public-env";
 import { ADMIN_COOKIE_NAME, verifyAdminSession } from "@/lib/admin/session";
 import { isUserAdmin } from "@/lib/auth/authorization";
 
@@ -47,8 +47,8 @@ export async function updateSession(request: NextRequest): Promise<NextResponse>
 
   let supabaseUser: { id: string; email?: string | null } | null = null;
 
-  // 1. Supabase SSR session validation and cookie refresh
-  if (publicEnv.NEXT_PUBLIC_SUPABASE_URL && publicEnv.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY) {
+  // 1. Supabase SSR session validation and cookie refresh (skip build-time placeholder URL)
+  if (isSupabaseConfigured()) {
     try {
       const supabase = createServerClient(
         publicEnv.NEXT_PUBLIC_SUPABASE_URL,
@@ -108,12 +108,16 @@ export async function updateSession(request: NextRequest): Promise<NextResponse>
     return NextResponse.redirect(loginUrl);
   }
 
-  // 4. Authenticated visitor navigating to /login -> redirect to return destination or /
+  // 4. Authenticated visitor navigating to /login -> redirect while preserving any refreshed SSR cookies
   if (isAuthenticated && pathname === "/login") {
     const rawReturn = request.nextUrl.searchParams.get("returnUrl") || "/";
     // Prevent open redirect by ensuring destination starts with "/" and not "//"
     const safeReturn = rawReturn.startsWith("/") && !rawReturn.startsWith("//") ? rawReturn : "/";
-    return NextResponse.redirect(new URL(safeReturn, request.url));
+    const redirectResponse = NextResponse.redirect(new URL(safeReturn, request.url));
+    for (const cookie of response.cookies.getAll()) {
+      redirectResponse.cookies.set(cookie);
+    }
+    return redirectResponse;
   }
 
   // 5. Admin-only route authorization enforcement
@@ -135,10 +139,14 @@ export async function updateSession(request: NextRequest): Promise<NextResponse>
         );
       }
 
-      // Non-admin visiting admin page: redirect to dashboard with notice
+      // Non-admin visiting admin page: redirect to dashboard while keeping SSR cookies intact
       const dashboardUrl = new URL("/", request.url);
       dashboardUrl.searchParams.set("error", "unauthorized_admin_area");
-      return NextResponse.redirect(dashboardUrl);
+      const redirectResponse = NextResponse.redirect(dashboardUrl);
+      for (const cookie of response.cookies.getAll()) {
+        redirectResponse.cookies.set(cookie);
+      }
+      return redirectResponse;
     }
   }
 

@@ -7,7 +7,7 @@
 import { NextResponse } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
-import { publicEnv } from "@/lib/config/public-env";
+import { isSupabaseConfigured, publicEnv } from "@/lib/config/public-env";
 import { resolveUserIdentifier } from "@/lib/auth/authorization";
 
 export async function POST(request: Request) {
@@ -31,7 +31,7 @@ export async function POST(request: Request) {
 
   const targetEmail = resolveUserIdentifier(rawEmail);
 
-  if (publicEnv.NEXT_PUBLIC_SUPABASE_URL && publicEnv.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY) {
+  if (isSupabaseConfigured()) {
     try {
       const cookieStore = await cookies();
       const supabase = createServerClient(
@@ -55,8 +55,17 @@ export async function POST(request: Request) {
         }
       );
 
-      const origin = request.headers.get("origin") || request.headers.get("x-forwarded-host") || "";
-      const redirectUrl = origin ? `${origin}/auth/callback?type=recovery` : undefined;
+      // Anchor recovery link to configured app URL or request URL origin (never raw spoofable headers)
+      const configuredOrigin = (() => {
+        try {
+          return new URL(publicEnv.NEXT_PUBLIC_APP_URL).origin;
+        } catch {
+          return new URL(request.url).origin;
+        }
+      })();
+      const requestOrigin = new URL(request.url).origin;
+      const safeOrigin = requestOrigin === configuredOrigin ? requestOrigin : configuredOrigin;
+      const redirectUrl = `${safeOrigin}/auth/callback?type=recovery`;
 
       await supabase.auth.resetPasswordForEmail(targetEmail, {
         redirectTo: redirectUrl,

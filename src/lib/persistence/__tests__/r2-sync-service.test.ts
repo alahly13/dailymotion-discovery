@@ -107,6 +107,7 @@ describe("R2 Two-Phase Save All, Integrity Verify, and Hydration", () => {
 
     expect(receipt.stage).toBe("CLOUD_COMMITTED");
     expect(receipt.verifiedByWorker).toBe(true);
+    expect(receipt.targetBackend).toBe("r2-worker");
     expect(receipt.counts.savedItems).toBe(1);
 
     const hydrated = await hydrateDatasetsFromCloud({ r2Client, db: null, ownerId: "admin" });
@@ -118,5 +119,97 @@ describe("R2 Two-Phase Save All, Integrity Verify, and Hydration", () => {
     const integrity = await verifyR2DatasetsIntegrity({ r2Client, ownerId: "admin" });
     expect(integrity.ok).toBe(true);
     expect(integrity.verifiedDatasets).toBe(6);
+  });
+
+  it("reports targetBackend honestly as r2-worker when Postgres transaction fails after R2 verification", async () => {
+    const bucket = new TestR2Bucket();
+    const secret = "sync-integration-secret-0123456789abcdef0123456789";
+    const env: Env = {
+      R2_BUCKET: bucket,
+      WORKER_AUTH_SECRET: secret,
+      ALLOWED_ORIGINS: "http://localhost:3000",
+    };
+    const r2Client = new R2WorkerClient({
+      workerUrl: "https://worker.test",
+      hmacSecret: secret,
+      fetchFn: async (input, init) => {
+        const req = input instanceof Request ? input : new Request(String(input), init);
+        return handleWorkerRequest(req, env);
+      },
+    });
+    const failingDb = {
+      $transaction: async () => {
+        throw new Error("Simulated Postgres connection drop");
+      },
+    } as unknown as Parameters<typeof executeSaveAll>[1] extends infer D
+      ? D extends { db?: infer P }
+        ? P
+        : never
+      : never;
+
+    const receipt = await executeSaveAll(
+      {
+        batchId: "batch-db-fail-1",
+        idempotencyKey: "save-all-db-fail-1",
+        datasets: {
+          savedItems: [{ compositeKey: "v1:video:x123", id: "x123", title: "Saved Demo" }],
+        },
+      },
+      { r2Client, db: failingDb, ownerId: "admin" }
+    );
+
+    expect(receipt.stage).toBe("CLOUD_COMMITTED");
+    expect(receipt.verifiedByWorker).toBe(true);
+    expect(receipt.targetBackend).toBe("r2-worker");
+    expect(receipt.errorMessage).toContain("Simulated Postgres connection drop");
+  });
+
+  it("verifies saved-titles manifest checksum via verifyR2DatasetsIntegrity", async () => {
+    const bucket = new TestR2Bucket();
+    const secret = "sync-integration-secret-0123456789abcdef0123456789";
+    const env: Env = {
+      R2_BUCKET: bucket,
+      WORKER_AUTH_SECRET: secret,
+      ALLOWED_ORIGINS: "http://localhost:3000",
+    };
+    const r2Client = new R2WorkerClient({
+      workerUrl: "https://worker.test",
+      hmacSecret: secret,
+      fetchFn: async (input, init) => {
+        const req = input instanceof Request ? input : new Request(String(input), init);
+        return handleWorkerRequest(req, env);
+      },
+    });
+
+    const { executeSavedTitlesCloudSync } = await import("@/lib/saved-titles/cloud-sync-service");
+    const syncRes = await executeSavedTitlesCloudSync(
+      {
+        ownerId: "admin",
+        pendingEntries: [
+          {
+            id: "st_verify_1",
+            ownerId: "admin",
+            kind: "search_query",
+            value: "astronomy",
+            displayTitle: "astronomy",
+            source: { workspace: "global-search", label: "Global Search", apiVersion: "v1", resourceType: null },
+            addedBy: { type: "search-action" },
+            createdAt: "2026-11-15T10:00:00.000Z",
+            updatedAt: "2026-11-15T10:00:00.000Z",
+            resourceType: null,
+            canonicalUrl: null,
+            status: "pending_sync",
+          },
+        ],
+      },
+      { r2Client, db: null }
+    );
+    expect(syncRes.ok).toBe(true);
+
+    const integrity = await verifyR2DatasetsIntegrity({ r2Client, ownerId: "admin" });
+    expect(integrity.ok).toBe(true);
+    const savedTitlesRow = integrity.results.find((r) => r.datasetSlug === "saved-titles");
+    expect(savedTitlesRow).toBeDefined();
+    expect(savedTitlesRow?.ok).toBe(true);
   });
 });

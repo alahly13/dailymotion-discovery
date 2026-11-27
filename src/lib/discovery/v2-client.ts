@@ -93,9 +93,15 @@ async function v2FetchRaw(path: string, params: Record<string, string>, options:
   let url: URL;
   if (/^https?:\/\//i.test(path)) {
     url = new URL(path);
-    // Security check: validate host belongs strictly to api.dailymotion.com
-    if (url.hostname !== "api.dailymotion.com") {
-      throw new Error(`Untrusted V2 API pagination host: ${url.hostname}`);
+    // Strict SSRF/exfiltration guard: V2 pagination cursors must stay on HTTPS api.dailymotion.com/v2/*
+    if (
+      url.protocol !== "https:" ||
+      url.hostname !== "api.dailymotion.com" ||
+      url.username !== "" ||
+      url.password !== "" ||
+      !url.pathname.startsWith("/v2/")
+    ) {
+      throw new Error(`Untrusted V2 API pagination target: ${url.origin}${url.pathname}`);
     }
   } else {
     url = new URL(`${profile.baseUrl}/${path.replace(/^\/+/, "")}`);

@@ -132,4 +132,45 @@ describe("v2 client without credentials", () => {
     }
     expect(fetchMock).not.toHaveBeenCalled();
   });
+
+  it("blocks untrusted scheme, credentials, or non-/v2/ pagination targets before network fetch", async () => {
+    vi.stubEnv("PRIVATE_DAILYMOTION_API_KEY_V2", "client-id-v2");
+    vi.stubEnv("PRIVATE_DAILYMOTION_API_KEY_SECRET_V2", "client-secret-v2");
+    const requestedUrls: string[] = [];
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      requestedUrls.push(url);
+      if (url.includes("/oauth") || url.includes("/v2/token")) {
+        return jsonResponse(200, { access_token: "v2-token", expires_in: 3600 });
+      }
+      return jsonResponse(200, { list: [] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const insecureHttp = await v2List("http://api.dailymotion.com/v2/videos", {});
+    expect(insecureHttp.ok).toBe(false);
+    if (!insecureHttp.ok) {
+      expect(insecureHttp.failure.error).toContain("Untrusted V2 API pagination target");
+    }
+
+    const nonV2Path = await v2List("https://api.dailymotion.com/oauth/authorize", {});
+    expect(nonV2Path.ok).toBe(false);
+    if (!nonV2Path.ok) {
+      expect(nonV2Path.failure.error).toContain("Untrusted V2 API pagination target");
+    }
+
+    const foreignHost = await v2List("https://attacker.example/v2/videos", {});
+    expect(foreignHost.ok).toBe(false);
+    if (!foreignHost.ok) {
+      expect(foreignHost.failure.error).toContain("Untrusted V2 API pagination target");
+    }
+
+    // Only the OAuth token acquisition request should have touched the network
+    expect(requestedUrls.some((u) => u.includes("attacker.example"))).toBe(false);
+    expect(requestedUrls.some((u) => u.startsWith("http://api.dailymotion.com"))).toBe(false);
+    expect(requestedUrls.some((u) => u.includes("/oauth/authorize"))).toBe(false);
+
+    const validNext = await v2List("https://api.dailymotion.com/v2/profiles/x/videos", {});
+    expect(validNext.ok).toBe(true);
+  });
 });

@@ -175,7 +175,7 @@ export async function executeSaveAll(
     if (input.datasets.savedItems && input.datasets.savedItems.length > 0) {
       try {
         await uploadOwnerScopedItemsAndTitles(
-          input.datasets.savedItems as any,
+          input.datasets.savedItems as unknown as Parameters<typeof uploadOwnerScopedItemsAndTitles>[0],
           ownerId,
           r2Client
         );
@@ -192,11 +192,7 @@ export async function executeSaveAll(
     batchId: input.batchId,
     idempotencyKey: input.idempotencyKey,
     stage: "CLOUD_COMMITTED",
-    targetBackend: verifiedByWorker
-      ? db
-        ? "r2-worker+postgres"
-        : "r2-worker+postgres"
-      : "postgres-fallback",
+    targetBackend: verifiedByWorker ? (db ? "r2-worker+postgres" : "r2-worker") : "postgres-fallback",
     startedAt,
     completedAt,
     generationIds,
@@ -279,12 +275,19 @@ export async function executeSaveAll(
           });
         }
 
-        // Sync collections & saved presets relationally for queryability.
-        const incomingColIds = new Set<string>();
+        // Sync collections & saved presets relationally with strict owner-scope enforcement.
+        const ownedColIds = new Set<string>();
         for (const col of input.datasets.collections) {
           const id = String(col.id || "");
           if (!id) continue;
-          incomingColIds.add(id);
+          const existingCol = await tx.researchCollection.findUnique({
+            where: { id },
+            select: { ownerId: true },
+          });
+          if (existingCol && existingCol.ownerId !== ownerId) {
+            continue;
+          }
+          ownedColIds.add(id);
           await tx.researchCollection.upsert({
             where: { id },
             create: {
@@ -305,8 +308,15 @@ export async function executeSaveAll(
         for (const item of input.datasets.collectionItems) {
           const collectionId = String(item.collectionId || "");
           const itemKey = String(item.itemKey || "");
-          if (!collectionId || !itemKey || !incomingColIds.has(collectionId)) continue;
+          if (!collectionId || !itemKey || !ownedColIds.has(collectionId)) continue;
           const rowId = String(item.id || `${collectionId}::${itemKey}`);
+          const existingItem = await tx.researchCollectionItem.findUnique({
+            where: { id: rowId },
+            select: { collection: { select: { ownerId: true } } },
+          });
+          if (existingItem && existingItem.collection.ownerId !== ownerId) {
+            continue;
+          }
           await tx.researchCollectionItem.upsert({
             where: { id: rowId },
             create: {
@@ -330,6 +340,13 @@ export async function executeSaveAll(
         for (const preset of input.datasets.savedSearches) {
           const id = String(preset.id || "");
           if (!id || !/^[0-9a-f-]{36}$/i.test(id)) continue;
+          const existingPreset = await tx.savedSearchPreset.findUnique({
+            where: { id },
+            select: { ownerId: true },
+          });
+          if (existingPreset && existingPreset.ownerId !== ownerId) {
+            continue;
+          }
           await tx.savedSearchPreset.upsert({
             where: { id },
             create: {
@@ -380,14 +397,18 @@ export async function executeSaveAll(
         });
       });
     } catch (error) {
-      // If R2 already succeeded and verified SHA-256 cleanly, do NOT silently claim full DB commit unless DB succeeded!
+      // If R2 already succeeded and verified SHA-256 cleanly, report targetBackend honestly as
+      // "r2-worker" so callers and receipts do not claim Postgres durability when DB write failed.
       if (!verifiedByWorker) {
         throw new PersistenceUnavailableError(
           error instanceof Error ? error.message : "Database unavailable during Save All."
         );
       }
-      // If R2 succeeded but Postgres isn't reachable/migrated yet, mark targetBackend transparently as R2-only
-      receipt.targetBackend = "r2-worker+postgres";
+      receipt.targetBackend = "r2-worker";
+      receipt.errorMessage =
+        error instanceof Error
+          ? `R2 committed and verified, but Postgres registry sync failed: ${error.message}`
+          : "R2 committed and verified, but Postgres registry sync failed.";
     }
   }
 
@@ -453,11 +474,16 @@ export async function hydrateDatasetsFromCloud(deps?: {
 
   if (!loadedFromR2 && db) {
     try {
+      const isUuidOwner = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(ownerId);
       const [cols, colItems, presets, history] = await Promise.all([
         db.researchCollection.findMany({ where: { ownerId } }),
-        db.researchCollectionItem.findMany(),
+        db.researchCollectionItem.findMany({ where: { collection: { ownerId } } }),
         db.savedSearchPreset.findMany({ where: { ownerId } }),
-        db.searchHistory.findMany({ orderBy: { submittedAt: "desc" }, take: 200 }),
+        db.searchHistory.findMany({
+          where: isUuidOwner ? { ownerId } : { ownerId: null },
+          orderBy: { submittedAt: "desc" },
+          take: 200,
+        }),
       ]);
       datasets.collections = cols.map((c) => ({
         id: c.id,

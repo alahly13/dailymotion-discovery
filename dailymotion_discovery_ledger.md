@@ -1,8 +1,8 @@
 # Dailymotion Discovery Platform Ledger
 
-Updated: 2026-11-23
+Updated: 2026-11-27
 Repo path: `E:\discovery\dailymotion-discovery`
-Scope: Project source-of-truth ledger, updated after Unified Session Synchronization, Dual-Provider Auth Harmony (Supabase SSR + HMAC), Dynamic Identity Resolution, and Real-Time Shell Auth State across all routes and layout components.
+Scope: Project source-of-truth ledger, updated after Principal Software Architect Full-Stack Audit, Integration Integrity & Reliability Hardening (2026-11-27).
 
 ## Table of Contents
 
@@ -24,6 +24,40 @@ Scope: Project source-of-truth ledger, updated after Unified Session Synchroniza
 - [Future Roadmap](#future-roadmap)
 - [Agent Instructions](#agent-instructions)
 
+## 2026-11-27 Principal Software Architect Full-Stack Codebase Audit, Integration Integrity & Reliability Hardening
+
+**Verified Stack & Active Integrations**
+- **Framework & Runtime**: Next.js `16.4.6` (App Router + `src/proxy.ts` Next.js 16 Proxy convention), React `19.3.1`, TypeScript `6.0.3`, Node.js `v24.22.0`, Tailwind CSS 4, Zustand 5, Vitest `5.1.0`.
+- **Active Integrations**: Supabase Auth SSR (`@supabase/ssr`), Prisma `7.10.1` + `@prisma/adapter-pg` on Postgres, Cloudflare Worker (`cloudflare/workers/dailymotion-discovery-api`) + R2 private bucket (`dailymotion-discovery-private`), browser IndexedDB (`dailymotion_discovery_local_v1`) + `localStorage`, Dailymotion V1 (public + partner OAuth) & V2 OAuth APIs.
+- **Configured / Partial / Legacy**:
+  - Gemini AI (`@google/genai`, `/api/ai/*`): active implementation, currently returns `503 missing_config` when `GEMINI_API_KEY` is missing/placeholder.
+  - Supabase Storage (`storage-documents` bucket): legacy/migration source only (`supabase-to-r2-migration.ts`); R2 Worker is primary cloud object storage.
+  - Legacy/unused relational routes (`/api/cloud/batch-commit`, `/api/cloud/history`): superseded by `/api/sync/save-all` and `/api/sync/hydrate` (`SyncCoordinator`), retained for backward API compatibility.
+  - Cloudflare OPFS: absent (browser storage uses IndexedDB + `localStorage` cleanly).
+
+**Database / Migration & Schema Audit (`2026-11-27`)**
+- Canonical schema (`prisma/schema.prisma`, validated via Prisma 7.10.1): 23 models (`Video`, `Collection`, `SavedVideo`, `SearchHistory`, `BatchCommit`, `StorageDocument`, `ApiTokenCache`, `ChannelFetchJob`, `ChannelFetchWindow`, `ChannelFetchPageAttempt`, `VideoSource`, `CatalogSnapshot`, `Manifest`, `ManifestItem`, `MigrationRun`, `StorageDataset`, `StorageGeneration`, `StorageGenerationPart`, `SavedSearchPreset`, `ResearchCollection`, `ResearchCollectionItem`, plus enums).
+- Latest migrations inspected: `20261011183739_workspace_cloud_persistence` (enables RLS with `service_role` policies on legacy workspace tables) and `20261112000000_r2_generations_and_presets` (creates `StorageDataset`, `StorageGeneration`, `StorageGenerationPart`, `SavedSearchPreset`, `ResearchCollection`, `ResearchCollectionItem`).
+- **Flagged Schema Debt (approval-gated, NOT modified or applied)**: `20261112000000_r2_generations_and_presets/migration.sql` omits `ENABLE ROW LEVEL SECURITY` on those 6 new tables. Production mitigation currently relies on private Vercel server connections (`requireAdmin()` / `requireAuth()`) and non-public direct PostgREST usage until an additive RLS migration is reviewed and applied with operator approval.
+
+**P0/P1/P2 Defects Fixed**
+1. **Hardcoded Admin HMAC Secret Removed (`src/lib/admin/session.ts`)**: Removed `"dm_discovery_platform_admin_session_auth_secret_2026"`; `adminConfig()` reads `process.env` dynamically, supports SHA-256 domain-separated fallback only from configured server secrets when `ADMIN_SESSION_SECRET` is unset, and fails closed (`""`) otherwise.
+2. **Password-Rotation Bypass & Cookie Forwarding (`src/app/api/auth/login/route.ts`, `src/app/api/admin/login/route.ts`, `src/app/api/admin/change-password/route.ts`, `src/app/settings/page.tsx`)**: Blocked fallback to `ADMIN_INITIAL_PASSWORD` when Supabase Auth rejects credentials; honored `remember === false` session lifetimes on `/api/auth/login`; forwarded Supabase SSR cookies in `change-password`; made `/settings` sign-out clear both Supabase and `/api/admin/logout`.
+3. **Auth Callback, Reset Origin & Placeholder Supabase Guard (`src/lib/config/public-env.ts`, `src/lib/supabase/middleware.ts`, `src/app/auth/callback/route.ts`, `src/app/api/auth/reset-password/route.ts`)**: Added `isSupabaseConfigured()` to prevent probing `https://example.supabase.co`; checked `{ error }` from `exchangeCodeForSession`; anchored password recovery `redirectTo` to configured `NEXT_PUBLIC_APP_URL` / request origin (blocking raw `Origin`/`x-forwarded-host` poisoning); preserved refreshed SSR cookies across middleware redirects.
+4. **Owner Namespace Unification Across Auth, Sync & Storage (`src/lib/admin/require-admin.ts`, `/api/sync/hydrate`, `/api/sync/status`, `/api/storage/overview`, `/api/storage/verify`, `/api/storage/export`, `src/lib/persistence/r2-sync-service.ts`)**: Updated `getAdminIdentity()` to prioritize verified Supabase Auth SSR `ownerId`/`email` when coexisting with `dm_admin_session`, reject non-admin Supabase sessions, and forward `ownerId` across all 5 sync/storage routes. Hardened Postgres upserts and `hydrateDatasetsFromCloud` fallback (`researchCollectionItem` filtered by `collection.ownerId`, `searchHistory` filtered safely for UUID owners without breaking non-UUID fallback).
+5. **Cloud Sync Honesty & Outbox Reliability (`src/lib/sync/save-receipt.ts`, `src/lib/persistence/r2-sync-service.ts`, `src/lib/sync/unified-cloud-sync.ts`, `src/lib/sync/sync-coordinator.ts`)**: Added `"r2-worker"` `SaveReceipt.targetBackend` so R2-only commits or Postgres transaction errors no longer misreport `"r2-worker+postgres"`; fixed `executeUnifiedR2CloudSync()` to return `ok: false` on Saved Titles or workspace sync failure; added per-DB single-flight concurrency mutex and catch-block outbox/receipt persistence in `SyncCoordinator.syncNow()`.
+6. **Saved Titles & R2 Integrity (`src/lib/saved-titles/local-storage.ts`, `src/lib/saved-titles/cloud-sync-service.ts`, `src/components/saved-titles/saved-titles-workspace.tsx`, `src/lib/storage/r2-worker-client.ts`, `src/lib/storage/storage-explorer-service.ts`, `src/lib/storage/owner-scoped-r2-service.ts`)**: Unified alias owner matching across read/edit/delete/markCommitted (`matchesSavedTitleOwner`) and included deletion tombstones in `getPendingOwnerSavedTitles` (filtered out of pending UI cards & export merge); aligned `saved-titles/version.json` and `verifyR2DatasetsIntegrity` SHA-256 verification; fixed `WorkerBatchVerifyResult` typing; enforced `cloud_verified`-only clearance, cloud title match, and `titles-index.entries` verification in `verifyLocalItemForSafeDeletion`.
+7. **IndexedDB & Dailymotion API Hardening (`src/lib/local-first/indexeddb-store.ts`, `src/app/api/discovery/v1/[resource]/route.ts`, `src/lib/discovery/v2-client.ts`)**: Reset `dbPromise` on rejection, `onversionchange`, `onclose`, or `InvalidStateError` and added `tx.onabort` in `putMany`; preserved explicit `familyFilter="true"` in V1 discovery route; enforced `https://api.dailymotion.com/v2/*` (no HTTP, no URL credentials, no non-`/v2/` paths) on V2 pagination targets.
+8. **Code Quality & ESLint Cleanup**: Cleared pre-existing `no-explicit-any` and React 19 `set-state-in-effect` / hook-order lint errors across modified files (`admin/login`, `settings/page.tsx`, `saved-titles-workspace.tsx`, `indexeddb-store.ts`, `r2-sync-service.ts`, `owner-scoped-r2-service.ts`) and added `beforeAll` cache warmup to `require-admin.test.ts`.
+
+**Verification Summary (2026-11-27, post-final edit)**
+- `node scripts/validate-all-env.mjs`: exit `0` (1 warning: `GEMINI_API_KEY` missing/placeholder).
+- `prisma validate`: exit `0` (`schema.prisma` valid).
+- `tsc --noEmit`: exit `0` (`0` errors).
+- Programmatic ESLint across all 36 modified files: exit `0` (`0` errors; 10 pre-existing unused-var/router/deps warnings in `settings/page.tsx` and `saved-titles-workspace.tsx`).
+- Full Vitest suite (`vitest run`): exit `0`, **`49 passed (49)` test files, `312 passed (312)` tests** (includes 11 new regression assertions).
+- Local `next build` intentionally omitted per low-RAM hardware rule; remote Vercel production build verified via GitHub push.
+
 ## 2026-11-23 Production Release: Unified Session Synchronization, Dual-Provider Auth Harmony (Supabase SSR + HMAC), Dynamic Identity Resolution & Real-Time Shell Auth State
 
 **User intent addressed**
@@ -41,8 +75,8 @@ Scope: Project source-of-truth ledger, updated after Unified Session Synchroniza
        - Synchronously invalidates both Supabase SSR cookies (`sb-*`, `auth-token`) and `dm_admin_session` during `POST /api/admin/session`.
     2. **Unified Route Gate (`src/lib/admin/require-admin.ts`)**:
        - `getAdminIdentity()` and `requireAdmin()` now evaluate Supabase Auth SSR sessions and verified administrator roles (`isUserAdmin`), seamlessly unlocking all cloud routes (`/api/cloud/*`, `/api/storage/*`, `/api/sync/*`, `/admin/migrations`) for logged-in Supabase administrators without requiring a separate manual HMAC login step.
-    3. **Deterministic Admin Session Fallback Secret (`src/lib/admin/session.ts`)**:
-       - Protected HMAC session signing from runtime failure when `ADMIN_SESSION_SECRET` is unset in environment by falling back to `SUPABASE_SECRET_KEY`, `TOKEN_CACHE_ENCRYPTION_KEY`, or a deterministic fallback secret.
+    3. **Admin Session Secret Handling (`src/lib/admin/session.ts`)**:
+       - Note (updated 2026-11-27): Removed the hardcoded source fallback secret (`dm_discovery_platform_admin_session_auth_secret_2026`); runtime now uses `ADMIN_SESSION_SECRET`, domain-separated derivation from server secrets only when configured, or fails closed (`""`).
     4. **Dual-Cookie Forwarding on Login (`src/app/api/auth/login/route.ts` & `/api/admin/login/route.ts`)**:
        - Captures Supabase SSR `setAll` cookies and explicitly forwards them onto the HTTP `response.cookies.set(...)` headers alongside `dm_admin_session`.
     5. **Dynamic Account Profile UI (`src/app/account/page.tsx`)**:
@@ -2857,13 +2891,14 @@ CONFIRM_DB_APPLY=true npm run db:apply
 
 ## Safety and Security
 
-- Server-only secrets must stay server-only. Never move DB URLs, Gemini keys, or service-role keys into `NEXT_PUBLIC_*`.
+- Server-only secrets must stay server-only. Never move DB URLs, Gemini keys, R2 HMAC secrets, or service-role keys into `NEXT_PUBLIC_*`.
+- Never commit hardcoded session signing fallbacks; `src/lib/admin/session.ts` fails closed when no server secret env is configured.
 - The platform is metadata-only. Do not add downloading, rehosting, or stream scraping features.
 - AI routes are constrained by a safety prompt that forbids inventing videos, IDs, URLs, or counts.
 - DB scripts print sanitized connection host/protocol details only, not raw secrets.
 - Partial manifests are preserved on fetch-all failures instead of being thrown away.
 - `zeroSafeNumber` ensures valid `0` values are not mistaken for missing metadata.
-- Proxy refreshes Supabase session cookies but is not, by itself, a full authorization strategy.
+- Proxy (`src/proxy.ts` + `src/lib/supabase/middleware.ts`) refreshes Supabase session cookies and enforces auth/admin route gates alongside server-side `requireAuth()` / `requireAdmin()`.
 - Real `.env` data was intentionally omitted from this ledger.
 
 ## 2026-11-11 Prisma ORM 7.10.1 Restoration, Dependency Upgrade & Platform Linking
@@ -3230,6 +3265,8 @@ CONFIRM_DB_APPLY=true npm run db:apply
 ## Known Limitations
 
 - Live AI endpoints (`/api/ai/*`, `/ai-search`) fail closed with HTTP `503 missing_config` until a real `GEMINI_API_KEY` replaces the placeholder in `.env` or Vercel Environment Variables.
+- Schema/migration audit note (2026-11-27): `prisma/migrations/20261112000000_r2_generations_and_presets/migration.sql` does not execute `ALTER TABLE ... ENABLE ROW LEVEL SECURITY` on `storage_datasets`, `storage_generations`, `storage_generation_parts`, `saved_search_presets`, `research_collections`, or `research_collection_items`; any remediation migration requires explicit operator approval.
+- Legacy API routes `/api/cloud/batch-commit` and `/api/cloud/history` have no active UI callers (superseded by `/api/sync/save-all` and `/api/sync/hydrate`).
 - Admin session auth gates `/api/sync/*`, `/api/storage/*`, `/api/cloud/*`, and `/api/admin/*`.
 - Cloudflare Worker production deployment (`worker:deploy`) is ready for operator execution using Cloudflare CLI credentials.
 

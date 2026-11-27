@@ -143,4 +143,39 @@ describe("Owner-Scoped R2 Service", () => {
     expect(verification.stepResults.step3_r2ItemObjectExists).toBe(false);
     expect(verification.reason).toContain("Step 3 failed");
   });
+
+  it("refuses deletion when item is local_only, missing from titles-index, or cloud title mismatches", async () => {
+    const client = new MockMemoryR2Client();
+    await uploadOwnerScopedItemsAndTitles([sampleItem], "admin-user", client);
+
+    // 1. local_only must never pass deletion verification
+    const localOnlyResult = await verifyLocalItemForSafeDeletion(
+      { ...sampleItem, syncStatus: "local_only" },
+      "admin-user",
+      client
+    );
+    expect(localOnlyResult.canDeleteLocally).toBe(false);
+    expect(localOnlyResult.reason).toContain("Step 2 failed");
+
+    // 2. Corrupted/tampered cloud title text must fail Step 6
+    const titleKey = "admins/admin-user/dailymotion/titles/video/x8abc12.json";
+    const originalTitle = client.store.get(titleKey)!;
+    client.store.set(titleKey, {
+      ...originalTitle,
+      body: JSON.stringify({ ...JSON.parse(originalTitle.body), title: "Corrupted Wrong Title" }),
+    });
+    const mismatchResult = await verifyLocalItemForSafeDeletion(sampleItem, "admin-user", client);
+    expect(mismatchResult.canDeleteLocally).toBe(false);
+    expect(mismatchResult.reason).toContain("Step 6 failed");
+    client.store.set(titleKey, originalTitle);
+
+    // 3. Missing entry inside titles-index.entries must fail Step 8
+    const indexKey = "admins/admin-user/dailymotion/indexes/titles-index.json";
+    client.store.set(indexKey, {
+      body: JSON.stringify({ ownerId: "admin-user", count: 0, entries: {} }),
+    });
+    const missingIndexResult = await verifyLocalItemForSafeDeletion(sampleItem, "admin-user", client);
+    expect(missingIndexResult.canDeleteLocally).toBe(false);
+    expect(missingIndexResult.reason).toContain("Step 8 failed");
+  });
 });

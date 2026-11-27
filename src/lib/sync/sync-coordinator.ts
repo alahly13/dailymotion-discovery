@@ -67,6 +67,10 @@ async function enqueueOutboxOp(
   return full;
 }
 
+// Per-database single-flight sync guard so header Save button and panel clicks cannot race
+// parallel Save All batches against the same IndexedDB outbox and R2 pointers.
+const IN_FLIGHT_SYNC_BY_DB = new WeakMap<LocalStoreAdapter, Promise<SaveReceipt>>();
+
 export class SyncCoordinator {
   constructor(
     private readonly db: LocalStoreAdapter = getLocalDatabase(),
@@ -581,6 +585,18 @@ export class SyncCoordinator {
    *   3. ONLY clears outbox entries after receiving a verified `CLOUD_COMMITTED` receipt.
    */
   async syncNow(): Promise<SaveReceipt> {
+    const existing = IN_FLIGHT_SYNC_BY_DB.get(this.db);
+    if (existing) {
+      return existing;
+    }
+    const promise = this.executeSyncNowInternal().finally(() => {
+      IN_FLIGHT_SYNC_BY_DB.delete(this.db);
+    });
+    IN_FLIGHT_SYNC_BY_DB.set(this.db, promise);
+    return promise;
+  }
+
+  private async executeSyncNowInternal(): Promise<SaveReceipt> {
     await this.recoverInterruptedSyncs();
 
     const [savedItems, collections, collectionItems, savedSearches, searchHistory, researchNotes, pendingOps] =
@@ -704,6 +720,15 @@ export class SyncCoordinator {
         updatedAt: new Date().toISOString(),
         errorMessage: message,
       });
+      for (const op of pendingOps) {
+        await this.db.put<PendingOutboxOperation>(LOCAL_STORES.PENDING_OPERATIONS, {
+          ...op,
+          status: "failed",
+          attempts: op.attempts + 1,
+          lastError: message,
+          updatedAt: new Date().toISOString(),
+        });
+      }
       const failedReceipt: SaveReceipt = {
         ...createPendingSaveReceipt(batchId, idempotencyKey, {
           savedItems: savedItems.length,
@@ -715,6 +740,11 @@ export class SyncCoordinator {
         stage: "FAILED",
         errorMessage: message,
       };
+      await this.db.put<LocalSyncMetadataRecord>(LOCAL_STORES.LOCAL_SYNC_METADATA, {
+        key: "last_save_receipt",
+        value: failedReceipt,
+        updatedAt: new Date().toISOString(),
+      });
       emitLocalChange();
       return failedReceipt;
     }

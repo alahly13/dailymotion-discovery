@@ -286,7 +286,7 @@ export function createMemoryLocalDatabase(): LocalStoreAdapter {
 
 let cachedBrowserAdapter: LocalStoreAdapter | null = null;
 
-function openNativeIndexedDB(): Promise<IDBDatabase> {
+function openNativeIndexedDB(onInvalidate?: () => void): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     let settled = false;
     // Safety timeout: never allow IndexedDB open to hang the application
@@ -346,11 +346,15 @@ function openNativeIndexedDB(): Promise<IDBDatabase> {
           clearTimeout(timer);
           const db = req.result;
           db.onversionchange = () => {
+            onInvalidate?.();
             try {
               db.close();
             } catch {
               // Ignore
             }
+          };
+          db.onclose = () => {
+            onInvalidate?.();
           };
           resolve(db);
         }
@@ -379,29 +383,50 @@ export function getLocalDatabase(): LocalStoreAdapter {
   }
   if (cachedBrowserAdapter) return cachedBrowserAdapter;
 
-  const dbPromise = openNativeIndexedDB();
+  // Resettable single-flight connection promise: recovers cleanly from transient open errors
+  // or cross-tab `versionchange` / `close` events instead of caching a rejected/closed DB handle.
+  let dbPromise: Promise<IDBDatabase> | null = null;
+  const resetDbPromise = () => {
+    dbPromise = null;
+  };
+  const getOpenDb = (): Promise<IDBDatabase> => {
+    if (!dbPromise) {
+      dbPromise = openNativeIndexedDB(resetDbPromise).catch((err) => {
+        dbPromise = null;
+        throw err;
+      });
+    }
+    return dbPromise;
+  };
 
   const runTx = async <R>(
     store: LocalStoreName,
     mode: IDBTransactionMode,
     executor: (os: IDBObjectStore) => IDBRequest<R> | void
   ): Promise<R> => {
-    const db = await dbPromise;
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction(store, mode);
-      const os = tx.objectStore(store);
-      const req = executor(os);
-      let reqResult: R;
-      if (req) {
-        req.onsuccess = () => {
-          reqResult = req.result;
-        };
-        req.onerror = () => reject(req.error);
+    const db = await getOpenDb();
+    try {
+      return await new Promise<R>((resolve, reject) => {
+        const tx = db.transaction(store, mode);
+        const os = tx.objectStore(store);
+        const req = executor(os);
+        let reqResult: R;
+        if (req) {
+          req.onsuccess = () => {
+            reqResult = req.result;
+          };
+          req.onerror = () => reject(req.error);
+        }
+        tx.oncomplete = () => resolve(reqResult);
+        tx.onerror = () => reject(tx.error ?? new Error(`IndexedDB tx error on ${store}`));
+        tx.onabort = () => reject(tx.error ?? new Error(`IndexedDB tx aborted on ${store}`));
+      });
+    } catch (err) {
+      if (err instanceof DOMException && err.name === "InvalidStateError") {
+        resetDbPromise();
       }
-      tx.oncomplete = () => resolve(reqResult);
-      tx.onerror = () => reject(tx.error ?? new Error(`IndexedDB tx error on ${store}`));
-      tx.onabort = () => reject(tx.error ?? new Error(`IndexedDB tx aborted on ${store}`));
-    });
+      throw err;
+    }
   };
 
   cachedBrowserAdapter = {
@@ -416,16 +441,24 @@ export function getLocalDatabase(): LocalStoreAdapter {
     },
     async putMany<T>(store: LocalStoreName, records: T[]): Promise<void> {
       if (records.length === 0) return;
-      const db = await dbPromise;
-      await new Promise<void>((resolve, reject) => {
-        const tx = db.transaction(store, "readwrite");
-        const os = tx.objectStore(store);
-        for (const rec of records) {
-          os.put(rec);
+      const db = await getOpenDb();
+      try {
+        await new Promise<void>((resolve, reject) => {
+          const tx = db.transaction(store, "readwrite");
+          const os = tx.objectStore(store);
+          for (const rec of records) {
+            os.put(rec);
+          }
+          tx.oncomplete = () => resolve();
+          tx.onerror = () => reject(tx.error ?? new Error(`IndexedDB putMany error on ${store}`));
+          tx.onabort = () => reject(tx.error ?? new Error(`IndexedDB putMany aborted on ${store}`));
+        });
+      } catch (err) {
+        if (err instanceof DOMException && err.name === "InvalidStateError") {
+          resetDbPromise();
         }
-        tx.oncomplete = () => resolve();
-        tx.onerror = () => reject(tx.error);
-      });
+        throw err;
+      }
     },
     async delete(store: LocalStoreName, key: string): Promise<void> {
       await runTx(store, "readwrite", (os) => os.delete(key));
@@ -456,19 +489,26 @@ export function buildLocalSavedItemRecord(
 ): LocalSavedItemRecord {
   // Support both direct DiscoveryItem and wrapped { item: DiscoveryItem, savedAt: ... }
   // to prevent undefined fields when migrating or saving items
-  const rawItem = (item as any)?.item ? (item as any).item : item;
+  const wrapped = item as unknown as {
+    item?: DiscoveryItem;
+    id?: string;
+    apiVersion?: "v1" | "v2";
+    kind?: DiscoveryItem["kind"];
+    savedAt?: number | string;
+  };
+  const rawItem = wrapped.item ?? item;
   const now = new Date().toISOString();
   const extra = ((rawItem?.extra ?? {}) as Record<string, unknown>) || {};
   const likes = typeof extra.likes_total === "number" ? extra.likes_total : undefined;
   const resType = classifyDiscoveryItem(rawItem || item);
-  const cleanId = (rawItem?.id || (item as any)?.id || "item").toString().trim();
-  const cleanVersion = (rawItem?.apiVersion || (item as any)?.apiVersion || "v1") as "v1" | "v2";
-  const cleanKind = rawItem?.kind || (item as any)?.kind || "video";
+  const cleanId = (rawItem?.id || wrapped.id || "item").toString().trim();
+  const cleanVersion = (rawItem?.apiVersion || wrapped.apiVersion || "v1") as "v1" | "v2";
+  const cleanKind = rawItem?.kind || wrapped.kind || "video";
   const stableId = buildStableDailymotionId(resType, cleanId);
   const country = options?.country || (typeof extra.country === "string" ? extra.country : undefined);
   const category = options?.category || (typeof extra.channel === "string" ? extra.channel : undefined);
 
-  const rawSavedAt = options?.savedAt || (item as any)?.savedAt;
+  const rawSavedAt = options?.savedAt || wrapped.savedAt;
   let safeSavedAt = now;
   if (typeof rawSavedAt === "number" && !isNaN(rawSavedAt)) {
     safeSavedAt = new Date(rawSavedAt).toISOString();
@@ -557,11 +597,11 @@ export async function migrateLegacyLocalStorageIfNeeded(db: LocalStoreAdapter = 
 
       const st = parsed?.state;
       if (st?.savedItems?.length) {
-        const recs = st.savedItems
-          .map((entry: any) => {
-            const raw = entry?.item ? entry.item : entry;
+        const recs = (st.savedItems as Array<{ item?: DiscoveryItem; id?: string; tags?: string[]; savedAt?: number | string }>)
+          .map((entry) => {
+            const raw = entry?.item ? entry.item : (entry as unknown as DiscoveryItem);
             if (!raw || (!raw.id && !entry.id)) return null;
-            return buildLocalSavedItemRecord(entry, {
+            return buildLocalSavedItemRecord(entry as unknown as DiscoveryItem, {
               tags: entry.tags ?? raw.tags ?? [],
               savedAt: typeof entry.savedAt === "number" ? new Date(entry.savedAt).toISOString() : entry.savedAt,
             });

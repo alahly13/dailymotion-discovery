@@ -21,33 +21,46 @@ export interface AdminIdentity {
 }
 
 /** Current admin identity from the session cookie or Supabase Auth SSR, or null. */
+/**
+ * Resolves the active administrator identity.
+ *
+ * Security & namespace ordering:
+ *   1. Check verified Supabase Auth SSR session FIRST when present, so `ownerId` (immutable
+ *      UUID) and verified `email` are always preserved on `gate.admin` — preventing storage/sync
+ *      endpoints (`hydrate`, `overview`, `verify`, `export`) from drifting into the default
+ *      `"admin"` namespace when `dm_admin_session` coexists with a Supabase session.
+ *   2. Reject if Supabase session is explicitly authenticated as a non-admin account (prevents
+ *      stale HMAC cookie privilege escalation).
+ *   3. Fall back to stateless HMAC admin cookie when no Supabase session is active.
+ */
 export async function getAdminIdentity(): Promise<AdminIdentity | null> {
   const store = await cookies();
-
-  // 1. Check stateless HMAC admin session cookie
   const hmacSession = verifyAdminSession(store.get(ADMIN_COOKIE_NAME)?.value);
-  if (hmacSession) {
-    return {
-      username: hmacSession.username,
-      expiresAt: hmacSession.expiresAt,
-      authSource: "admin_hmac",
-    };
-  }
 
-  // 2. Authoritative check: Supabase Auth SSR session
   try {
     const serverSession = await getServerAuthSession();
-    if (serverSession.authenticated && serverSession.isAdmin && serverSession.user) {
+    if (serverSession.authenticated) {
+      if (!serverSession.isAdmin || !serverSession.user) {
+        return null;
+      }
       return {
-        username: serverSession.user.username || CANONICAL_ADMIN_USERNAME,
-        expiresAt: Date.now() + 7 * 86400 * 1000,
+        username: serverSession.user.username || hmacSession?.username || CANONICAL_ADMIN_USERNAME,
+        expiresAt: hmacSession?.expiresAt ?? Date.now() + 7 * 86400 * 1000,
         email: serverSession.user.email,
         ownerId: serverSession.ownerId ?? undefined,
         authSource: serverSession.authSource,
       };
     }
   } catch {
-    // Non-fatal fallback for isolated test environments
+    // Non-fatal fallback for isolated test environments without Supabase session headers
+  }
+
+  if (hmacSession) {
+    return {
+      username: hmacSession.username,
+      expiresAt: hmacSession.expiresAt,
+      authSource: "admin_hmac",
+    };
   }
 
   return null;

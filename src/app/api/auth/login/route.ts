@@ -10,7 +10,7 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { createServerClient } from "@supabase/ssr";
-import { publicEnv } from "@/lib/config/public-env";
+import { isSupabaseConfigured, publicEnv } from "@/lib/config/public-env";
 import {
   ADMIN_COOKIE_NAME,
   CANONICAL_ADMIN_EMAIL,
@@ -51,9 +51,11 @@ export async function POST(request: Request) {
 
   const cookieStore = await cookies();
   const capturedCookies: { name: string; value: string; options?: Record<string, unknown> }[] = [];
+  const supabaseConfigured = isSupabaseConfigured();
+  let supabaseRejectedCredentials = false;
 
-  // 1. Supabase Auth SSR authentication
-  if (publicEnv.NEXT_PUBLIC_SUPABASE_URL && publicEnv.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY) {
+  // 1. Supabase Auth SSR authentication (authoritative when configured & reachable)
+  if (supabaseConfigured) {
     try {
       const supabase = createServerClient(
         publicEnv.NEXT_PUBLIC_SUPABASE_URL,
@@ -88,14 +90,18 @@ export async function POST(request: Request) {
           email: data.user.email || targetEmail,
         };
         isAdmin = isUserAdmin(data.user);
+      } else if (error) {
+        // If Supabase responded cleanly and rejected credentials (e.g. after password rotation),
+        // NEVER fall back to legacy env bootstrap password.
+        supabaseRejectedCredentials = error.status === 400 || error.status === 401 || /invalid login|credentials|email/i.test(error.message);
       }
     } catch (err) {
       console.warn("[auth/login] Supabase auth attempt notice:", err instanceof Error ? err.message : String(err));
     }
   }
 
-  // 2. Test / local development fallback verification
-  if (!authenticatedUser) {
+  // 2. Fallback check ONLY when Supabase Auth is not configured or genuinely unreachable
+  if (!authenticatedUser && !supabaseRejectedCredentials) {
     if (verifyAdminCredentials(rawIdentifier, password)) {
       authenticatedUser = {
         id: "asdy-admin-id",
@@ -125,21 +131,29 @@ export async function POST(request: Request) {
     ownerId: authenticatedUser.id,
   });
 
-  // Explicitly forward captured Supabase SSR cookies onto HTTP response headers
+  // Explicitly forward captured Supabase SSR cookies onto HTTP response headers;
+  // omit persistent Max-Age/Expires when `remember === false` so session closes with browser.
+  const persistSession = body.remember !== false;
   for (const c of capturedCookies) {
-    response.cookies.set(c.name, c.value, c.options as any);
+    const cookieOpts = persistSession
+      ? c.options
+      : { ...(c.options ?? {}), maxAge: undefined, expires: undefined };
+    response.cookies.set(c.name, c.value, cookieOpts as Parameters<typeof response.cookies.set>[2]);
   }
 
   if (isAdmin) {
-    const adminToken = createAdminSession(authenticatedUser.email?.split("@")[0] || CANONICAL_ADMIN_USERNAME);
+    const adminTtl = persistSession ? adminSessionMaxAge() : undefined;
+    const adminToken = createAdminSession(
+      authenticatedUser.email?.split("@")[0] || CANONICAL_ADMIN_USERNAME,
+      persistSession ? undefined : 12 * 3600
+    );
     if (adminToken) {
-      const maxAge = adminSessionMaxAge();
       response.cookies.set(ADMIN_COOKIE_NAME, adminToken, {
         httpOnly: true,
         sameSite: "lax",
         secure: process.env.NODE_ENV === "production",
         path: "/",
-        maxAge,
+        ...(persistSession && adminTtl ? { maxAge: adminTtl } : {}),
       });
     }
   }
